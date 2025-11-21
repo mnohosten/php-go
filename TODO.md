@@ -215,7 +215,7 @@ Total: 65+ node types covering all PHP 8.4 syntax
 - [x] Add error reporting (1h)
 
 **Files**: `cmd/php-go/main.go` (230 lines)
-**Commit**: TBD
+**Commit**: 09df09f
 
 **Note**: Implemented complete CLI tool with:
 - Command routing (lex, parse, --version, --help)
