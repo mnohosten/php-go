@@ -176,7 +176,7 @@ All features fully tested with 24 test cases + 5 integration tests.
 
 **Files**: `pkg/parser/types.go` (223 lines), `pkg/ast/ast.go` (+52 lines for type nodes)
 **Tests**: `pkg/parser/types_test.go` (590 lines, 82.0% coverage overall)
-**Commit**: (pending)
+**Commit**: c1647d3
 
 **Note**: Implemented comprehensive type parsing including:
 - All scalar types (int, string, bool, float, array, object, callable, iterable)
