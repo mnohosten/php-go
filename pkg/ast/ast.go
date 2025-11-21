@@ -366,4 +366,204 @@ func (ge *GroupedExpression) String() string {
 	return "(" + ge.Expr.String() + ")"
 }
 
-// Additional node types will be added in Tasks 1.7-1.10
+// EchoStatement represents echo statement
+type EchoStatement struct {
+	Token       lexer.Token // The ECHO token
+	Expressions []Expr
+}
+
+func (es *EchoStatement) statementNode()       {}
+func (es *EchoStatement) TokenLiteral() string { return es.Token.Literal }
+func (es *EchoStatement) String() string {
+	return "echo ..."
+}
+
+// ReturnStatement represents return statement
+type ReturnStatement struct {
+	Token       lexer.Token // The RETURN token
+	ReturnValue Expr        // Can be nil
+}
+
+func (rs *ReturnStatement) statementNode()       {}
+func (rs *ReturnStatement) TokenLiteral() string { return rs.Token.Literal }
+func (rs *ReturnStatement) String() string {
+	if rs.ReturnValue != nil {
+		return "return " + rs.ReturnValue.String()
+	}
+	return "return"
+}
+
+// BreakStatement represents break statement
+type BreakStatement struct {
+	Token lexer.Token // The BREAK token
+	Depth Expr        // Optional depth (break 2)
+}
+
+func (bs *BreakStatement) statementNode()       {}
+func (bs *BreakStatement) TokenLiteral() string { return bs.Token.Literal }
+func (bs *BreakStatement) String() string {
+	return "break"
+}
+
+// ContinueStatement represents continue statement
+type ContinueStatement struct {
+	Token lexer.Token // The CONTINUE token
+	Depth Expr        // Optional depth (continue 2)
+}
+
+func (cs *ContinueStatement) statementNode()       {}
+func (cs *ContinueStatement) TokenLiteral() string { return cs.Token.Literal }
+func (cs *ContinueStatement) String() string {
+	return "continue"
+}
+
+// IfStatement represents if/elseif/else statement
+type IfStatement struct {
+	Token       lexer.Token // The IF token
+	Condition   Expr
+	Consequence *BlockStatement
+	ElseIfs     []*ElseIfClause
+	Alternative *BlockStatement // Can be nil
+}
+
+type ElseIfClause struct {
+	Token       lexer.Token // The ELSEIF token
+	Condition   Expr
+	Consequence *BlockStatement
+}
+
+func (is *IfStatement) statementNode()       {}
+func (is *IfStatement) TokenLiteral() string { return is.Token.Literal }
+func (is *IfStatement) String() string {
+	return "if (...) { ... }"
+}
+
+// WhileStatement represents while loop
+type WhileStatement struct {
+	Token     lexer.Token // The WHILE token
+	Condition Expr
+	Body      *BlockStatement
+}
+
+func (ws *WhileStatement) statementNode()       {}
+func (ws *WhileStatement) TokenLiteral() string { return ws.Token.Literal }
+func (ws *WhileStatement) String() string {
+	return "while (...) { ... }"
+}
+
+// DoWhileStatement represents do-while loop
+type DoWhileStatement struct {
+	Token     lexer.Token // The DO token
+	Body      *BlockStatement
+	Condition Expr
+}
+
+func (dws *DoWhileStatement) statementNode()       {}
+func (dws *DoWhileStatement) TokenLiteral() string { return dws.Token.Literal }
+func (dws *DoWhileStatement) String() string {
+	return "do { ... } while (...)"
+}
+
+// ForStatement represents for loop
+type ForStatement struct {
+	Token      lexer.Token // The FOR token
+	Init       []Expr      // Initialization expressions
+	Condition  []Expr      // Condition expressions
+	Increment  []Expr      // Increment expressions
+	Body       *BlockStatement
+}
+
+func (fs *ForStatement) statementNode()       {}
+func (fs *ForStatement) TokenLiteral() string { return fs.Token.Literal }
+func (fs *ForStatement) String() string {
+	return "for (...; ...; ...) { ... }"
+}
+
+// ForeachStatement represents foreach loop
+type ForeachStatement struct {
+	Token     lexer.Token // The FOREACH token
+	Array     Expr
+	Key       Expr        // Can be nil
+	Value     Expr
+	ByRef     bool        // true if value is by reference
+	Body      *BlockStatement
+}
+
+func (fs *ForeachStatement) statementNode()       {}
+func (fs *ForeachStatement) TokenLiteral() string { return fs.Token.Literal }
+func (fs *ForeachStatement) String() string {
+	return "foreach (...) { ... }"
+}
+
+// SwitchStatement represents switch statement
+type SwitchStatement struct {
+	Token   lexer.Token // The SWITCH token
+	Subject Expr
+	Cases   []*SwitchCase
+}
+
+type SwitchCase struct {
+	Token   lexer.Token // The CASE or DEFAULT token
+	Value   Expr        // nil for default case
+	Body    []Stmt
+}
+
+func (ss *SwitchStatement) statementNode()       {}
+func (ss *SwitchStatement) TokenLiteral() string { return ss.Token.Literal }
+func (ss *SwitchStatement) String() string {
+	return "switch (...) { ... }"
+}
+
+// MatchExpression represents match expression (PHP 8.0+)
+type MatchExpression struct {
+	Token lexer.Token // The MATCH token
+	Subject Expr
+	Arms  []*MatchArm
+}
+
+type MatchArm struct {
+	Conditions []Expr // Multiple conditions separated by comma
+	Body       Expr
+	IsDefault  bool
+}
+
+func (me *MatchExpression) expressionNode()      {}
+func (me *MatchExpression) TokenLiteral() string { return me.Token.Literal }
+func (me *MatchExpression) String() string {
+	return "match (...) { ... }"
+}
+
+// TryStatement represents try-catch-finally statement
+type TryStatement struct {
+	Token        lexer.Token // The TRY token
+	Body         *BlockStatement
+	CatchClauses []*CatchClause
+	Finally      *BlockStatement // Can be nil
+}
+
+type CatchClause struct {
+	Token     lexer.Token // The CATCH token
+	Types     []Expr      // Exception types (can be multiple with |)
+	Variable  *Variable   // Variable to catch exception
+	Body      *BlockStatement
+}
+
+func (ts *TryStatement) statementNode()       {}
+func (ts *TryStatement) TokenLiteral() string { return ts.Token.Literal }
+func (ts *TryStatement) String() string {
+	return "try { ... } catch (...) { ... }"
+}
+
+// ThrowStatement represents throw statement
+type ThrowStatement struct {
+	Token      lexer.Token // The THROW token
+	Expression Expr
+}
+
+func (ts *ThrowStatement) statementNode()       {}
+func (ts *ThrowStatement) TokenLiteral() string { return ts.Token.Literal }
+func (ts *ThrowStatement) String() string {
+	return "throw ..."
+}
+
+// Additional node types will be added in Tasks 1.8-1.10

@@ -30,7 +30,7 @@ This is the master task tracking file for the entire PHP-Go project. Each task r
 
 ## Phase 1: Foundation - Lexer, Parser, AST 🔄 IN PROGRESS
 
-**Duration**: 6-7 weeks | **Status**: IN PROGRESS (46% complete, 64/140 hours) | **Effort**: 140 hours
+**Duration**: 6-7 weeks | **Status**: IN PROGRESS (57% complete, 80/140 hours) | **Effort**: 140 hours
 
 **Reference**: `docs/phases/01-foundation/README.md`
 
@@ -119,20 +119,28 @@ requires expression parsing capabilities.
 precedence rules, and expression types working. Closures/arrow functions deferred as they
 require more complex parsing (will implement in Task 1.9 or separately).
 
-### 1.7 Statement Parsing (16h)
-- [ ] Parse echo statement (1h)
-- [ ] Parse if/elseif/else (2h)
-- [ ] Parse while loop (1h)
-- [ ] Parse do-while loop (1h)
-- [ ] Parse for loop (2h)
-- [ ] Parse foreach loop (2h)
-- [ ] Parse switch statement (2h)
-- [ ] Parse match expression (PHP 8.0+) (2h)
-- [ ] Parse break/continue/return (1h)
-- [ ] Parse try-catch-finally (2h)
+### 1.7 Statement Parsing (16h) ✅ COMPLETE
+- [x] Parse echo statement (1h)
+- [x] Parse if/elseif/else (2h)
+- [x] Parse while loop (1h)
+- [x] Parse do-while loop (1h)
+- [x] Parse for loop (2h)
+- [x] Parse foreach loop (2h)
+- [x] Parse switch statement (2h)
+- [x] Parse match expression (PHP 8.0+) (2h)
+- [x] Parse break/continue/return (1h)
+- [x] Parse try-catch-finally (2h)
+- [x] Parse throw statement (included)
+- [x] Parse block statements (included)
 
-**Files**: `pkg/parser/stmt.go`
-**Tests**: `pkg/parser/stmt_test.go` (target 85%+ coverage)
+**Files**: `pkg/parser/stmt.go` (609 lines), `pkg/ast/ast.go` (enhanced with 12 statement types)
+**Tests**: `pkg/parser/stmt_test.go` (17 test functions, 83.7% coverage overall)
+**Commit**: Pending
+
+**Note**: Implemented complete statement parsing including all control flow statements
+(if/elseif/else, while, do-while, for, foreach), switch/match, try-catch-finally,
+throw, and break/continue/return. Added postfix ++ and -- support for proper
+loop increment handling.
 
 ### 1.8 Declaration Parsing (16h)
 - [ ] Parse function declarations (3h)

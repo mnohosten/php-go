@@ -63,9 +63,36 @@ func (p *Parser) ParseProgram() *ast.Program {
 
 // parseStatement parses a single statement
 func (p *Parser) parseStatement() ast.Stmt {
-	// For now, parse expression statements
-	// Full statement parsing will be implemented in Task 1.7
-	return p.parseExpressionStatement()
+	switch p.curToken.Type {
+	case lexer.LBRACE:
+		return p.parseBlockStatement()
+	case lexer.ECHO:
+		return p.parseEchoStatement()
+	case lexer.RETURN:
+		return p.parseReturnStatement()
+	case lexer.BREAK:
+		return p.parseBreakStatement()
+	case lexer.CONTINUE:
+		return p.parseContinueStatement()
+	case lexer.IF:
+		return p.parseIfStatement()
+	case lexer.WHILE:
+		return p.parseWhileStatement()
+	case lexer.DO:
+		return p.parseDoWhileStatement()
+	case lexer.FOR:
+		return p.parseForStatement()
+	case lexer.FOREACH:
+		return p.parseForeachStatement()
+	case lexer.SWITCH:
+		return p.parseSwitchStatement()
+	case lexer.TRY:
+		return p.parseTryStatement()
+	case lexer.THROW:
+		return p.parseThrowStatement()
+	default:
+		return p.parseExpressionStatement()
+	}
 }
 
 // parseExpressionStatement parses an expression as a statement
@@ -286,6 +313,8 @@ var precedences = map[lexer.TokenType]int{
 	lexer.NULLSAFE_OPERATOR: POSTFIX,
 	lexer.PAAMAYIM_NEKUDOTAYIM: POSTFIX,
 	lexer.LPAREN:            POSTFIX,
+	lexer.INC:               POSTFIX, // Postfix ++ precedence
+	lexer.DEC:               POSTFIX, // Postfix -- precedence
 	lexer.NEW:               NEW_CLONE,
 	lexer.CLONE:             NEW_CLONE,
 }

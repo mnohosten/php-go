@@ -38,6 +38,7 @@ func (p *Parser) registerExpressionParsers() {
 	p.prefixParseFns[lexer.LPAREN] = p.parseGroupedOrCastExpression
 	p.prefixParseFns[lexer.LBRACKET] = p.parseArrayExpression
 	p.prefixParseFns[lexer.NEW] = p.parseNewExpression
+	p.prefixParseFns[lexer.MATCH] = p.parseMatchExpression
 
 	// Infix parsers (operators that appear between expressions)
 	p.infixParseFns = make(map[lexer.TokenType]infixParseFn)
@@ -107,6 +108,10 @@ func (p *Parser) registerExpressionParsers() {
 
 	// instanceof
 	p.infixParseFns[lexer.INSTANCEOF] = p.parseInstanceofExpression
+
+	// Postfix ++ and --
+	p.infixParseFns[lexer.INC] = p.parsePostfixExpression
+	p.infixParseFns[lexer.DEC] = p.parsePostfixExpression
 }
 
 // parseExpression is the main entry point for parsing expressions using Pratt parsing
@@ -541,4 +546,13 @@ func (p *Parser) parseInstanceofExpression(left ast.Expr) ast.Expr {
 	expression.Right = p.parseExpression(COMPARISON)
 
 	return expression
+}
+
+func (p *Parser) parsePostfixExpression(left ast.Expr) ast.Expr {
+	// Postfix ++ and -- are unary operators applied after the operand
+	return &ast.PrefixExpression{
+		Token:    p.curToken,
+		Operator: p.curToken.Literal + "(postfix)",
+		Right:    left,
+	}
 }
