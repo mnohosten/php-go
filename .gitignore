@@ -1,0 +1,61 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+coverage.txt
+coverage.html
+
+# Go workspace file
+go.work
+go.work.sum
+
+# Build artifacts
+/bin/
+/dist/
+/build/
+php-go
+
+# IDE and editor files
+.vscode/
+.idea/
+.claude/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Temporary files
+/tmp/
+*.tmp
+*.log
+
+# Test fixtures and data
+/testdata/output/
+/tests/tmp/
+
+# Documentation build artifacts
+/docs/_build/
+/docs/.doctrees/
+
+# Profiling data
+*.prof
+*.pprof
+cpu.out
+mem.out
+
+# Vendor (if used)
+/vendor/
+
+# Generated files
+*_gen.go
+
+# PHP source reference (not part of this project)
+/php-src/
