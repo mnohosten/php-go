@@ -153,7 +153,7 @@ loop increment handling.
 
 **Files**: `pkg/parser/decl.go` (713 lines), `pkg/ast/ast.go` (749 lines total, +180 for declarations)
 **Tests**: `pkg/parser/decl_test.go` (655 lines), `pkg/parser/decl_integration_test.go` (326 lines, 83.9% coverage)
-**Commit**: (pending)
+**Commit**: 05dbedf
 
 **Note**: Implemented complete declaration parsing including:
 - Functions with reference returns, typed parameters, variadic params, default values
