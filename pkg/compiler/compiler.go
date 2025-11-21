@@ -1322,6 +1322,87 @@ func (c *Compiler) Compile(node ast.Node) error {
 			vm.UnusedOperand())
 		return nil
 
+	// ========================================
+	// Function and Class Declarations
+	// ========================================
+
+	// Function Declaration
+	case *ast.FunctionDeclaration:
+		// Store function name as constant
+		funcNameIdx := c.AddConstant(node.Name.Value)
+
+		// Remember function start position
+		funcStart := c.CurrentPosition()
+
+		// Enter new scope for function
+		c.EnterScope()
+
+		// Emit RECV opcodes for each parameter
+		for i, param := range node.Parameters {
+			// Define parameter variable in function scope
+			symbol := c.DefineVariable(param.Name.Name)
+
+			if param.Variadic {
+				// RECV_VARIADIC for ...args
+				c.EmitWithLine(vm.OpRecvVariadic, uint32(node.Token.Pos.Line),
+					vm.ConstOperand(uint32(i)), // Parameter index
+					vm.UnusedOperand(),
+					vm.CVOperand(uint32(symbol.Index))) // Store in compiled variable
+			} else if param.DefaultValue != nil {
+				// RECV_INIT for parameters with defaults
+				// Compile default value
+				if err := c.Compile(param.DefaultValue); err != nil {
+					return err
+				}
+
+				c.EmitWithLine(vm.OpRecvInit, uint32(node.Token.Pos.Line),
+					vm.ConstOperand(uint32(i)),    // Parameter index
+					vm.TmpVarOperand(0),           // Default value in temp 0
+					vm.CVOperand(uint32(symbol.Index))) // Store in compiled variable
+			} else {
+				// RECV for required parameters
+				recvOp := vm.OpRecv
+				if param.ByRef {
+					recvOp = vm.OpSendRef // Use SEND_REF for by-reference parameters
+				}
+
+				c.EmitWithLine(recvOp, uint32(node.Token.Pos.Line),
+					vm.ConstOperand(uint32(i)),    // Parameter index
+					vm.UnusedOperand(),
+					vm.CVOperand(uint32(symbol.Index))) // Store in compiled variable
+			}
+		}
+
+		// Compile function body
+		if err := c.Compile(node.Body); err != nil {
+			return err
+		}
+
+		// Add implicit return if function doesn't end with return
+		if !c.LastInstructionIs(vm.OpReturn) && !c.LastInstructionIs(vm.OpReturnByRef) {
+			// Return null
+			c.EmitWithLine(vm.OpReturn, uint32(node.Token.Pos.Line),
+				vm.UnusedOperand(),
+				vm.UnusedOperand(),
+				vm.UnusedOperand())
+		}
+
+		// Exit function scope
+		c.ExitScope()
+
+		// Function end position
+		funcEnd := c.CurrentPosition()
+
+		// DECLARE_FUNCTION to register the function
+		// Store function metadata: name index, start pos, end pos, num params
+		c.EmitWithExtended(vm.OpDeclareFunction, uint32(node.Token.Pos.Line),
+			uint32(len(node.Parameters)), // Number of parameters
+			vm.ConstOperand(uint32(funcNameIdx)), // Function name
+			vm.ConstOperand(uint32(funcStart)),   // Function start position
+			vm.ConstOperand(uint32(funcEnd)))     // Function end position
+
+		return nil
+
 	default:
 		return fmt.Errorf("compilation not yet implemented for node type: %T", node)
 	}

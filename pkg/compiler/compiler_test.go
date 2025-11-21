@@ -1485,3 +1485,337 @@ func TestCompileComplexControlFlow(t *testing.T) {
 		t.Errorf("Expected 2 ECHO instructions, got %d", echoCount)
 	}
 }
+
+// ========================================
+// Task 2.8: Function Compilation Tests
+// ========================================
+
+func TestCompileFunctionDeclaration(t *testing.T) {
+	input := `<?php
+	function greet() {
+		echo "Hello";
+	}
+	`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have DECLARE_FUNCTION and ECHO opcodes
+	hasDeclareFunc := false
+	hasEcho := false
+
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpDeclareFunction {
+			hasDeclareFunc = true
+		}
+		if instr.Opcode == vm.OpEcho {
+			hasEcho = true
+		}
+	}
+
+	if !hasDeclareFunc {
+		t.Error("Expected DECLARE_FUNCTION instruction")
+	}
+	if !hasEcho {
+		t.Error("Expected ECHO instruction in function body")
+	}
+
+	// Should have function name as constant
+	foundGreet := false
+	for _, c := range bytecode.Constants {
+		if s, ok := c.(string); ok && s == "greet" {
+			foundGreet = true
+			break
+		}
+	}
+	if !foundGreet {
+		t.Error("Expected 'greet' function name in constants")
+	}
+}
+
+func TestCompileFunctionWithParameters(t *testing.T) {
+	input := `<?php
+	function add($a, $b) {
+		return $a + $b;
+	}
+	`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have RECV opcodes for parameters
+	recvCount := 0
+	hasAdd := false
+	hasReturn := false
+
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpRecv {
+			recvCount++
+		}
+		if instr.Opcode == vm.OpAdd {
+			hasAdd = true
+		}
+		if instr.Opcode == vm.OpReturn {
+			hasReturn = true
+		}
+	}
+
+	if recvCount != 2 {
+		t.Errorf("Expected 2 RECV instructions for parameters, got %d", recvCount)
+	}
+	if !hasAdd {
+		t.Error("Expected ADD instruction in function body")
+	}
+	if !hasReturn {
+		t.Error("Expected RETURN instruction")
+	}
+}
+
+func TestCompileFunctionWithDefaultParameter(t *testing.T) {
+	input := `<?php
+	function greet($name = "World") {
+		echo $name;
+	}
+	`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have RECV_INIT opcode for parameter with default
+	hasRecvInit := false
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpRecvInit {
+			hasRecvInit = true
+			break
+		}
+	}
+
+	if !hasRecvInit {
+		t.Error("Expected RECV_INIT instruction for parameter with default value")
+	}
+
+	// Should have "World" as constant for default value
+	foundWorld := false
+	for _, c := range bytecode.Constants {
+		if s, ok := c.(string); ok && s == "World" {
+			foundWorld = true
+			break
+		}
+	}
+	if !foundWorld {
+		t.Error("Expected 'World' default value in constants")
+	}
+}
+
+func TestCompileFunctionWithVariadicParameter(t *testing.T) {
+	input := `<?php
+	function sum(...$numbers) {
+		return 0;
+	}
+	`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have RECV_VARIADIC opcode
+	hasRecvVariadic := false
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpRecvVariadic {
+			hasRecvVariadic = true
+			break
+		}
+	}
+
+	if !hasRecvVariadic {
+		t.Error("Expected RECV_VARIADIC instruction for variadic parameter")
+	}
+}
+
+func TestCompileFunctionWithReturnValue(t *testing.T) {
+	input := `<?php
+	function double($x) {
+		return $x * 2;
+	}
+	`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have MUL and RETURN opcodes
+	hasMul := false
+	hasReturn := false
+
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpMul {
+			hasMul = true
+		}
+		if instr.Opcode == vm.OpReturn {
+			hasReturn = true
+		}
+	}
+
+	if !hasMul {
+		t.Error("Expected MUL instruction")
+	}
+	if !hasReturn {
+		t.Error("Expected RETURN instruction")
+	}
+}
+
+func TestCompileFunctionWithMultipleParameters(t *testing.T) {
+	input := `<?php
+	function calculate($a, $b, $c) {
+		return ($a + $b) * $c;
+	}
+	`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have 3 RECV opcodes
+	recvCount := 0
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpRecv {
+			recvCount++
+		}
+	}
+
+	if recvCount != 3 {
+		t.Errorf("Expected 3 RECV instructions, got %d", recvCount)
+	}
+}
+
+func TestCompileFunctionImplicitReturn(t *testing.T) {
+	input := `<?php
+	function noReturn() {
+		echo "test";
+	}
+	`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have implicit RETURN at end
+	hasReturn := false
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpReturn {
+			hasReturn = true
+			break
+		}
+	}
+
+	if !hasReturn {
+		t.Error("Expected implicit RETURN instruction")
+	}
+}
+
+func TestCompileNestedFunctionDeclarations(t *testing.T) {
+	input := `<?php
+	function outer() {
+		echo "outer";
+	}
+
+	function inner() {
+		echo "inner";
+	}
+	`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have 2 DECLARE_FUNCTION opcodes
+	declareFuncCount := 0
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpDeclareFunction {
+			declareFuncCount++
+		}
+	}
+
+	if declareFuncCount != 2 {
+		t.Errorf("Expected 2 DECLARE_FUNCTION instructions, got %d", declareFuncCount)
+	}
+
+	// Should have both function names as constants
+	hasOuter := false
+	hasInner := false
+	for _, c := range bytecode.Constants {
+		if s, ok := c.(string); ok {
+			if s == "outer" {
+				hasOuter = true
+			}
+			if s == "inner" {
+				hasInner = true
+			}
+		}
+	}
+
+	if !hasOuter {
+		t.Error("Expected 'outer' function name in constants")
+	}
+	if !hasInner {
+		t.Error("Expected 'inner' function name in constants")
+	}
+}
+
+func TestCompileFunctionWithMixedParameters(t *testing.T) {
+	input := `<?php
+	function variedParams($required, $optional = 10, ...$rest) {
+		return $required;
+	}
+	`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have RECV, RECV_INIT, and RECV_VARIADIC
+	hasRecv := false
+	hasRecvInit := false
+	hasRecvVariadic := false
+
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpRecv {
+			hasRecv = true
+		}
+		if instr.Opcode == vm.OpRecvInit {
+			hasRecvInit = true
+		}
+		if instr.Opcode == vm.OpRecvVariadic {
+			hasRecvVariadic = true
+		}
+	}
+
+	if !hasRecv {
+		t.Error("Expected RECV instruction for required parameter")
+	}
+	if !hasRecvInit {
+		t.Error("Expected RECV_INIT instruction for optional parameter")
+	}
+	if !hasRecvVariadic {
+		t.Error("Expected RECV_VARIADIC instruction for variadic parameter")
+	}
+}
+
+func TestCompileFunctionWithComplexBody(t *testing.T) {
+	input := `<?php
+	function complex($x) {
+		if ($x > 0) {
+			return $x * 2;
+		} else {
+			return 0;
+		}
+	}
+	`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have control flow and return opcodes
+	hasJmpz := false
+	returnCount := 0
+
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpJmpZ {
+			hasJmpz = true
+		}
+		if instr.Opcode == vm.OpReturn {
+			returnCount++
+		}
+	}
+
+	if !hasJmpz {
+		t.Error("Expected JMPZ instruction for if statement")
+	}
+	if returnCount < 2 {
+		t.Errorf("Expected at least 2 RETURN instructions, got %d", returnCount)
+	}
+}
