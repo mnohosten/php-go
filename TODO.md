@@ -30,7 +30,7 @@ This is the master task tracking file for the entire PHP-Go project. Each task r
 
 ## Phase 1: Foundation - Lexer, Parser, AST 🔄 IN PROGRESS
 
-**Duration**: 6-7 weeks | **Status**: IN PROGRESS (31% complete, 44/140 hours) | **Effort**: 140 hours
+**Duration**: 6-7 weeks | **Status**: IN PROGRESS (46% complete, 64/140 hours) | **Effort**: 140 hours
 
 **Reference**: `docs/phases/01-foundation/README.md`
 
@@ -97,22 +97,27 @@ requires expression parsing capabilities.
 **Tests**: `pkg/parser/parser_test.go` (350+ lines, 84.5% coverage)
 **Commit**: dc001bd
 
-### 1.6 Expression Parsing (20h) ⚠️ CRITICAL
-- [ ] Parse primary expressions (literals, variables) (2h)
-- [ ] Parse binary expressions with precedence (4h)
-- [ ] Parse unary expressions (1h)
-- [ ] Parse assignment expressions (2h)
-- [ ] Parse ternary operator (1h)
-- [ ] Parse function calls (2h)
-- [ ] Parse method calls (2h)
-- [ ] Parse array access (1h)
-- [ ] Parse property access (1h)
-- [ ] Parse new expressions (1h)
-- [ ] Parse instanceof (1h)
-- [ ] Parse closures and arrow functions (2h)
+### 1.6 Expression Parsing (20h) ✅ COMPLETE
+- [x] Parse primary expressions (literals, variables) (2h)
+- [x] Parse binary expressions with precedence (4h)
+- [x] Parse unary expressions (1h)
+- [x] Parse assignment expressions (2h)
+- [x] Parse ternary operator (1h)
+- [x] Parse function calls (2h)
+- [x] Parse method calls (2h)
+- [x] Parse array access (1h)
+- [x] Parse property access (1h)
+- [x] Parse new expressions (1h)
+- [x] Parse instanceof (1h)
+- [ ] Parse closures and arrow functions (2h) - Deferred to Task 1.9
 
-**Files**: `pkg/parser/expr.go`
-**Tests**: `pkg/parser/expr_test.go` (target 85%+ coverage)
+**Files**: `pkg/parser/expr.go` (535 lines), `pkg/ast/ast.go` (enhanced with 15+ expression types)
+**Tests**: `pkg/parser/expr_test.go` (20 test functions, 87.7% coverage)
+**Commit**: Pending
+
+**Note**: Implemented complete Pratt parsing with prefix/infix function maps. All operators,
+precedence rules, and expression types working. Closures/arrow functions deferred as they
+require more complex parsing (will implement in Task 1.9 or separately).
 
 ### 1.7 Statement Parsing (16h)
 - [ ] Parse echo statement (1h)

@@ -3,6 +3,7 @@ package parser
 import (
 	"testing"
 
+	"github.com/krizos/php-go/pkg/ast"
 	"github.com/krizos/php-go/pkg/lexer"
 )
 
@@ -228,10 +229,15 @@ func TestParseIdentifier(t *testing.T) {
 
 	p.nextToken() // Move to 'test'
 
-	ident := p.parseIdentifier()
+	identExpr := p.parseIdentifier()
 
-	if ident == nil {
+	if identExpr == nil {
 		t.Fatal("parseIdentifier() returned nil")
+	}
+
+	ident, ok := identExpr.(*ast.Identifier)
+	if !ok {
+		t.Fatalf("identExpr not *ast.Identifier. got=%T", identExpr)
 	}
 
 	if ident.Value != "test" {

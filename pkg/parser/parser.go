@@ -16,6 +16,10 @@ type Parser struct {
 
 	// For error recovery
 	panicMode bool
+
+	// Pratt parsing function maps
+	prefixParseFns map[lexer.TokenType]prefixParseFn
+	infixParseFns  map[lexer.TokenType]infixParseFn
 }
 
 // New creates a new Parser from a lexer
@@ -24,6 +28,9 @@ func New(l *lexer.Lexer) *Parser {
 		l:      l,
 		errors: []string{},
 	}
+
+	// Register expression parsing functions
+	p.registerExpressionParsers()
 
 	// Read two tokens to initialize curToken and peekToken
 	p.nextToken()
@@ -55,10 +62,26 @@ func (p *Parser) ParseProgram() *ast.Program {
 }
 
 // parseStatement parses a single statement
-// This is a placeholder - will be implemented in Task 1.7
 func (p *Parser) parseStatement() ast.Stmt {
-	// TODO: Implement statement parsing in Task 1.7
-	return nil
+	// For now, parse expression statements
+	// Full statement parsing will be implemented in Task 1.7
+	return p.parseExpressionStatement()
+}
+
+// parseExpressionStatement parses an expression as a statement
+func (p *Parser) parseExpressionStatement() *ast.ExpressionStatement {
+	stmt := &ast.ExpressionStatement{
+		Token: p.curToken,
+	}
+
+	stmt.Expression = p.parseExpression(LOWEST)
+
+	// Optional semicolon
+	if p.peekTokenIs(lexer.SEMICOLON) {
+		p.nextToken()
+	}
+
+	return stmt
 }
 
 // Token management methods
@@ -170,14 +193,6 @@ func (p *Parser) skipToStatementEnd() {
 }
 
 // Helper methods for parsing
-
-// parseIdentifier parses an identifier token
-func (p *Parser) parseIdentifier() *ast.Identifier {
-	return &ast.Identifier{
-		Token: p.curToken,
-		Value: p.curToken.Literal,
-	}
-}
 
 // currentTokenPrecedence returns the precedence of the current token
 // This will be used for expression parsing (Task 1.6)
