@@ -491,6 +491,298 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 		return fmt.Errorf("assignment to non-variable not yet implemented")
 
+	// Identifier (convert to string constant)
+	case *ast.Identifier:
+		constIdx := c.AddConstant(node.Value)
+		c.EmitWithLine(vm.OpQMAssign, uint32(node.Token.Pos.Line),
+			vm.ConstOperand(uint32(constIdx)),
+			vm.UnusedOperand(),
+			vm.TmpVarOperand(0))
+		return nil
+
+	// Grouped Expression (just compile the inner expression)
+	case *ast.GroupedExpression:
+		return c.Compile(node.Expr)
+
+	// Array Literal
+	case *ast.ArrayExpression:
+		// Initialize empty array
+		c.EmitWithLine(vm.OpInitArray, uint32(node.Token.Pos.Line),
+			vm.UnusedOperand(),
+			vm.UnusedOperand(),
+			vm.TmpVarOperand(0)) // Array in temp var 0
+
+		// Add elements to array
+		for _, elem := range node.Elements {
+			// Compile the value
+			if err := c.Compile(elem.Value); err != nil {
+				return err
+			}
+			valueTemp := vm.TmpVarOperand(1) // Value in temp 1
+
+			// If there's a key, compile it
+			if elem.Key != nil {
+				if err := c.Compile(elem.Key); err != nil {
+					return err
+				}
+				keyTemp := vm.TmpVarOperand(2) // Key in temp 2
+
+				// ADD_ARRAY_ELEMENT with key: array[key] = value
+				c.EmitWithLine(vm.OpAddArrayElement, uint32(node.Token.Pos.Line),
+					valueTemp,
+					keyTemp,
+					vm.TmpVarOperand(0)) // Result array in temp 0
+			} else {
+				// ADD_ARRAY_ELEMENT without key: array[] = value
+				c.EmitWithLine(vm.OpAddArrayElement, uint32(node.Token.Pos.Line),
+					valueTemp,
+					vm.UnusedOperand(),
+					vm.TmpVarOperand(0)) // Result array in temp 0
+			}
+		}
+		return nil
+
+	// Array Access
+	case *ast.IndexExpression:
+		// Compile the array/string
+		if err := c.Compile(node.Left); err != nil {
+			return err
+		}
+		arrayTemp := vm.TmpVarOperand(0)
+
+		// Compile the index
+		if err := c.Compile(node.Index); err != nil {
+			return err
+		}
+		indexTemp := vm.TmpVarOperand(1)
+
+		// Emit FETCH_DIM_R: result = array[index]
+		c.EmitWithLine(vm.OpFetchDimR, uint32(node.Token.Pos.Line),
+			arrayTemp,
+			indexTemp,
+			vm.TmpVarOperand(2)) // Result in temp 2
+		return nil
+
+	// Property Access
+	case *ast.PropertyExpression:
+		// Compile the object
+		if err := c.Compile(node.Object); err != nil {
+			return err
+		}
+		objTemp := vm.TmpVarOperand(0)
+
+		// Compile the property (could be identifier or dynamic expression)
+		if err := c.Compile(node.Property); err != nil {
+			return err
+		}
+		propTemp := vm.TmpVarOperand(1)
+
+		// Emit FETCH_OBJ_R: result = obj->prop
+		c.EmitWithLine(vm.OpFetchObjR, uint32(node.Token.Pos.Line),
+			objTemp,
+			propTemp,
+			vm.TmpVarOperand(2)) // Result in temp 2
+		return nil
+
+	// Function Call
+	case *ast.CallExpression:
+		// For now, we'll handle simple function calls by name
+		// Full implementation with dynamic calls will come later
+
+		// Compile arguments first
+		for _, arg := range node.Arguments {
+			if err := c.Compile(arg); err != nil {
+				return err
+			}
+			// TODO: Push arguments onto stack properly
+		}
+
+		// Compile the function expression
+		if err := c.Compile(node.Function); err != nil {
+			return err
+		}
+		funcTemp := vm.TmpVarOperand(0)
+
+		// Initialize function call
+		c.EmitWithLine(vm.OpInitFcallByName, uint32(node.Token.Pos.Line),
+			funcTemp,
+			vm.ConstOperand(uint32(len(node.Arguments))), // Argument count
+			vm.UnusedOperand())
+
+		// Execute function call
+		c.EmitWithLine(vm.OpDoFcall, uint32(node.Token.Pos.Line),
+			vm.UnusedOperand(),
+			vm.UnusedOperand(),
+			vm.TmpVarOperand(1)) // Result in temp 1
+		return nil
+
+	// Method Call
+	case *ast.MethodCallExpression:
+		// Compile the object
+		if err := c.Compile(node.Object); err != nil {
+			return err
+		}
+		objTemp := vm.TmpVarOperand(0)
+
+		// Compile the method name (could be identifier or dynamic)
+		if err := c.Compile(node.Method); err != nil {
+			return err
+		}
+		methodTemp := vm.TmpVarOperand(1)
+
+		// Compile arguments
+		for _, arg := range node.Arguments {
+			if err := c.Compile(arg); err != nil {
+				return err
+			}
+			// TODO: Push arguments onto stack properly
+		}
+
+		// Initialize method call
+		c.EmitWithLine(vm.OpInitMethodCall, uint32(node.Token.Pos.Line),
+			objTemp,
+			methodTemp,
+			vm.UnusedOperand())
+
+		// Execute method call with argument count in extended value
+		c.EmitWithExtended(vm.OpDoFcall, uint32(node.Token.Pos.Line),
+			uint32(len(node.Arguments)),
+			vm.UnusedOperand(),
+			vm.UnusedOperand(),
+			vm.TmpVarOperand(2)) // Result in temp 2
+		return nil
+
+	// Ternary Operator
+	case *ast.TernaryExpression:
+		// Compile the condition
+		if err := c.Compile(node.Condition); err != nil {
+			return err
+		}
+
+		// Short ternary form: $x ?: $y (if $x is falsy, use $y)
+		if node.Consequence == nil {
+			// Use JMP_SET: if (condition) { result = condition; goto end; }
+			// Emit JMP_SET with placeholder address
+			jmpSetPos := c.EmitWithLine(vm.OpJmpSet, uint32(node.Token.Pos.Line),
+				vm.TmpVarOperand(0),
+				vm.UnusedOperand(),
+				vm.TmpVarOperand(1)) // Result in temp 1
+
+			// Compile alternative (used if condition is falsy)
+			if err := c.Compile(node.Alternative); err != nil {
+				return err
+			}
+			// Move alternative to result
+			c.EmitWithLine(vm.OpQMAssign, uint32(node.Token.Pos.Line),
+				vm.TmpVarOperand(0),
+				vm.UnusedOperand(),
+				vm.TmpVarOperand(1))
+
+			// Patch JMP_SET to jump here
+			endPos := c.CurrentPosition()
+			c.ChangeOperand(jmpSetPos, 2, vm.ConstOperand(uint32(endPos)))
+			return nil
+		}
+
+		// Full ternary form: $x ? $y : $z
+		// JMPZ consequence_end with placeholder
+		jmpzPos := c.EmitWithLine(vm.OpJmpZ, uint32(node.Token.Pos.Line),
+			vm.TmpVarOperand(0),
+			vm.UnusedOperand(),
+			vm.UnusedOperand())
+
+		// Compile consequence (true branch)
+		if err := c.Compile(node.Consequence); err != nil {
+			return err
+		}
+		// Move consequence to result
+		c.EmitWithLine(vm.OpQMAssign, uint32(node.Token.Pos.Line),
+			vm.TmpVarOperand(0),
+			vm.UnusedOperand(),
+			vm.TmpVarOperand(1)) // Result in temp 1
+
+		// JMP to end with placeholder
+		jmpEndPos := c.EmitWithLine(vm.OpJmp, uint32(node.Token.Pos.Line),
+			vm.UnusedOperand(),
+			vm.UnusedOperand(),
+			vm.UnusedOperand())
+
+		// Patch JMPZ to jump to alternative
+		altPos := c.CurrentPosition()
+		c.ChangeOperand(jmpzPos, 1, vm.ConstOperand(uint32(altPos)))
+
+		// Compile alternative (false branch)
+		if err := c.Compile(node.Alternative); err != nil {
+			return err
+		}
+		// Move alternative to result
+		c.EmitWithLine(vm.OpQMAssign, uint32(node.Token.Pos.Line),
+			vm.TmpVarOperand(0),
+			vm.UnusedOperand(),
+			vm.TmpVarOperand(1))
+
+		// Patch JMP to jump to end
+		endPos := c.CurrentPosition()
+		c.ChangeOperand(jmpEndPos, 1, vm.ConstOperand(uint32(endPos)))
+		return nil
+
+	// Type Cast
+	case *ast.CastExpression:
+		// Compile the expression to cast
+		if err := c.Compile(node.Expr); err != nil {
+			return err
+		}
+
+		// Map cast type to opcode extended value
+		var castType uint32
+		switch node.Type {
+		case "int", "integer":
+			castType = 1
+		case "bool", "boolean":
+			castType = 2
+		case "float", "double", "real":
+			castType = 3
+		case "string":
+			castType = 4
+		case "array":
+			castType = 5
+		case "object":
+			castType = 6
+		case "unset":
+			castType = 7
+		default:
+			return fmt.Errorf("unknown cast type: %s", node.Type)
+		}
+
+		// Emit CAST instruction
+		c.EmitWithExtended(vm.OpCast, uint32(node.Token.Pos.Line),
+			castType,
+			vm.TmpVarOperand(0),
+			vm.UnusedOperand(),
+			vm.TmpVarOperand(1)) // Result in temp 1
+		return nil
+
+	// Instanceof
+	case *ast.InstanceofExpression:
+		// Compile the left side (object)
+		if err := c.Compile(node.Left); err != nil {
+			return err
+		}
+		objTemp := vm.TmpVarOperand(0)
+
+		// Compile the right side (class name/expression)
+		if err := c.Compile(node.Right); err != nil {
+			return err
+		}
+		classTemp := vm.TmpVarOperand(1)
+
+		// Emit INSTANCEOF instruction
+		c.EmitWithLine(vm.OpInstanceof, uint32(node.Token.Pos.Line),
+			objTemp,
+			classTemp,
+			vm.TmpVarOperand(2)) // Result in temp 2
+		return nil
+
 	default:
 		return fmt.Errorf("compilation not yet implemented for node type: %T", node)
 	}

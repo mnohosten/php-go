@@ -589,3 +589,443 @@ func TestCompileArithmeticExpression(t *testing.T) {
 		t.Errorf("Expected 3 constants, got %d", len(bytecode.Constants))
 	}
 }
+
+// ========================================
+// Task 2.5: Expression Compilation Tests
+// ========================================
+
+func TestCompileArrayLiteral(t *testing.T) {
+	input := `<?php
+	$x = [1, 2, 3];
+	`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have INIT_ARRAY and ADD_ARRAY_ELEMENT opcodes
+	hasInitArray := false
+	addArrayCount := 0
+
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpInitArray {
+			hasInitArray = true
+		}
+		if instr.Opcode == vm.OpAddArrayElement {
+			addArrayCount++
+		}
+	}
+
+	if !hasInitArray {
+		t.Error("Expected INIT_ARRAY instruction")
+	}
+	if addArrayCount != 3 {
+		t.Errorf("Expected 3 ADD_ARRAY_ELEMENT instructions, got %d", addArrayCount)
+	}
+
+	// Should have constants 1, 2, 3
+	if len(bytecode.Constants) < 3 {
+		t.Errorf("Expected at least 3 constants, got %d", len(bytecode.Constants))
+	}
+}
+
+func TestCompileAssociativeArray(t *testing.T) {
+	input := `<?php
+	$x = ["foo" => 1, "bar" => 2];
+	`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have INIT_ARRAY and ADD_ARRAY_ELEMENT opcodes
+	hasInitArray := false
+	addArrayCount := 0
+
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpInitArray {
+			hasInitArray = true
+		}
+		if instr.Opcode == vm.OpAddArrayElement {
+			addArrayCount++
+		}
+	}
+
+	if !hasInitArray {
+		t.Error("Expected INIT_ARRAY instruction")
+	}
+	if addArrayCount != 2 {
+		t.Errorf("Expected 2 ADD_ARRAY_ELEMENT instructions, got %d", addArrayCount)
+	}
+}
+
+func TestCompileArrayAccess(t *testing.T) {
+	input := `<?php
+	$x = $arr[0];
+	`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have FETCH_DIM_R opcode
+	hasFetchDim := false
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpFetchDimR {
+			hasFetchDim = true
+			break
+		}
+	}
+
+	if !hasFetchDim {
+		t.Error("Expected FETCH_DIM_R instruction")
+	}
+
+	// Should have constant 0
+	found := false
+	for _, c := range bytecode.Constants {
+		if i, ok := c.(int64); ok && i == 0 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("Expected constant 0")
+	}
+}
+
+func TestCompilePropertyAccess(t *testing.T) {
+	input := `<?php
+	$x = $obj->prop;
+	`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have FETCH_OBJ_R opcode
+	hasFetchObj := false
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpFetchObjR {
+			hasFetchObj = true
+			break
+		}
+	}
+
+	if !hasFetchObj {
+		t.Error("Expected FETCH_OBJ_R instruction")
+	}
+
+	// Should have constant "prop"
+	found := false
+	for _, c := range bytecode.Constants {
+		if s, ok := c.(string); ok && s == "prop" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("Expected constant 'prop'")
+	}
+}
+
+func TestCompileFunctionCall(t *testing.T) {
+	input := `<?php
+	$x = strlen("hello");
+	`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have INIT_FCALL_BY_NAME and DO_FCALL opcodes
+	hasInitFcall := false
+	hasDoFcall := false
+
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpInitFcallByName {
+			hasInitFcall = true
+		}
+		if instr.Opcode == vm.OpDoFcall {
+			hasDoFcall = true
+		}
+	}
+
+	if !hasInitFcall {
+		t.Error("Expected INIT_FCALL_BY_NAME instruction")
+	}
+	if !hasDoFcall {
+		t.Error("Expected DO_FCALL instruction")
+	}
+
+	// Should have constants "strlen" and "hello"
+	hasStrlen := false
+	hasHello := false
+	for _, c := range bytecode.Constants {
+		if s, ok := c.(string); ok {
+			if s == "strlen" {
+				hasStrlen = true
+			}
+			if s == "hello" {
+				hasHello = true
+			}
+		}
+	}
+	if !hasStrlen {
+		t.Error("Expected constant 'strlen'")
+	}
+	if !hasHello {
+		t.Error("Expected constant 'hello'")
+	}
+}
+
+func TestCompileMethodCall(t *testing.T) {
+	input := `<?php
+	$x = $obj->method(1, 2);
+	`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have INIT_METHOD_CALL and DO_FCALL opcodes
+	hasInitMethod := false
+	hasDoFcall := false
+
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpInitMethodCall {
+			hasInitMethod = true
+		}
+		if instr.Opcode == vm.OpDoFcall {
+			hasDoFcall = true
+		}
+	}
+
+	if !hasInitMethod {
+		t.Error("Expected INIT_METHOD_CALL instruction")
+	}
+	if !hasDoFcall {
+		t.Error("Expected DO_FCALL instruction")
+	}
+
+	// Should have constant "method"
+	found := false
+	for _, c := range bytecode.Constants {
+		if s, ok := c.(string); ok && s == "method" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("Expected constant 'method'")
+	}
+}
+
+func TestCompileTernaryOperator(t *testing.T) {
+	input := `<?php
+	$x = $a ? $b : $c;
+	`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have JMPZ and JMP opcodes
+	hasJmpz := false
+	hasJmp := false
+
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpJmpZ {
+			hasJmpz = true
+		}
+		if instr.Opcode == vm.OpJmp {
+			hasJmp = true
+		}
+	}
+
+	if !hasJmpz {
+		t.Error("Expected JMPZ instruction for ternary")
+	}
+	if !hasJmp {
+		t.Error("Expected JMP instruction for ternary")
+	}
+}
+
+func TestCompileShortTernary(t *testing.T) {
+	input := `<?php
+	$x = $a ?: $b;
+	`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have JMP_SET opcode
+	hasJmpSet := false
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpJmpSet {
+			hasJmpSet = true
+			break
+		}
+	}
+
+	if !hasJmpSet {
+		t.Error("Expected JMP_SET instruction for short ternary")
+	}
+}
+
+func TestCompileTypeCast(t *testing.T) {
+	tests := []struct {
+		input    string
+		castType string
+	}{
+		{`<?php $x = (int)$y;`, "int"},
+		{`<?php $x = (string)$y;`, "string"},
+		{`<?php $x = (bool)$y;`, "bool"},
+		// Note: float/double and array casts need parser support to be added later
+	}
+
+	for _, tt := range tests {
+		bytecode := parseAndCompile(t, tt.input)
+
+		// Should have CAST opcode
+		hasCast := false
+		for _, instr := range bytecode.Instructions {
+			if instr.Opcode == vm.OpCast {
+				hasCast = true
+				break
+			}
+		}
+
+		if !hasCast {
+			t.Errorf("Expected CAST instruction for %s cast", tt.castType)
+		}
+	}
+}
+
+func TestCompileInstanceof(t *testing.T) {
+	input := `<?php
+	$x = $obj instanceof MyClass;
+	`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have INSTANCEOF opcode
+	hasInstanceof := false
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpInstanceof {
+			hasInstanceof = true
+			break
+		}
+	}
+
+	if !hasInstanceof {
+		t.Error("Expected INSTANCEOF instruction")
+	}
+
+	// Should have constant "MyClass"
+	found := false
+	for _, c := range bytecode.Constants {
+		if s, ok := c.(string); ok && s == "MyClass" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("Expected constant 'MyClass'")
+	}
+}
+
+func TestCompileGroupedExpression(t *testing.T) {
+	input := `<?php
+	$x = (1 + 2) * 3;
+	`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have ADD and MUL opcodes
+	hasAdd := false
+	hasMul := false
+
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpAdd {
+			hasAdd = true
+		}
+		if instr.Opcode == vm.OpMul {
+			hasMul = true
+		}
+	}
+
+	if !hasAdd {
+		t.Error("Expected ADD instruction")
+	}
+	if !hasMul {
+		t.Error("Expected MUL instruction")
+	}
+}
+
+func TestCompileComplexExpression(t *testing.T) {
+	input := `<?php
+	$result = $arr[0]->method($x, $y) + 10;
+	`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have FETCH_DIM_R, INIT_METHOD_CALL, DO_FCALL, and ADD opcodes
+	hasFetchDim := false
+	hasInitMethod := false
+	hasDoFcall := false
+	hasAdd := false
+
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpFetchDimR {
+			hasFetchDim = true
+		}
+		if instr.Opcode == vm.OpInitMethodCall {
+			hasInitMethod = true
+		}
+		if instr.Opcode == vm.OpDoFcall {
+			hasDoFcall = true
+		}
+		if instr.Opcode == vm.OpAdd {
+			hasAdd = true
+		}
+	}
+
+	if !hasFetchDim {
+		t.Error("Expected FETCH_DIM_R instruction")
+	}
+	if !hasInitMethod {
+		t.Error("Expected INIT_METHOD_CALL instruction")
+	}
+	if !hasDoFcall {
+		t.Error("Expected DO_FCALL instruction")
+	}
+	if !hasAdd {
+		t.Error("Expected ADD instruction")
+	}
+}
+
+func TestCompileNestedArrays(t *testing.T) {
+	input := `<?php
+	$x = [1, [2, 3], 4];
+	`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have multiple INIT_ARRAY instructions (one for outer, one for inner)
+	initArrayCount := 0
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpInitArray {
+			initArrayCount++
+		}
+	}
+
+	if initArrayCount < 2 {
+		t.Errorf("Expected at least 2 INIT_ARRAY instructions for nested arrays, got %d", initArrayCount)
+	}
+}
+
+func TestCompileIdentifier(t *testing.T) {
+	input := `<?php
+	$x = MyClass;
+	`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have constant "MyClass"
+	found := false
+	for _, c := range bytecode.Constants {
+		if s, ok := c.(string); ok && s == "MyClass" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("Expected constant 'MyClass' from identifier")
+	}
+}
