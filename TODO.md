@@ -30,7 +30,7 @@ This is the master task tracking file for the entire PHP-Go project. Each task r
 
 ## Phase 1: Foundation - Lexer, Parser, AST 🔄 IN PROGRESS
 
-**Duration**: 6-7 weeks | **Status**: IN PROGRESS (74% complete, 104/140 hours) | **Effort**: 140 hours
+**Duration**: 6-7 weeks | **Status**: IN PROGRESS (83% complete, 116/140 hours) | **Effort**: 140 hours
 
 **Reference**: `docs/phases/01-foundation/README.md`
 
@@ -188,14 +188,25 @@ All features fully tested with 24 test cases + 5 integration tests.
   conflict with by-reference syntax (&$param). Will be re-enabled with context tracking.
 All features tested with 25 test cases covering scalar, nullable, union, and complex types.
 
-### 1.10 AST Node Definitions (12h)
-- [ ] Define Node interface (1h)
-- [ ] Define statement node types (~20 types) (4h)
-- [ ] Define expression node types (~30 types) (5h)
-- [ ] Implement String() methods for debugging (1h)
-- [ ] Add visitor pattern support (1h)
+### 1.10 AST Node Definitions (12h) ✅ COMPLETE
+- [x] Define Node interface (1h)
+- [x] Define statement node types (~20 types) (4h)
+- [x] Define expression node types (~30 types) (5h)
+- [x] Implement String() methods for debugging (1h)
+- [x] Add visitor pattern support (1h)
 
-**Files**: `pkg/ast/node.go`, `pkg/ast/stmt.go`, `pkg/ast/expr.go`
+**Files**: `pkg/ast/ast.go` (801 lines, 65+ node types), `pkg/ast/visitor.go` (461 lines)
+**Tests**: `pkg/ast/visitor_test.go` (4 test cases for visitor pattern)
+**Commit**: (pending)
+
+**Note**: All AST nodes have been defined across tasks 1.5-1.9:
+- 3 base interfaces (Node, Stmt, Expr)
+- 22+ statement types (if, while, for, foreach, try, function, class, etc.)
+- 30+ expression types (literals, operators, calls, property access, types, etc.)
+- 10+ declaration types (functions, classes, methods, properties, traits, etc.)
+- Complete visitor pattern with Walk() function and BaseVisitor
+- All nodes have String() methods for debugging
+Total: 65+ node types covering all PHP 8.4 syntax
 
 ### 1.11 CLI Tool (6h)
 - [ ] Set up CLI framework (1h)
