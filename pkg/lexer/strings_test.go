@@ -483,3 +483,259 @@ func BenchmarkStringInterpolation(b *testing.B) {
 		parseStringInterpolation(input)
 	}
 }
+
+// Additional edge case tests for better coverage
+
+func TestStringEscapeSequences(t *testing.T) {
+	tests := []struct {
+		name            string
+		input           string
+		expectedLiteral string
+	}{
+		{
+			name:            "newline escape",
+			input:           `"line1\nline2"`,
+			expectedLiteral: "line1\nline2",
+		},
+		{
+			name:            "tab escape",
+			input:           `"col1\tcol2"`,
+			expectedLiteral: "col1\tcol2",
+		},
+		{
+			name:            "carriage return",
+			input:           `"before\rafter"`,
+			expectedLiteral: "before\rafter",
+		},
+		{
+			name:            "backslash escape",
+			input:           `"path\\to\\file"`,
+			expectedLiteral: "path\\to\\file",
+		},
+		{
+			name:            "dollar sign escape",
+			input:           `"price is \$10"`,
+			expectedLiteral: "price is $10",
+		},
+		{
+			name:            "quote escape",
+			input:           `"He said \"Hello\""`,
+			expectedLiteral: "He said \"Hello\"",
+		},
+		{
+			name:            "null byte escape",
+			input:           `"null\0byte"`,
+			expectedLiteral: "null\x00byte",
+		},
+		{
+			name:            "unknown escape keeps backslash",
+			input:           `"test\q"`,
+			expectedLiteral: "test\\q",
+		},
+		{
+			name:            "hex uppercase letters",
+			input:           `"\x41\x42\x43"`,
+			expectedLiteral: "ABC",
+		},
+		{
+			name:            "hex lowercase letters",
+			input:           `"\x61\x62\x63"`,
+			expectedLiteral: "abc",
+		},
+		{
+			name:            "hex mixed case",
+			input:           `"\x4A\x6b"`,
+			expectedLiteral: "Jk",
+		},
+		{
+			name:            "invalid hex escape - non-hex chars",
+			input:           `"\xGH"`,
+			expectedLiteral: "\\xGH",
+		},
+		{
+			name:            "invalid hex escape - one digit",
+			input:           `"\x4Z"`,
+			expectedLiteral: "\\x4Z",
+		},
+		{
+			name:            "mixed escapes",
+			input:           `"line1\nline2\ttab\x41"`,
+			expectedLiteral: "line1\nline2\ttabA",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := New(tt.input, "test.php")
+			tok := l.NextToken()
+
+			if tok.Type != STRING {
+				t.Errorf("token type wrong. expected=STRING, got=%q", tok.Type)
+			}
+
+			if tok.Literal != tt.expectedLiteral {
+				t.Errorf("literal wrong. expected=%q, got=%q", tt.expectedLiteral, tok.Literal)
+			}
+		})
+	}
+}
+
+func TestUnterminatedString(t *testing.T) {
+	input := `"unterminated string`
+	l := New(input, "test.php")
+	tok := l.NextToken()
+
+	if tok.Type != ILLEGAL {
+		t.Errorf("expected ILLEGAL token for unterminated string, got %q", tok.Type)
+	}
+
+	if tok.Literal != "unterminated string" {
+		t.Errorf("expected error message 'unterminated string', got %q", tok.Literal)
+	}
+}
+
+func TestStringWithNewlines(t *testing.T) {
+	input := "\"line1\nline2\nline3\""
+	l := New(input, "test.php")
+	tok := l.NextToken()
+
+	if tok.Type != STRING {
+		t.Errorf("token type wrong. expected=STRING, got=%q", tok.Type)
+	}
+
+	expected := "line1\nline2\nline3"
+	if tok.Literal != expected {
+		t.Errorf("literal wrong. expected=%q, got=%q", expected, tok.Literal)
+	}
+
+	// Check that line number was incremented
+	if tok.Pos.Line != 1 {
+		t.Errorf("expected string to start at line 1, got line %d", tok.Pos.Line)
+	}
+}
+
+func TestStringWithDollarSign(t *testing.T) {
+	tests := []struct {
+		name            string
+		input           string
+		expectedLiteral string
+	}{
+		{
+			name:            "dollar sign alone",
+			input:           `"price $"`,
+			expectedLiteral: "price $",
+		},
+		{
+			name:            "dollar sign with text",
+			input:           `"total $amount"`,
+			expectedLiteral: "total $amount",
+		},
+		{
+			name:            "multiple dollar signs",
+			input:           `"$a $b $c"`,
+			expectedLiteral: "$a $b $c",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := New(tt.input, "test.php")
+			tok := l.NextToken()
+
+			if tok.Type != STRING {
+				t.Errorf("token type wrong. expected=STRING, got=%q", tok.Type)
+			}
+
+			if tok.Literal != tt.expectedLiteral {
+				t.Errorf("literal wrong. expected=%q, got=%q", tt.expectedLiteral, tok.Literal)
+			}
+		})
+	}
+}
+
+func TestHeredocVariations(t *testing.T) {
+	tests := []struct {
+		name            string
+		input           string
+		expectedLiteral string
+	}{
+		{
+			name: "heredoc with blank lines",
+			input: `<<<EOT
+line1
+
+line3
+EOT;`,
+			expectedLiteral: "line1\n\nline3\n",
+		},
+		{
+			name: "heredoc with only newlines",
+			input: `<<<EOT
+
+
+EOT;`,
+			expectedLiteral: "\n\n",
+		},
+		{
+			name: "heredoc with trailing spaces",
+			input: `<<<EOT
+text
+EOT;`,
+			expectedLiteral: "text\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := New(tt.input, "test.php")
+			tok := l.NextToken()
+
+			if tok.Type != HEREDOC {
+				t.Errorf("token type wrong. expected=HEREDOC, got=%q", tok.Type)
+			}
+
+			if tok.Literal != tt.expectedLiteral {
+				t.Errorf("literal wrong. expected=%q, got=%q", tt.expectedLiteral, tok.Literal)
+			}
+		})
+	}
+}
+
+func TestNowdocVariations(t *testing.T) {
+	tests := []struct {
+		name            string
+		input           string
+		expectedLiteral string
+	}{
+		{
+			name: "nowdoc with variables not interpolated",
+			input: `<<<'EOT'
+Hello $name
+Total $count
+EOT;`,
+			expectedLiteral: "Hello $name\nTotal $count\n",
+		},
+		{
+			name: "nowdoc with backslashes",
+			input: `<<<'EOT'
+C:\path\to\file
+EOT;`,
+			expectedLiteral: "C:\\path\\to\\file\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := New(tt.input, "test.php")
+			tok := l.NextToken()
+
+			if tok.Type != NOWDOC {
+				t.Errorf("token type wrong. expected=NOWDOC, got=%q", tok.Type)
+			}
+
+			if tok.Literal != tt.expectedLiteral {
+				t.Errorf("literal wrong. expected=%q, got=%q", tt.expectedLiteral, tok.Literal)
+			}
+		})
+	}
+}

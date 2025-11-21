@@ -588,3 +588,265 @@ func TestNeverReturnType(t *testing.T) {
 		t.Errorf("return type not 'never'. got=%v", funcDecl.ReturnType)
 	}
 }
+
+// Additional edge case tests for better coverage
+
+func TestTypeHelperFunctions(t *testing.T) {
+	// Test isScalarType
+	scalarTests := []struct {
+		name     string
+		expected bool
+	}{
+		{"int", true},
+		{"integer", true},
+		{"float", true},
+		{"double", true},
+		{"string", true},
+		{"bool", true},
+		{"boolean", true},
+		{"User", false},
+		{"mixed", false},
+		{"array", false},
+	}
+
+	for _, tt := range scalarTests {
+		result := isScalarType(tt.name)
+		if result != tt.expected {
+			t.Errorf("isScalarType(%q) = %v, expected %v", tt.name, result, tt.expected)
+		}
+	}
+
+	// Test isSpecialType
+	specialTests := []struct {
+		name     string
+		expected bool
+	}{
+		{"mixed", true},
+		{"void", true},
+		{"never", true},
+		{"null", true},
+		{"false", true},
+		{"true", true},
+		{"static", true},
+		{"self", true},
+		{"parent", true},
+		{"int", false},
+		{"User", false},
+	}
+
+	for _, tt := range specialTests {
+		result := isSpecialType(tt.name)
+		if result != tt.expected {
+			t.Errorf("isSpecialType(%q) = %v, expected %v", tt.name, result, tt.expected)
+		}
+	}
+
+	// Test isCompoundType
+	compoundTests := []struct {
+		name     string
+		expected bool
+	}{
+		{"array", true},
+		{"object", true},
+		{"callable", true},
+		{"iterable", true},
+		{"resource", true},
+		{"int", false},
+		{"mixed", false},
+		{"User", false},
+	}
+
+	for _, tt := range compoundTests {
+		result := isCompoundType(tt.name)
+		if result != tt.expected {
+			t.Errorf("isCompoundType(%q) = %v, expected %v", tt.name, result, tt.expected)
+		}
+	}
+}
+
+func TestStaticReturnType(t *testing.T) {
+	input := `<?php
+	class Foo {
+		public function getInstance(): static {}
+	}`
+
+	l := lexer.New(input, "test.php")
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	classDecl := program.Statements[0].(*ast.ClassDeclaration)
+	methodDecl := classDecl.Body[0].(*ast.MethodDeclaration)
+
+	returnType, ok := methodDecl.ReturnType.(*ast.Identifier)
+	if !ok || returnType.Value != "static" {
+		t.Errorf("return type not 'static'. got=%v", methodDecl.ReturnType)
+	}
+}
+
+func TestSelfReturnType(t *testing.T) {
+	input := `<?php
+	class Foo {
+		public function getSelf(): self {}
+	}`
+
+	l := lexer.New(input, "test.php")
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	classDecl := program.Statements[0].(*ast.ClassDeclaration)
+	methodDecl := classDecl.Body[0].(*ast.MethodDeclaration)
+
+	returnType, ok := methodDecl.ReturnType.(*ast.Identifier)
+	if !ok || returnType.Value != "self" {
+		t.Errorf("return type not 'self'. got=%v", methodDecl.ReturnType)
+	}
+}
+
+func TestParentReturnType(t *testing.T) {
+	input := `<?php
+	class Bar extends Foo {
+		public function getParent(): parent {}
+	}`
+
+	l := lexer.New(input, "test.php")
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	classDecl := program.Statements[0].(*ast.ClassDeclaration)
+	methodDecl := classDecl.Body[0].(*ast.MethodDeclaration)
+
+	returnType, ok := methodDecl.ReturnType.(*ast.Identifier)
+	if !ok || returnType.Value != "parent" {
+		t.Errorf("return type not 'parent'. got=%v", methodDecl.ReturnType)
+	}
+}
+
+func TestFalseReturnType(t *testing.T) {
+	input := `<?php function alwaysFalse(): false {}`
+
+	l := lexer.New(input, "test.php")
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	funcDecl := program.Statements[0].(*ast.FunctionDeclaration)
+
+	returnType, ok := funcDecl.ReturnType.(*ast.Identifier)
+	if !ok || returnType.Value != "false" {
+		t.Errorf("return type not 'false'. got=%v", funcDecl.ReturnType)
+	}
+}
+
+func TestTrueReturnType(t *testing.T) {
+	input := `<?php function alwaysTrue(): true {}`
+
+	l := lexer.New(input, "test.php")
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	funcDecl := program.Statements[0].(*ast.FunctionDeclaration)
+
+	returnType, ok := funcDecl.ReturnType.(*ast.Identifier)
+	if !ok || returnType.Value != "true" {
+		t.Errorf("return type not 'true'. got=%v", funcDecl.ReturnType)
+	}
+}
+
+func TestResourceType(t *testing.T) {
+	input := `<?php function getResource(): resource {}`
+
+	l := lexer.New(input, "test.php")
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	funcDecl := program.Statements[0].(*ast.FunctionDeclaration)
+
+	returnType, ok := funcDecl.ReturnType.(*ast.Identifier)
+	if !ok || returnType.Value != "resource" {
+		t.Errorf("return type not 'resource'. got=%v", funcDecl.ReturnType)
+	}
+}
+
+func TestNamespacedTypeHint(t *testing.T) {
+	input := `<?php function getUser(): \App\Models\User {}`
+
+	l := lexer.New(input, "test.php")
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	funcDecl := program.Statements[0].(*ast.FunctionDeclaration)
+
+	returnType, ok := funcDecl.ReturnType.(*ast.Identifier)
+	if !ok {
+		t.Fatalf("return type not Identifier. got=%T", funcDecl.ReturnType)
+	}
+
+	if returnType.Value != "\\App\\Models\\User" {
+		t.Errorf("return type not '\\App\\Models\\User'. got=%q", returnType.Value)
+	}
+}
+
+func TestComplexUnionWithNullable(t *testing.T) {
+	input := `<?php function getValue(): int|string|null {}`
+
+	l := lexer.New(input, "test.php")
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	funcDecl := program.Statements[0].(*ast.FunctionDeclaration)
+
+	unionType, ok := funcDecl.ReturnType.(*ast.UnionType)
+	if !ok {
+		t.Fatalf("return type not UnionType. got=%T", funcDecl.ReturnType)
+	}
+
+	if len(unionType.Types) != 3 {
+		t.Errorf("union should have 3 types. got=%d", len(unionType.Types))
+	}
+}
+
+func TestTypeAliases(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "integer alias",
+			input:    `<?php function test(): integer {}`,
+			expected: "integer",
+		},
+		{
+			name:     "double alias",
+			input:    `<?php function test(): double {}`,
+			expected: "double",
+		},
+		{
+			name:     "boolean alias",
+			input:    `<?php function test(): boolean {}`,
+			expected: "boolean",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := lexer.New(tt.input, "test.php")
+			p := New(l)
+			program := p.ParseProgram()
+			checkParserErrors(t, p)
+
+			funcDecl := program.Statements[0].(*ast.FunctionDeclaration)
+			returnType, ok := funcDecl.ReturnType.(*ast.Identifier)
+			if !ok || returnType.Value != tt.expected {
+				t.Errorf("return type not %q. got=%v", tt.expected, funcDecl.ReturnType)
+			}
+		})
+	}
+}

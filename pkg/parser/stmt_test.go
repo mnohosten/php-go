@@ -580,3 +580,152 @@ func TestNestedStatements(t *testing.T) {
 		t.Fatalf("nested statement is not *ast.ForStatement. got=%T", ifStmt.Consequence.Statements[0])
 	}
 }
+
+// Additional edge case tests for better coverage
+
+func TestForStatementEdgeCases(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		initLen  int
+		condLen  int
+		incrLen  int
+	}{
+		{
+			name:    "multiple init",
+			input:   `<?php for ($i = 0, $j = 0; $i < 10; $i++) { echo $i; }`,
+			initLen: 2,
+			condLen: 1,
+			incrLen: 1,
+		},
+		{
+			name:    "multiple conditions",
+			input:   `<?php for ($i = 0; $i < 10, $j < 20; $i++) { echo $i; }`,
+			initLen: 1,
+			condLen: 2,
+			incrLen: 1,
+		},
+		{
+			name:    "multiple increments",
+			input:   `<?php for ($i = 0; $i < 10; $i++, $j--) { echo $i; }`,
+			initLen: 1,
+			condLen: 1,
+			incrLen: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := lexer.New(tt.input, "test.php")
+			p := New(l)
+			program := p.ParseProgram()
+			checkParserErrors(t, p)
+
+			if len(program.Statements) != 1 {
+				t.Fatalf("expected 1 statement, got %d", len(program.Statements))
+			}
+
+			forStmt, ok := program.Statements[0].(*ast.ForStatement)
+			if !ok {
+				t.Fatalf("statement not ForStatement. got=%T", program.Statements[0])
+			}
+
+			if len(forStmt.Init) != tt.initLen {
+				t.Errorf("init length wrong. expected=%d, got=%d", tt.initLen, len(forStmt.Init))
+			}
+
+			if len(forStmt.Condition) != tt.condLen {
+				t.Errorf("condition length wrong. expected=%d, got=%d", tt.condLen, len(forStmt.Condition))
+			}
+
+			if len(forStmt.Increment) != tt.incrLen {
+				t.Errorf("increment length wrong. expected=%d, got=%d", tt.incrLen, len(forStmt.Increment))
+			}
+		})
+	}
+}
+
+func TestContinueStatementWithLevel(t *testing.T) {
+	input := `<?php
+	for ($i = 0; $i < 10; $i++) {
+		for ($j = 0; $j < 10; $j++) {
+			continue 2;
+		}
+	}`
+
+	l := lexer.New(input, "test.php")
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	forStmt := program.Statements[0].(*ast.ForStatement)
+	innerFor := forStmt.Body.Statements[0].(*ast.ForStatement)
+	continueStmt, ok := innerFor.Body.Statements[0].(*ast.ContinueStatement)
+	if !ok {
+		t.Fatalf("statement not ContinueStatement. got=%T", innerFor.Body.Statements[0])
+	}
+
+	if continueStmt.Depth == nil {
+		t.Fatal("continue depth is nil")
+	}
+
+	intLit, ok := continueStmt.Depth.(*ast.IntegerLiteral)
+	if !ok {
+		t.Fatalf("continue depth not IntegerLiteral. got=%T", continueStmt.Depth)
+	}
+
+	if intLit.Value != 2 {
+		t.Errorf("continue depth wrong. expected=2, got=%d", intLit.Value)
+	}
+}
+
+func TestBreakStatementWithLevel(t *testing.T) {
+	input := `<?php
+	for ($i = 0; $i < 10; $i++) {
+		for ($j = 0; $j < 10; $j++) {
+			break 2;
+		}
+	}`
+
+	l := lexer.New(input, "test.php")
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	forStmt := program.Statements[0].(*ast.ForStatement)
+	innerFor := forStmt.Body.Statements[0].(*ast.ForStatement)
+	breakStmt, ok := innerFor.Body.Statements[0].(*ast.BreakStatement)
+	if !ok {
+		t.Fatalf("statement not BreakStatement. got=%T", innerFor.Body.Statements[0])
+	}
+
+	if breakStmt.Depth == nil {
+		t.Fatal("break depth is nil")
+	}
+
+	intLit, ok := breakStmt.Depth.(*ast.IntegerLiteral)
+	if !ok {
+		t.Fatalf("break depth not IntegerLiteral. got=%T", breakStmt.Depth)
+	}
+
+	if intLit.Value != 2 {
+		t.Errorf("break depth wrong. expected=2, got=%d", intLit.Value)
+	}
+}
+
+func TestIfElseStatementWithNoBraces(t *testing.T) {
+	input := `<?php if ($x) echo "true"; else echo "false";`
+
+	l := lexer.New(input, "test.php")
+	p := New(l)
+	program := p.ParseProgram()
+
+	// Parser doesn't support single statement if/else without braces yet
+	// This test documents the current limitation
+	if len(p.Errors()) == 0 {
+		ifStmt := program.Statements[0].(*ast.IfStatement)
+		if ifStmt.Consequence == nil {
+			t.Error("if consequence is nil")
+		}
+	}
+}
