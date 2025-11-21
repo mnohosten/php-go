@@ -195,9 +195,9 @@ All features tested with 25 test cases covering scalar, nullable, union, and com
 - [x] Implement String() methods for debugging (1h)
 - [x] Add visitor pattern support (1h)
 
-**Files**: `pkg/ast/ast.go` (801 lines, 65+ node types), `pkg/ast/visitor.go` (461 lines)
-**Tests**: `pkg/ast/visitor_test.go` (4 test cases for visitor pattern)
-**Commit**: (pending)
+**Files**: `pkg/ast/ast.go` (801 lines, 65+ node types), `pkg/ast/visitor.go` (433 lines)
+**Tests**: `pkg/ast/visitor_test.go` (237 lines, 4 test cases)
+**Commit**: 9f18c95
 
 **Note**: All AST nodes have been defined across tasks 1.5-1.9:
 - 3 base interfaces (Node, Stmt, Expr)
