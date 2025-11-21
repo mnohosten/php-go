@@ -135,7 +135,7 @@ require more complex parsing (will implement in Task 1.9 or separately).
 
 **Files**: `pkg/parser/stmt.go` (609 lines), `pkg/ast/ast.go` (enhanced with 12 statement types)
 **Tests**: `pkg/parser/stmt_test.go` (17 test functions, 83.7% coverage overall)
-**Commit**: Pending
+**Commit**: 71d66b6
 
 **Note**: Implemented complete statement parsing including all control flow statements
 (if/elseif/else, while, do-while, for, foreach), switch/match, try-catch-finally,
