@@ -18,6 +18,9 @@ type Compiler struct {
 	// constantMap maps constant values to their indices for deduplication
 	constantMap map[interface{}]int
 
+	// symbolTable manages variable scopes
+	symbolTable *SymbolTable
+
 	// lastInstruction tracks the most recently emitted instruction
 	lastInstruction EmittedInstruction
 
@@ -33,13 +36,15 @@ type EmittedInstruction struct {
 
 // New creates a new compiler instance
 func New() *Compiler {
-	return &Compiler{
+	c := &Compiler{
 		instructions:        vm.Instructions{},
 		constants:           []interface{}{},
 		constantMap:         make(map[interface{}]int),
 		lastInstruction:     EmittedInstruction{},
 		previousInstruction: EmittedInstruction{},
 	}
+	c.InitSymbolTable()
+	return c
 }
 
 // ========================================
@@ -430,9 +435,61 @@ func (c *Compiler) Compile(node ast.Node) error {
 		return nil
 
 	case *ast.Variable:
-		// For now, just emit a placeholder
-		// Will be properly implemented in symbol table phase
-		return fmt.Errorf("variable compilation not yet implemented: $%s", node.Name)
+		// Look up the variable in the symbol table
+		symbol, ok := c.ResolveVariable(node.Name)
+		if !ok {
+			// Variable not defined, define it now (PHP allows implicit declaration)
+			symbol = c.DefineVariable(node.Name)
+		}
+
+		// Emit FETCH instruction based on scope
+		switch symbol.Scope {
+		case GlobalScope:
+			// Fetch global variable
+			c.EmitWithLine(vm.OpFetchR, uint32(node.Token.Pos.Line),
+				vm.CVOperand(uint32(symbol.Index)),
+				vm.UnusedOperand(),
+				vm.TmpVarOperand(0))
+		case LocalScope:
+			// Fetch local variable (compiled variable for direct access)
+			c.EmitWithLine(vm.OpQMAssign, uint32(node.Token.Pos.Line),
+				vm.CVOperand(uint32(symbol.Index)),
+				vm.UnusedOperand(),
+				vm.TmpVarOperand(0))
+		case BuiltinScope:
+			return fmt.Errorf("cannot use builtin '%s' as variable", node.Name)
+		case FreeScope:
+			// Fetch free variable (closure variable)
+			c.EmitWithLine(vm.OpFetchR, uint32(node.Token.Pos.Line),
+				vm.CVOperand(uint32(symbol.Index)),
+				vm.UnusedOperand(),
+				vm.TmpVarOperand(0))
+		}
+		return nil
+
+	case *ast.AssignmentExpression:
+		// Compile the right side first
+		if err := c.Compile(node.Right); err != nil {
+			return err
+		}
+
+		// Handle the left side (variable)
+		if variable, ok := node.Left.(*ast.Variable); ok {
+			// Look up or define the variable
+			symbol, ok := c.ResolveVariable(variable.Name)
+			if !ok {
+				symbol = c.DefineVariable(variable.Name)
+			}
+
+			// Emit ASSIGN instruction
+			c.EmitWithLine(vm.OpAssign, uint32(node.Token.Pos.Line),
+				vm.TmpVarOperand(0), // Value is in temp var 0
+				vm.UnusedOperand(),
+				vm.CVOperand(uint32(symbol.Index))) // Store in compiled variable
+			return nil
+		}
+
+		return fmt.Errorf("assignment to non-variable not yet implemented")
 
 	default:
 		return fmt.Errorf("compilation not yet implemented for node type: %T", node)
@@ -455,4 +512,5 @@ func (c *Compiler) Reset() {
 	c.constantMap = make(map[interface{}]int)
 	c.lastInstruction = EmittedInstruction{}
 	c.previousInstruction = EmittedInstruction{}
+	c.InitSymbolTable()
 }
