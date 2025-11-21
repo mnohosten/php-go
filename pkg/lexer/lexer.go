@@ -214,9 +214,10 @@ func (l *Lexer) NextToken() Token {
 	case '<':
 		if l.peekChar() == '<' {
 			ch := l.ch
-			l.readChar()
+			l.readChar() // Now on second <
 			if l.peekChar() == '<' {
-				// Could be heredoc/nowdoc
+				// Could be heredoc/nowdoc (<<<)
+				l.readChar() // Consume second <, now on third <
 				tok = l.scanHeredocOrShift()
 				return tok
 			} else if l.peekChar() == '=' {
@@ -348,7 +349,7 @@ func (l *Lexer) NextToken() Token {
 		return tok
 
 	case '"':
-		tok = l.scanDoubleQuotedString()
+		tok = l.scanStringWithInterpolation()
 		return tok
 
 	case '\'':
@@ -751,9 +752,22 @@ func (l *Lexer) scanPHPTag() Token {
 
 // scanHeredocOrShift determines if <<< is heredoc/nowdoc or left shift
 func (l *Lexer) scanHeredocOrShift() Token {
-	// TODO: Implement heredoc/nowdoc scanning in Phase 1, Task 1.4
-	// For now, just return shift left
-	return l.makeToken(SL, "<<")
+	// We're already on the third '<'
+	// Consume it and check for heredoc label
+	l.readChar() // Move past third '<'
+
+	// Try to scan heredoc/nowdoc label
+	label, isNowdoc := l.scanHeredocLabel()
+
+	if label == "" || !isValidHeredocLabel(label) {
+		// Not a valid heredoc, this is an error case
+		// We already consumed <<<, so we can't easily recover
+		// Return illegal token
+		return l.makeToken(ILLEGAL, "invalid heredoc/nowdoc syntax")
+	}
+
+	// Valid heredoc/nowdoc found
+	return l.scanHeredoc(label, isNowdoc)
 }
 
 // Helper functions
