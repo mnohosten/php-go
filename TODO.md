@@ -113,7 +113,7 @@ requires expression parsing capabilities.
 
 **Files**: `pkg/parser/expr.go` (535 lines), `pkg/ast/ast.go` (enhanced with 15+ expression types)
 **Tests**: `pkg/parser/expr_test.go` (20 test functions, 87.7% coverage)
-**Commit**: Pending
+**Commit**: 9f29b31
 
 **Note**: Implemented complete Pratt parsing with prefix/infix function maps. All operators,
 precedence rules, and expression types working. Closures/arrow functions deferred as they
