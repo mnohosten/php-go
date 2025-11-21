@@ -30,7 +30,7 @@ This is the master task tracking file for the entire PHP-Go project. Each task r
 
 ## Phase 1: Foundation - Lexer, Parser, AST 🔄 IN PROGRESS
 
-**Duration**: 6-7 weeks | **Status**: IN PROGRESS (83% complete, 116/140 hours) | **Effort**: 140 hours
+**Duration**: 6-7 weeks | **Status**: IN PROGRESS (87% complete, 122/140 hours) | **Effort**: 140 hours
 
 **Reference**: `docs/phases/01-foundation/README.md`
 
@@ -208,13 +208,22 @@ All features tested with 25 test cases covering scalar, nullable, union, and com
 - All nodes have String() methods for debugging
 Total: 65+ node types covering all PHP 8.4 syntax
 
-### 1.11 CLI Tool (6h)
-- [ ] Set up CLI framework (1h)
-- [ ] Implement `lex` command (2h)
-- [ ] Implement `parse` command (2h)
-- [ ] Add error reporting (1h)
+### 1.11 CLI Tool (6h) ✅ COMPLETE
+- [x] Set up CLI framework (1h)
+- [x] Implement `lex` command (2h)
+- [x] Implement `parse` command (2h)
+- [x] Add error reporting (1h)
 
-**Files**: `cmd/php-go/main.go`, `cmd/php-go/commands.go`
+**Files**: `cmd/php-go/main.go` (230 lines)
+**Commit**: TBD
+
+**Note**: Implemented complete CLI tool with:
+- Command routing (lex, parse, --version, --help)
+- `php-go lex [--json] <file>` - tokenizes and displays tokens in human-readable table or JSON
+- `php-go parse [--json] <file>` - parses and displays AST in human-readable or JSON format
+- Error handling for file I/O and parser errors with proper exit codes
+- Nice table formatting for human-readable token output
+All commands tested and working correctly.
 
 ### 1.12 Phase 1 Testing (16h)
 - [ ] Unit tests for lexer (4h)
