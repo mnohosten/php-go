@@ -95,7 +95,7 @@ requires expression parsing capabilities.
 
 **Files**: `pkg/parser/parser.go` (293 lines), `pkg/ast/ast.go` (141 lines)
 **Tests**: `pkg/parser/parser_test.go` (350+ lines, 84.5% coverage)
-**Commit**: Pending
+**Commit**: dc001bd
 
 ### 1.6 Expression Parsing (20h) ⚠️ CRITICAL
 - [ ] Parse primary expressions (literals, variables) (2h)
