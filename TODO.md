@@ -9,7 +9,7 @@ This is the master task tracking file for the entire PHP-Go project. Each task r
 - ⏸️ Blocked
 - ⏭️ Deferred
 
-**Progress**: 21% (Phase 0 ✅ Complete, Phase 1 ✅ Complete, Phase 2 🔄 In Progress, 220/1050 hours)
+**Progress**: 22% (Phase 0 ✅ Complete, Phase 1 ✅ Complete, Phase 2 🔄 In Progress, 232/1050 hours)
 
 ---
 
@@ -261,7 +261,7 @@ All commands tested and working correctly.
 
 ## Phase 2: Compiler - AST to Opcodes 🔄
 
-**Duration**: 5-6 weeks | **Status**: IN PROGRESS (36%) | **Effort**: 110 hours (40 hours completed)
+**Duration**: 5-6 weeks | **Status**: IN PROGRESS (47%) | **Effort**: 110 hours (52 hours completed)
 
 **Reference**: `docs/phases/02-compiler/README.md`
 
@@ -354,17 +354,27 @@ pre-registered. Variable compilation working with CV operands for optimized acce
 - CastExpression (int/string/bool casts), InstanceofExpression (type checks)
 All expressions emit appropriate opcodes and handle complex chained expressions correctly.
 
-### 2.6 Statement Compilation (12h)
-- [ ] Compile echo statement (1h)
-- [ ] Compile if/elseif/else (2h)
-- [ ] Compile while loop (1h)
-- [ ] Compile for loop (2h)
-- [ ] Compile foreach loop (2h)
-- [ ] Compile switch statement (2h)
-- [ ] Compile break/continue/return (1h)
-- [ ] Compile try-catch-finally (1h)
+### 2.6 Statement Compilation (12h) ✅ COMPLETE
+- [x] Compile echo statement (1h) - Already done in Task 2.3
+- [x] Compile if/elseif/else (2h)
+- [x] Compile while loop (1h)
+- [x] Compile for loop (2h)
+- [x] Compile foreach loop (2h)
+- [x] Compile switch statement (2h)
+- [x] Compile break/continue/return (1h)
+- [x] Compile try-catch-finally (1h)
 
-**Files**: `pkg/compiler/stmt.go`
+**Files**: `pkg/compiler/compiler.go` (updated, +586 lines), `pkg/compiler/compiler_test.go` (updated, +456 lines)
+**Tests**: 17 new test functions, 78 total tests passing (100% pass rate)
+**Commit**: 3eaaa34
+
+**Note**: Complete control flow statement compilation including:
+- If/elseif/else statements with JMPZ/JMP for conditional branching
+- While/for/foreach loops with break/continue support and jump patching
+- Switch statements with case comparison and fall-through behavior
+- Try-catch-finally with exception handling (CATCH, THROW, FAST_CALL/FAST_RET)
+- Loop context management for nested loops with proper break/continue targeting
+All statement types emit appropriate opcodes and handle complex nested control flow.
 
 ### 2.7 Control Flow & Jumps (10h) ⚠️ IMPORTANT
 - [ ] Implement jump placeholders (2h)
