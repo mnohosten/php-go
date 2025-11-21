@@ -566,4 +566,184 @@ func (ts *ThrowStatement) String() string {
 	return "throw ..."
 }
 
-// Additional node types will be added in Tasks 1.8-1.10
+// Task 1.8: Declaration node types
+
+// Parameter represents a function/method parameter
+type Parameter struct {
+	Name         *Variable
+	Type         Expr // Type hint (can be nil for untyped parameters)
+	DefaultValue Expr // Default value (can be nil)
+	ByRef        bool // Pass by reference (&$param)
+	Variadic     bool // Variadic parameter (...$param)
+}
+
+// FunctionDeclaration represents a function declaration
+type FunctionDeclaration struct {
+	Token      lexer.Token // The FUNCTION token
+	Name       *Identifier
+	Parameters []*Parameter
+	ReturnType Expr // Return type hint (can be nil)
+	Body       *BlockStatement
+	ByRef      bool // Returns reference (&function)
+}
+
+func (fd *FunctionDeclaration) statementNode()       {}
+func (fd *FunctionDeclaration) TokenLiteral() string { return fd.Token.Literal }
+func (fd *FunctionDeclaration) String() string {
+	return "function " + fd.Name.Value + "(...) { ... }"
+}
+
+// ClassDeclaration represents a class declaration
+type ClassDeclaration struct {
+	Token      lexer.Token // The CLASS token
+	Name       *Identifier
+	Extends    *Identifier // Parent class (can be nil)
+	Implements []*Identifier
+	Body       []Stmt // Properties, methods, constants, trait uses
+	Modifiers  []string   // abstract, final
+}
+
+func (cd *ClassDeclaration) statementNode()       {}
+func (cd *ClassDeclaration) TokenLiteral() string { return cd.Token.Literal }
+func (cd *ClassDeclaration) String() string {
+	return "class " + cd.Name.Value + " { ... }"
+}
+
+// PropertyDeclaration represents a class property
+type PropertyDeclaration struct {
+	Token        lexer.Token // The first token (visibility or VAR)
+	Visibility   string      // public, protected, private
+	Static       bool
+	Readonly     bool
+	Type         Expr        // Type hint (can be nil)
+	Properties   []*PropertyItem
+}
+
+type PropertyItem struct {
+	Name         *Variable
+	DefaultValue Expr // Can be nil
+}
+
+func (pd *PropertyDeclaration) statementNode()       {}
+func (pd *PropertyDeclaration) TokenLiteral() string { return pd.Token.Literal }
+func (pd *PropertyDeclaration) String() string {
+	return "property declaration"
+}
+
+// MethodDeclaration represents a class method
+type MethodDeclaration struct {
+	Token      lexer.Token // The FUNCTION token
+	Visibility string      // public, protected, private
+	Static     bool
+	Abstract   bool
+	Final      bool
+	Name       *Identifier
+	Parameters []*Parameter
+	ReturnType Expr // Return type hint (can be nil)
+	Body       *BlockStatement // nil for abstract methods
+	ByRef      bool // Returns reference
+}
+
+func (md *MethodDeclaration) statementNode()       {}
+func (md *MethodDeclaration) TokenLiteral() string { return md.Token.Literal }
+func (md *MethodDeclaration) String() string {
+	return "method " + md.Name.Value + "(...)"
+}
+
+// InterfaceDeclaration represents an interface declaration
+type InterfaceDeclaration struct {
+	Token   lexer.Token // The INTERFACE token
+	Name    *Identifier
+	Extends []*Identifier // Interfaces can extend multiple interfaces
+	Body    []*MethodSignature
+}
+
+type MethodSignature struct {
+	Token      lexer.Token // The FUNCTION token
+	Name       *Identifier
+	Parameters []*Parameter
+	ReturnType Expr // Return type hint (can be nil)
+	ByRef      bool
+}
+
+func (id *InterfaceDeclaration) statementNode()       {}
+func (id *InterfaceDeclaration) TokenLiteral() string { return id.Token.Literal }
+func (id *InterfaceDeclaration) String() string {
+	return "interface " + id.Name.Value + " { ... }"
+}
+
+// TraitDeclaration represents a trait declaration
+type TraitDeclaration struct {
+	Token lexer.Token // The TRAIT token
+	Name  *Identifier
+	Body  []Stmt // Properties and methods
+}
+
+func (td *TraitDeclaration) statementNode()       {}
+func (td *TraitDeclaration) TokenLiteral() string { return td.Token.Literal }
+func (td *TraitDeclaration) String() string {
+	return "trait " + td.Name.Value + " { ... }"
+}
+
+// ClassConstantDeclaration represents class constants
+type ClassConstantDeclaration struct {
+	Token      lexer.Token // The CONST token
+	Visibility string      // public, protected, private (PHP 7.1+)
+	Constants  []*ConstantItem
+}
+
+type ConstantItem struct {
+	Name  *Identifier
+	Value Expr
+}
+
+func (ccd *ClassConstantDeclaration) statementNode()       {}
+func (ccd *ClassConstantDeclaration) TokenLiteral() string { return ccd.Token.Literal }
+func (ccd *ClassConstantDeclaration) String() string {
+	return "const declaration"
+}
+
+// TraitUse represents trait usage in a class
+type TraitUse struct {
+	Token   lexer.Token // The USE token
+	Traits  []*Identifier
+	Adaptations []TraitAdaptation // insteadof, as
+}
+
+type TraitAdaptation interface {
+	Node
+	traitAdaptationNode()
+}
+
+// TraitPrecedence represents trait method precedence (insteadof)
+type TraitPrecedence struct {
+	Token      lexer.Token // The INSTEADOF token
+	TraitName  *Identifier
+	MethodName *Identifier
+	Instead    []*Identifier // Traits to use instead
+}
+
+func (tp *TraitPrecedence) traitAdaptationNode()      {}
+func (tp *TraitPrecedence) TokenLiteral() string      { return tp.Token.Literal }
+func (tp *TraitPrecedence) String() string            { return "trait precedence" }
+
+// TraitAlias represents trait method aliasing
+type TraitAlias struct {
+	Token      lexer.Token // The AS token
+	TraitName  *Identifier // Can be nil
+	MethodName *Identifier
+	Alias      *Identifier // New name
+	Visibility string      // New visibility (can be empty)
+}
+
+func (ta *TraitAlias) traitAdaptationNode()      {}
+func (ta *TraitAlias) TokenLiteral() string      { return ta.Token.Literal }
+func (ta *TraitAlias) String() string            { return "trait alias" }
+
+func (tu *TraitUse) statementNode()       {}
+func (tu *TraitUse) TokenLiteral() string { return tu.Token.Literal }
+func (tu *TraitUse) String() string {
+	return "use traits"
+}
+
+// Additional node types will be added in Tasks 1.9-1.10

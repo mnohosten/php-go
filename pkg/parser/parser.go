@@ -90,9 +90,43 @@ func (p *Parser) parseStatement() ast.Stmt {
 		return p.parseTryStatement()
 	case lexer.THROW:
 		return p.parseThrowStatement()
+	case lexer.FUNCTION:
+		return p.parseFunctionDeclaration()
+	case lexer.CLASS:
+		return p.parseClassDeclaration()
+	case lexer.INTERFACE:
+		return p.parseInterfaceDeclaration()
+	case lexer.TRAIT:
+		return p.parseTraitDeclaration()
+	case lexer.ABSTRACT, lexer.FINAL:
+		// Handle abstract/final class declarations
+		return p.parseClassDeclarationWithModifiers()
 	default:
 		return p.parseExpressionStatement()
 	}
+}
+
+// parseClassDeclarationWithModifiers handles abstract/final class declarations
+func (p *Parser) parseClassDeclarationWithModifiers() *ast.ClassDeclaration {
+	modifiers := []string{}
+
+	// Collect abstract/final modifiers
+	for p.curTokenIs(lexer.ABSTRACT) || p.curTokenIs(lexer.FINAL) {
+		modifiers = append(modifiers, p.curToken.Literal)
+		p.nextToken()
+	}
+
+	// Expect class keyword
+	if !p.curTokenIs(lexer.CLASS) {
+		p.error("expected 'class' after modifier")
+		return nil
+	}
+
+	classDecl := p.parseClassDeclaration()
+	if classDecl != nil {
+		classDecl.Modifiers = modifiers
+	}
+	return classDecl
 }
 
 // parseExpressionStatement parses an expression as a statement
