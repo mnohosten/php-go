@@ -26,6 +26,21 @@ type Compiler struct {
 
 	// previousInstruction tracks the instruction before lastInstruction
 	previousInstruction EmittedInstruction
+
+	// loopStack tracks nested loops for break/continue
+	loopStack []*LoopContext
+}
+
+// LoopContext tracks information about a loop for break/continue
+type LoopContext struct {
+	// startPos is the position to jump to for continue
+	startPos int
+
+	// breakJumps holds positions of break statements to be patched
+	breakJumps []int
+
+	// continueJumps holds positions of continue statements to be patched
+	continueJumps []int
 }
 
 // EmittedInstruction tracks metadata about an emitted instruction
@@ -783,6 +798,530 @@ func (c *Compiler) Compile(node ast.Node) error {
 			vm.TmpVarOperand(2)) // Result in temp 2
 		return nil
 
+	// New Expression (object instantiation)
+	case *ast.NewExpression:
+		// Compile class name
+		if err := c.Compile(node.Class); err != nil {
+			return err
+		}
+		classTemp := vm.TmpVarOperand(0)
+
+		// Compile constructor arguments
+		for _, arg := range node.Arguments {
+			if err := c.Compile(arg); err != nil {
+				return err
+			}
+			// TODO: Push arguments onto stack properly
+		}
+
+		// NEW instruction with argument count in extended value
+		c.EmitWithExtended(vm.OpNew, uint32(node.Token.Pos.Line),
+			uint32(len(node.Arguments)),
+			classTemp,
+			vm.UnusedOperand(),
+			vm.TmpVarOperand(1)) // New object in temp 1
+		return nil
+
+	// ========================================
+	// Control Flow Statements
+	// ========================================
+
+	// If Statement
+	case *ast.IfStatement:
+		// Compile condition
+		if err := c.Compile(node.Condition); err != nil {
+			return err
+		}
+
+		// JMPZ to alternative/end if condition is false
+		jmpzPos := c.EmitWithLine(vm.OpJmpZ, uint32(node.Token.Pos.Line),
+			vm.TmpVarOperand(0),
+			vm.UnusedOperand(),
+			vm.UnusedOperand())
+
+		// Compile consequence block
+		if err := c.Compile(node.Consequence); err != nil {
+			return err
+		}
+
+		// JMP to end (skip elseif/else)
+		jmpEndPos := c.EmitWithLine(vm.OpJmp, uint32(node.Token.Pos.Line),
+			vm.UnusedOperand(),
+			vm.UnusedOperand(),
+			vm.UnusedOperand())
+
+		// Patch JMPZ to point here
+		altStart := c.CurrentPosition()
+		c.ChangeOperand(jmpzPos, 1, vm.ConstOperand(uint32(altStart)))
+
+		// Track positions for elseif jumps
+		elseifJumps := []int{}
+
+		// Compile elseif clauses
+		for _, elseif := range node.ElseIfs {
+			// Compile elseif condition
+			if err := c.Compile(elseif.Condition); err != nil {
+				return err
+			}
+
+			// JMPZ to next elseif/else
+			elseifJmpz := c.EmitWithLine(vm.OpJmpZ, uint32(elseif.Token.Pos.Line),
+				vm.TmpVarOperand(0),
+				vm.UnusedOperand(),
+				vm.UnusedOperand())
+
+			// Compile elseif consequence
+			if err := c.Compile(elseif.Consequence); err != nil {
+				return err
+			}
+
+			// JMP to end
+			elseifJmpEnd := c.EmitWithLine(vm.OpJmp, uint32(elseif.Token.Pos.Line),
+				vm.UnusedOperand(),
+				vm.UnusedOperand(),
+				vm.UnusedOperand())
+			elseifJumps = append(elseifJumps, elseifJmpEnd)
+
+			// Patch JMPZ to next clause
+			nextClause := c.CurrentPosition()
+			c.ChangeOperand(elseifJmpz, 1, vm.ConstOperand(uint32(nextClause)))
+		}
+
+		// Compile alternative (else) if present
+		if node.Alternative != nil {
+			if err := c.Compile(node.Alternative); err != nil {
+				return err
+			}
+		}
+
+		// Patch all jumps to end
+		endPos := c.CurrentPosition()
+		c.ChangeOperand(jmpEndPos, 1, vm.ConstOperand(uint32(endPos)))
+		for _, jmp := range elseifJumps {
+			c.ChangeOperand(jmp, 1, vm.ConstOperand(uint32(endPos)))
+		}
+		return nil
+
+	// While Loop
+	case *ast.WhileStatement:
+		// Remember start position for continue
+		startPos := c.CurrentPosition()
+		c.EnterLoop(startPos)
+
+		// Compile condition
+		if err := c.Compile(node.Condition); err != nil {
+			return err
+		}
+
+		// JMPZ to end if condition is false
+		jmpzPos := c.EmitWithLine(vm.OpJmpZ, uint32(node.Token.Pos.Line),
+			vm.TmpVarOperand(0),
+			vm.UnusedOperand(),
+			vm.UnusedOperand())
+
+		// Compile loop body
+		if err := c.Compile(node.Body); err != nil {
+			return err
+		}
+
+		// JMP back to start
+		c.EmitWithLine(vm.OpJmp, uint32(node.Token.Pos.Line),
+			vm.ConstOperand(uint32(startPos)),
+			vm.UnusedOperand(),
+			vm.UnusedOperand())
+
+		// Patch JMPZ to jump here (end of loop)
+		endPos := c.CurrentPosition()
+		c.ChangeOperand(jmpzPos, 1, vm.ConstOperand(uint32(endPos)))
+
+		// Exit loop and patch break/continue
+		c.ExitLoop(endPos)
+		return nil
+
+	// For Loop
+	case *ast.ForStatement:
+		// Compile initialization expressions
+		for _, init := range node.Init {
+			if err := c.Compile(init); err != nil {
+				return err
+			}
+			// Free the result
+			c.Emit(vm.OpFree, vm.TmpVarOperand(0))
+		}
+
+		// Remember condition start position
+		condStart := c.CurrentPosition()
+		c.EnterLoop(condStart)
+
+		// Compile condition (if any)
+		var jmpzPos int
+		if len(node.Condition) > 0 {
+			// Evaluate all conditions with AND logic
+			for i, cond := range node.Condition {
+				if err := c.Compile(cond); err != nil {
+					return err
+				}
+				if i < len(node.Condition)-1 {
+					// Not the last condition, short-circuit if false
+					jmpz := c.EmitWithLine(vm.OpJmpZ, uint32(node.Token.Pos.Line),
+						vm.TmpVarOperand(0),
+						vm.UnusedOperand(),
+						vm.UnusedOperand())
+					if i == 0 {
+						jmpzPos = jmpz
+					}
+				}
+			}
+			// Final JMPZ to exit loop
+			finalJmpz := c.EmitWithLine(vm.OpJmpZ, uint32(node.Token.Pos.Line),
+				vm.TmpVarOperand(0),
+				vm.UnusedOperand(),
+				vm.UnusedOperand())
+			if len(node.Condition) == 1 {
+				jmpzPos = finalJmpz
+			}
+		}
+
+		// Compile loop body
+		if err := c.Compile(node.Body); err != nil {
+			return err
+		}
+
+		// Remember increment position for continue
+		incrementPos := c.CurrentPosition()
+
+		// Compile increment expressions
+		for _, inc := range node.Increment {
+			if err := c.Compile(inc); err != nil {
+				return err
+			}
+			// Free the result
+			c.Emit(vm.OpFree, vm.TmpVarOperand(0))
+		}
+
+		// JMP back to condition
+		c.EmitWithLine(vm.OpJmp, uint32(node.Token.Pos.Line),
+			vm.ConstOperand(uint32(condStart)),
+			vm.UnusedOperand(),
+			vm.UnusedOperand())
+
+		// Patch condition JMPZ to jump here (end of loop)
+		endPos := c.CurrentPosition()
+		if len(node.Condition) > 0 {
+			c.ChangeOperand(jmpzPos, 1, vm.ConstOperand(uint32(endPos)))
+		}
+
+		// Update loop context to use increment position for continue
+		if loop := c.CurrentLoop(); loop != nil {
+			loop.startPos = incrementPos
+		}
+
+		// Exit loop and patch break/continue
+		c.ExitLoop(endPos)
+		return nil
+
+	// Foreach Loop
+	case *ast.ForeachStatement:
+		// Compile array expression
+		if err := c.Compile(node.Array); err != nil {
+			return err
+		}
+		arrayTemp := vm.TmpVarOperand(0)
+
+		// Choose reset opcode based on by-ref
+		resetOp := vm.OpFeResetR
+		fetchOp := vm.OpFeFetchR
+		if node.ByRef {
+			resetOp = vm.OpFeResetRW
+			fetchOp = vm.OpFeFetchRW
+		}
+
+		// FE_RESET: Initialize foreach iterator
+		c.EmitWithLine(resetOp, uint32(node.Token.Pos.Line),
+			arrayTemp,
+			vm.UnusedOperand(),
+			vm.TmpVarOperand(1)) // Iterator in temp 1
+
+		// Remember start position for continue
+		startPos := c.CurrentPosition()
+		c.EnterLoop(startPos)
+
+		// FE_FETCH: Fetch next element (jumps to end if done)
+		jmpEndPos := c.EmitWithLine(fetchOp, uint32(node.Token.Pos.Line),
+			vm.TmpVarOperand(1), // Iterator
+			vm.UnusedOperand(),
+			vm.TmpVarOperand(2)) // Fetched value
+
+		// Assign key if present
+		if node.Key != nil {
+			if keyVar, ok := node.Key.(*ast.Variable); ok {
+				symbol, ok := c.ResolveVariable(keyVar.Name)
+				if !ok {
+					symbol = c.DefineVariable(keyVar.Name)
+				}
+				// Assign key (stored in temp 3 by FE_FETCH)
+				c.EmitWithLine(vm.OpAssign, uint32(node.Token.Pos.Line),
+					vm.TmpVarOperand(3),
+					vm.UnusedOperand(),
+					vm.CVOperand(uint32(symbol.Index)))
+			}
+		}
+
+		// Assign value
+		if valueVar, ok := node.Value.(*ast.Variable); ok {
+			symbol, ok := c.ResolveVariable(valueVar.Name)
+			if !ok {
+				symbol = c.DefineVariable(valueVar.Name)
+			}
+			// Assign value (in temp 2)
+			c.EmitWithLine(vm.OpAssign, uint32(node.Token.Pos.Line),
+				vm.TmpVarOperand(2),
+				vm.UnusedOperand(),
+				vm.CVOperand(uint32(symbol.Index)))
+		}
+
+		// Compile loop body
+		if err := c.Compile(node.Body); err != nil {
+			return err
+		}
+
+		// JMP back to FE_FETCH
+		c.EmitWithLine(vm.OpJmp, uint32(node.Token.Pos.Line),
+			vm.ConstOperand(uint32(startPos)),
+			vm.UnusedOperand(),
+			vm.UnusedOperand())
+
+		// End position
+		endPos := c.CurrentPosition()
+
+		// Patch FE_FETCH jump
+		c.ChangeOperand(jmpEndPos, 1, vm.ConstOperand(uint32(endPos)))
+
+		// FE_FREE: Clean up iterator
+		c.EmitWithLine(vm.OpFeFree, uint32(node.Token.Pos.Line),
+			vm.TmpVarOperand(1),
+			vm.UnusedOperand(),
+			vm.UnusedOperand())
+
+		// Exit loop and patch break/continue
+		c.ExitLoop(endPos)
+		return nil
+
+	// Break Statement
+	case *ast.BreakStatement:
+		if !c.InLoop() {
+			return fmt.Errorf("break statement outside of loop")
+		}
+
+		// Emit JMP with placeholder (will be patched by ExitLoop)
+		jmpPos := c.EmitWithLine(vm.OpJmp, uint32(node.Token.Pos.Line),
+			vm.UnusedOperand(),
+			vm.UnusedOperand(),
+			vm.UnusedOperand())
+
+		// Add to current loop's break jumps
+		loop := c.CurrentLoop()
+		loop.breakJumps = append(loop.breakJumps, jmpPos)
+		return nil
+
+	// Continue Statement
+	case *ast.ContinueStatement:
+		if !c.InLoop() {
+			return fmt.Errorf("continue statement outside of loop")
+		}
+
+		// Emit JMP with placeholder (will be patched by ExitLoop)
+		jmpPos := c.EmitWithLine(vm.OpJmp, uint32(node.Token.Pos.Line),
+			vm.UnusedOperand(),
+			vm.UnusedOperand(),
+			vm.UnusedOperand())
+
+		// Add to current loop's continue jumps
+		loop := c.CurrentLoop()
+		loop.continueJumps = append(loop.continueJumps, jmpPos)
+		return nil
+
+	// Switch Statement
+	case *ast.SwitchStatement:
+		// Compile switch subject
+		if err := c.Compile(node.Subject); err != nil {
+			return err
+		}
+		subjectTemp := vm.TmpVarOperand(0)
+
+		// Track case jump positions
+		caseJumps := []int{}
+		var defaultCase *ast.SwitchCase
+
+		// Enter switch as a loop context (for break)
+		c.EnterLoop(c.CurrentPosition())
+
+		// Compile each case
+		for _, switchCase := range node.Cases {
+			if switchCase.Value == nil {
+				// Default case
+				defaultCase = switchCase
+				continue
+			}
+
+			// Compile case value
+			if err := c.Compile(switchCase.Value); err != nil {
+				return err
+			}
+			caseValueTemp := vm.TmpVarOperand(1)
+
+			// Compare subject == case value
+			c.EmitWithLine(vm.OpIsEqual, uint32(switchCase.Token.Pos.Line),
+				subjectTemp,
+				caseValueTemp,
+				vm.TmpVarOperand(2)) // Result in temp 2
+
+			// JMPNZ to case body if equal
+			jmpCase := c.EmitWithLine(vm.OpJmpNZ, uint32(switchCase.Token.Pos.Line),
+				vm.TmpVarOperand(2),
+				vm.UnusedOperand(),
+				vm.UnusedOperand())
+			caseJumps = append(caseJumps, jmpCase)
+		}
+
+		// If no match, jump to default or end
+		jmpDefault := c.EmitWithLine(vm.OpJmp, uint32(node.Token.Pos.Line),
+			vm.UnusedOperand(),
+			vm.UnusedOperand(),
+			vm.UnusedOperand())
+
+		// Compile case bodies
+		for i, switchCase := range node.Cases {
+			if switchCase.Value == nil {
+				continue // Skip default, compile it later
+			}
+
+			// Patch jump to this case
+			caseBodyPos := c.CurrentPosition()
+			c.ChangeOperand(caseJumps[i], 1, vm.ConstOperand(uint32(caseBodyPos)))
+
+			// Compile case statements
+			for _, stmt := range switchCase.Body {
+				if err := c.Compile(stmt); err != nil {
+					return err
+				}
+			}
+			// Note: PHP switch has fall-through by default, no automatic jump to end
+		}
+
+		// Compile default case if present
+		if defaultCase != nil {
+			defaultBodyPos := c.CurrentPosition()
+			c.ChangeOperand(jmpDefault, 1, vm.ConstOperand(uint32(defaultBodyPos)))
+
+			for _, stmt := range defaultCase.Body {
+				if err := c.Compile(stmt); err != nil {
+					return err
+				}
+			}
+		} else {
+			// No default case, patch jump to end
+			endPos := c.CurrentPosition()
+			c.ChangeOperand(jmpDefault, 1, vm.ConstOperand(uint32(endPos)))
+		}
+
+		// End of switch
+		endPos := c.CurrentPosition()
+		c.ExitLoop(endPos)
+		return nil
+
+	// Try-Catch-Finally Statement
+	case *ast.TryStatement:
+		// For now, implement simplified version
+		// Full exception handling requires VM support
+
+		// Use FAST_CALL for finally block if present
+		var fastCallPos int
+		if node.Finally != nil {
+			fastCallPos = c.EmitWithLine(vm.OpFastCall, uint32(node.Token.Pos.Line),
+				vm.UnusedOperand(),
+				vm.UnusedOperand(),
+				vm.UnusedOperand())
+		}
+
+		// Compile try block
+		if err := c.Compile(node.Body); err != nil {
+			return err
+		}
+
+		// JMP over catch blocks
+		jmpEndPos := c.EmitWithLine(vm.OpJmp, uint32(node.Token.Pos.Line),
+			vm.UnusedOperand(),
+			vm.UnusedOperand(),
+			vm.UnusedOperand())
+
+		// Compile catch clauses
+		for _, catchClause := range node.CatchClauses {
+			// CATCH opcode
+			c.EmitWithLine(vm.OpCatch, uint32(catchClause.Token.Pos.Line),
+				vm.UnusedOperand(),
+				vm.UnusedOperand(),
+				vm.TmpVarOperand(0)) // Exception in temp 0
+
+			// Assign exception to variable
+			if catchClause.Variable != nil {
+				symbol, ok := c.ResolveVariable(catchClause.Variable.Name)
+				if !ok {
+					symbol = c.DefineVariable(catchClause.Variable.Name)
+				}
+				c.EmitWithLine(vm.OpAssign, uint32(catchClause.Token.Pos.Line),
+					vm.TmpVarOperand(0),
+					vm.UnusedOperand(),
+					vm.CVOperand(uint32(symbol.Index)))
+			}
+
+			// Compile catch block
+			if err := c.Compile(catchClause.Body); err != nil {
+				return err
+			}
+
+			// JMP to finally/end
+			c.EmitWithLine(vm.OpJmp, uint32(catchClause.Token.Pos.Line),
+				vm.UnusedOperand(),
+				vm.UnusedOperand(),
+				vm.UnusedOperand())
+		}
+
+		// End position
+		endPos := c.CurrentPosition()
+		c.ChangeOperand(jmpEndPos, 1, vm.ConstOperand(uint32(endPos)))
+
+		// Compile finally block if present
+		if node.Finally != nil {
+			finallyPos := c.CurrentPosition()
+			c.ChangeOperand(fastCallPos, 1, vm.ConstOperand(uint32(finallyPos)))
+
+			if err := c.Compile(node.Finally); err != nil {
+				return err
+			}
+
+			// FAST_RET to return from finally
+			c.EmitWithLine(vm.OpFastRet, uint32(node.Token.Pos.Line),
+				vm.UnusedOperand(),
+				vm.UnusedOperand(),
+				vm.UnusedOperand())
+		}
+		return nil
+
+	// Throw Statement
+	case *ast.ThrowStatement:
+		// Compile exception expression
+		if err := c.Compile(node.Expression); err != nil {
+			return err
+		}
+
+		// THROW instruction
+		c.EmitWithLine(vm.OpThrow, uint32(node.Token.Pos.Line),
+			vm.TmpVarOperand(0),
+			vm.UnusedOperand(),
+			vm.UnusedOperand())
+		return nil
+
 	default:
 		return fmt.Errorf("compilation not yet implemented for node type: %T", node)
 	}
@@ -804,5 +1343,52 @@ func (c *Compiler) Reset() {
 	c.constantMap = make(map[interface{}]int)
 	c.lastInstruction = EmittedInstruction{}
 	c.previousInstruction = EmittedInstruction{}
+	c.loopStack = []*LoopContext{}
 	c.InitSymbolTable()
+}
+
+// ========================================
+// Loop Context Management
+// ========================================
+
+// EnterLoop pushes a new loop context onto the stack
+func (c *Compiler) EnterLoop(startPos int) {
+	c.loopStack = append(c.loopStack, &LoopContext{
+		startPos:      startPos,
+		breakJumps:    []int{},
+		continueJumps: []int{},
+	})
+}
+
+// ExitLoop pops a loop context and patches all break/continue jumps
+func (c *Compiler) ExitLoop(endPos int) {
+	if len(c.loopStack) == 0 {
+		return
+	}
+
+	loop := c.loopStack[len(c.loopStack)-1]
+	c.loopStack = c.loopStack[:len(c.loopStack)-1]
+
+	// Patch all break jumps to jump to end
+	for _, pos := range loop.breakJumps {
+		c.ChangeOperand(pos, 1, vm.ConstOperand(uint32(endPos)))
+	}
+
+	// Patch all continue jumps to jump to start
+	for _, pos := range loop.continueJumps {
+		c.ChangeOperand(pos, 1, vm.ConstOperand(uint32(loop.startPos)))
+	}
+}
+
+// CurrentLoop returns the current loop context (nil if not in a loop)
+func (c *Compiler) CurrentLoop() *LoopContext {
+	if len(c.loopStack) == 0 {
+		return nil
+	}
+	return c.loopStack[len(c.loopStack)-1]
+}
+
+// InLoop returns true if currently inside a loop
+func (c *Compiler) InLoop() bool {
+	return len(c.loopStack) > 0
 }

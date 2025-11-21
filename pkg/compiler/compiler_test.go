@@ -1029,3 +1029,459 @@ func TestCompileIdentifier(t *testing.T) {
 		t.Error("Expected constant 'MyClass' from identifier")
 	}
 }
+
+// ========================================
+// Task 2.6: Statement Compilation Tests
+// ========================================
+
+func TestCompileIfStatement(t *testing.T) {
+	input := `<?php
+	if ($x > 0) {
+		echo "positive";
+	}
+	`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have JMPZ and JMP opcodes
+	hasJmpz := false
+	hasJmp := false
+
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpJmpZ {
+			hasJmpz = true
+		}
+		if instr.Opcode == vm.OpJmp {
+			hasJmp = true
+		}
+	}
+
+	if !hasJmpz {
+		t.Error("Expected JMPZ instruction for if statement")
+	}
+	if !hasJmp {
+		t.Error("Expected JMP instruction for if statement")
+	}
+}
+
+func TestCompileIfElseStatement(t *testing.T) {
+	input := `<?php
+	if ($x > 0) {
+		echo "positive";
+	} else {
+		echo "non-positive";
+	}
+	`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have JMPZ, JMP, and ECHO opcodes
+	hasJmpz := false
+	hasJmp := false
+	echoCount := 0
+
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpJmpZ {
+			hasJmpz = true
+		}
+		if instr.Opcode == vm.OpJmp {
+			hasJmp = true
+		}
+		if instr.Opcode == vm.OpEcho {
+			echoCount++
+		}
+	}
+
+	if !hasJmpz {
+		t.Error("Expected JMPZ instruction")
+	}
+	if !hasJmp {
+		t.Error("Expected JMP instruction")
+	}
+	if echoCount != 2 {
+		t.Errorf("Expected 2 ECHO instructions, got %d", echoCount)
+	}
+}
+
+func TestCompileWhileLoop(t *testing.T) {
+	input := `<?php
+	while ($i < 10) {
+		$i = $i + 1;
+	}
+	`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have JMPZ and JMP opcodes
+	hasJmpz := false
+	jmpCount := 0
+
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpJmpZ {
+			hasJmpz = true
+		}
+		if instr.Opcode == vm.OpJmp {
+			jmpCount++
+		}
+	}
+
+	if !hasJmpz {
+		t.Error("Expected JMPZ instruction for while loop")
+	}
+	if jmpCount < 1 {
+		t.Error("Expected at least 1 JMP instruction for while loop")
+	}
+}
+
+func TestCompileForLoop(t *testing.T) {
+	input := `<?php
+	for ($i = 0; $i < 10; $i = $i + 1) {
+		echo $i;
+	}
+	`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have JMPZ, JMP, and ECHO opcodes
+	hasJmpz := false
+	jmpCount := 0
+	hasEcho := false
+
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpJmpZ {
+			hasJmpz = true
+		}
+		if instr.Opcode == vm.OpJmp {
+			jmpCount++
+		}
+		if instr.Opcode == vm.OpEcho {
+			hasEcho = true
+		}
+	}
+
+	if !hasJmpz {
+		t.Error("Expected JMPZ instruction for for loop")
+	}
+	if jmpCount < 1 {
+		t.Error("Expected at least 1 JMP instruction for for loop")
+	}
+	if !hasEcho {
+		t.Error("Expected ECHO instruction in for loop body")
+	}
+}
+
+func TestCompileForeachLoop(t *testing.T) {
+	input := `<?php
+	foreach ($arr as $val) {
+		echo $val;
+	}
+	`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have FE_RESET_R, FE_FETCH_R, FE_FREE opcodes
+	hasFeReset := false
+	hasFeFetch := false
+	hasFeFree := false
+
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpFeResetR {
+			hasFeReset = true
+		}
+		if instr.Opcode == vm.OpFeFetchR {
+			hasFeFetch = true
+		}
+		if instr.Opcode == vm.OpFeFree {
+			hasFeFree = true
+		}
+	}
+
+	if !hasFeReset {
+		t.Error("Expected FE_RESET_R instruction")
+	}
+	if !hasFeFetch {
+		t.Error("Expected FE_FETCH_R instruction")
+	}
+	if !hasFeFree {
+		t.Error("Expected FE_FREE instruction")
+	}
+}
+
+func TestCompileForeachWithKey(t *testing.T) {
+	input := `<?php
+	foreach ($arr as $key => $val) {
+		echo $key;
+		echo $val;
+	}
+	`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have FE_RESET_R and multiple ASSIGN opcodes
+	hasFeReset := false
+	assignCount := 0
+
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpFeResetR {
+			hasFeReset = true
+		}
+		if instr.Opcode == vm.OpAssign {
+			assignCount++
+		}
+	}
+
+	if !hasFeReset {
+		t.Error("Expected FE_RESET_R instruction")
+	}
+	if assignCount < 2 {
+		t.Errorf("Expected at least 2 ASSIGN instructions (key and value), got %d", assignCount)
+	}
+}
+
+func TestCompileBreakStatement(t *testing.T) {
+	input := `<?php
+	while (true) {
+		break;
+	}
+	`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have multiple JMP opcodes (loop back and break)
+	jmpCount := 0
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpJmp {
+			jmpCount++
+		}
+	}
+
+	if jmpCount < 2 {
+		t.Errorf("Expected at least 2 JMP instructions (loop and break), got %d", jmpCount)
+	}
+}
+
+func TestCompileContinueStatement(t *testing.T) {
+	input := `<?php
+	while ($i < 10) {
+		if ($i == 5) {
+			continue;
+		}
+		echo $i;
+	}
+	`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have multiple JMP opcodes
+	jmpCount := 0
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpJmp {
+			jmpCount++
+		}
+	}
+
+	if jmpCount < 3 {
+		t.Errorf("Expected at least 3 JMP instructions (if-end, continue, loop), got %d", jmpCount)
+	}
+}
+
+func TestCompileSwitchStatement(t *testing.T) {
+	input := `<?php
+	switch ($x) {
+		case 1:
+			echo "one";
+			break;
+		case 2:
+			echo "two";
+			break;
+		default:
+			echo "other";
+	}
+	`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have IS_EQUAL and JMPNZ opcodes for case comparisons
+	hasIsEqual := false
+	hasJmpnz := false
+
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpIsEqual {
+			hasIsEqual = true
+		}
+		if instr.Opcode == vm.OpJmpNZ {
+			hasJmpnz = true
+		}
+	}
+
+	if !hasIsEqual {
+		t.Error("Expected IS_EQUAL instruction for switch cases")
+	}
+	if !hasJmpnz {
+		t.Error("Expected JMPNZ instruction for switch cases")
+	}
+}
+
+func TestCompileTryCatchStatement(t *testing.T) {
+	input := `<?php
+	try {
+		echo "trying";
+	} catch (Exception $e) {
+		echo "caught";
+	}
+	`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have CATCH opcode
+	hasCatch := false
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpCatch {
+			hasCatch = true
+			break
+		}
+	}
+
+	if !hasCatch {
+		t.Error("Expected CATCH instruction")
+	}
+}
+
+func TestCompileTryCatchFinallyStatement(t *testing.T) {
+	input := `<?php
+	try {
+		echo "trying";
+	} catch (Exception $e) {
+		echo "caught";
+	} finally {
+		echo "finally";
+	}
+	`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have FAST_CALL, CATCH, and FAST_RET opcodes
+	hasFastCall := false
+	hasCatch := false
+	hasFastRet := false
+
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpFastCall {
+			hasFastCall = true
+		}
+		if instr.Opcode == vm.OpCatch {
+			hasCatch = true
+		}
+		if instr.Opcode == vm.OpFastRet {
+			hasFastRet = true
+		}
+	}
+
+	if !hasFastCall {
+		t.Error("Expected FAST_CALL instruction for finally block")
+	}
+	if !hasCatch {
+		t.Error("Expected CATCH instruction")
+	}
+	if !hasFastRet {
+		t.Error("Expected FAST_RET instruction for finally block")
+	}
+}
+
+func TestCompileThrowStatement(t *testing.T) {
+	input := `<?php
+	throw new Exception("error");
+	`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have THROW opcode
+	hasThrow := false
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpThrow {
+			hasThrow = true
+			break
+		}
+	}
+
+	if !hasThrow {
+		t.Error("Expected THROW instruction")
+	}
+}
+
+func TestCompileNestedLoops(t *testing.T) {
+	input := `<?php
+	for ($i = 0; $i < 10; $i = $i + 1) {
+		for ($j = 0; $j < 10; $j = $j + 1) {
+			echo $i;
+			echo $j;
+		}
+	}
+	`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have multiple JMPZ and JMP opcodes for nested loops
+	jmpzCount := 0
+	jmpCount := 0
+
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpJmpZ {
+			jmpzCount++
+		}
+		if instr.Opcode == vm.OpJmp {
+			jmpCount++
+		}
+	}
+
+	if jmpzCount < 2 {
+		t.Errorf("Expected at least 2 JMPZ instructions for nested loops, got %d", jmpzCount)
+	}
+	if jmpCount < 2 {
+		t.Errorf("Expected at least 2 JMP instructions for nested loops, got %d", jmpCount)
+	}
+}
+
+func TestCompileComplexControlFlow(t *testing.T) {
+	input := `<?php
+	if ($x > 0) {
+		for ($i = 0; $i < $x; $i = $i + 1) {
+			if ($i == 5) {
+				break;
+			}
+			echo $i;
+		}
+	} else {
+		echo "negative";
+	}
+	`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have multiple control flow opcodes
+	jmpzCount := 0
+	jmpCount := 0
+	echoCount := 0
+
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpJmpZ {
+			jmpzCount++
+		}
+		if instr.Opcode == vm.OpJmp {
+			jmpCount++
+		}
+		if instr.Opcode == vm.OpEcho {
+			echoCount++
+		}
+	}
+
+	if jmpzCount < 2 {
+		t.Errorf("Expected at least 2 JMPZ instructions, got %d", jmpzCount)
+	}
+	if jmpCount < 3 {
+		t.Errorf("Expected at least 3 JMP instructions, got %d", jmpCount)
+	}
+	if echoCount != 2 {
+		t.Errorf("Expected 2 ECHO instructions, got %d", echoCount)
+	}
+}
