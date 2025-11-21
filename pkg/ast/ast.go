@@ -746,4 +746,56 @@ func (tu *TraitUse) String() string {
 	return "use traits"
 }
 
-// Additional node types will be added in Tasks 1.9-1.10
+// Task 1.9: Type expression node types
+
+// NullableType represents a nullable type (?Type)
+type NullableType struct {
+	Token lexer.Token // The ? token
+	Type  Expr
+}
+
+func (nt *NullableType) expressionNode()      {}
+func (nt *NullableType) TokenLiteral() string { return nt.Token.Literal }
+func (nt *NullableType) String() string {
+	return "?" + nt.Type.String()
+}
+
+// UnionType represents a union type (Type1|Type2|Type3)
+type UnionType struct {
+	Token lexer.Token // The first type token
+	Types []Expr
+}
+
+func (ut *UnionType) expressionNode()      {}
+func (ut *UnionType) TokenLiteral() string { return ut.Token.Literal }
+func (ut *UnionType) String() string {
+	s := ""
+	for i, t := range ut.Types {
+		if i > 0 {
+			s += "|"
+		}
+		s += t.String()
+	}
+	return s
+}
+
+// IntersectionType represents an intersection type (Type1&Type2)
+type IntersectionType struct {
+	Token lexer.Token // The first type token
+	Types []Expr
+}
+
+func (it *IntersectionType) expressionNode()      {}
+func (it *IntersectionType) TokenLiteral() string { return it.Token.Literal }
+func (it *IntersectionType) String() string {
+	s := ""
+	for i, t := range it.Types {
+		if i > 0 {
+			s += "&"
+		}
+		s += t.String()
+	}
+	return s
+}
+
+// Additional node types will be added in Task 1.10

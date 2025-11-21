@@ -1,6 +1,8 @@
 package parser
 
 import (
+	"fmt"
+
 	"github.com/krizos/php-go/pkg/ast"
 	"github.com/krizos/php-go/pkg/lexer"
 )
@@ -106,15 +108,28 @@ func (p *Parser) parseParameter() *ast.Parameter {
 	if !p.curTokenIs(lexer.VARIABLE) && !p.curTokenIs(lexer.BITWISE_AND) {
 		// This is a type hint
 		param.Type = p.parseTypeHint()
+		// At this point, parseTypeHint has parsed the type but hasn't advanced past it
+		// We're still on the last token of the type
 
-		// After type, check for & again
+		// Don't advance yet - check what's next
+		// If next is &, it's part of the parameter syntax (by-reference), not the type
+		// If next is $, we're done with the type
+
+		// Advance to see what's after the type
 		if p.peekTokenIs(lexer.BITWISE_AND) {
-			p.nextToken()
+			// Next is &, which means by-reference parameter
+			p.nextToken() // move to &
 			param.ByRef = true
-		}
-
-		// Expect variable next
-		if !p.expectPeek(lexer.VARIABLE) {
+			// Now advance to the variable
+			if !p.expectPeek(lexer.VARIABLE) {
+				return nil
+			}
+		} else if p.peekTokenIs(lexer.VARIABLE) {
+			// Next is the variable name
+			p.nextToken() // move to variable
+		} else {
+			// Unexpected token after type
+			p.error(fmt.Sprintf("expected variable name or & after type, got %s instead", p.peekToken.Type))
 			return nil
 		}
 	}
@@ -140,26 +155,10 @@ func (p *Parser) parseParameter() *ast.Parameter {
 	return param
 }
 
-// parseTypeHint parses a type hint (simple implementation for Task 1.8)
-// Full type parsing will be in Task 1.9
+// parseTypeHint parses a type hint (now uses comprehensive type parser from types.go)
+// Supports: scalar types, nullable (?Type), union (A|B), intersection (A&B)
 func (p *Parser) parseTypeHint() ast.Expr {
-	// For now, handle simple types and identifiers
-	// Task 1.9 will handle union types, intersection types, nullable types, etc.
-
-	// Check for nullable type (?Type)
-	if p.curTokenIs(lexer.QUESTION) {
-		// This is a nullable type - for now, just parse as prefix
-		// Full implementation in Task 1.9
-		p.nextToken()
-	}
-
-	// Simple type or class name
-	typeIdent := &ast.Identifier{
-		Token: p.curToken,
-		Value: p.curToken.Literal,
-	}
-
-	return typeIdent
+	return p.parseType()
 }
 
 // parseClassDeclaration parses a class declaration
