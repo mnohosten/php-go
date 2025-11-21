@@ -504,6 +504,31 @@ func (c *Compiler) Compile(node ast.Node) error {
 			return nil
 		}
 
+		// Handle property assignment: $obj->prop = value
+		if property, ok := node.Left.(*ast.PropertyExpression); ok {
+			// Value is already compiled (in temp 0)
+			valueTemp := vm.TmpVarOperand(0)
+
+			// Compile the object
+			if err := c.Compile(property.Object); err != nil {
+				return err
+			}
+			objTemp := vm.TmpVarOperand(1)
+
+			// Compile the property (could be identifier or dynamic expression)
+			if err := c.Compile(property.Property); err != nil {
+				return err
+			}
+			propTemp := vm.TmpVarOperand(2)
+
+			// Emit ASSIGN_OBJ instruction
+			c.EmitWithLine(vm.OpAssignObj, uint32(node.Token.Pos.Line),
+				objTemp,   // Object
+				propTemp,  // Property name
+				valueTemp) // Value to assign
+			return nil
+		}
+
 		return fmt.Errorf("assignment to non-variable not yet implemented")
 
 	// Identifier (convert to string constant)
@@ -1402,6 +1427,150 @@ func (c *Compiler) Compile(node ast.Node) error {
 			vm.ConstOperand(uint32(funcEnd)))     // Function end position
 
 		return nil
+
+	// Class Declaration
+	case *ast.ClassDeclaration:
+		// Store class name as constant
+		classNameIdx := c.AddConstant(node.Name.Value)
+
+		// Store parent class name if extends
+		var parentIdx int
+		if node.Extends != nil {
+			parentIdx = c.AddConstant(node.Extends.Value)
+		}
+
+		// Remember class body start position
+		classStart := c.CurrentPosition()
+
+		// Compile class body (properties and methods)
+		for _, stmt := range node.Body {
+			switch decl := stmt.(type) {
+			case *ast.PropertyDeclaration:
+				// Compile property declarations
+				// Properties are initialized when the class is instantiated
+				// For now, we just note their existence
+				for _, prop := range decl.Properties {
+					// Store property name as constant
+					c.AddConstant(prop.Name.Name)
+
+					// If property has default value, compile it
+					if prop.DefaultValue != nil {
+						if err := c.Compile(prop.DefaultValue); err != nil {
+							return err
+						}
+					}
+				}
+
+			case *ast.MethodDeclaration:
+				// Compile method similar to function but in class context
+				methodNameIdx := c.AddConstant(decl.Name.Value)
+
+				// Skip abstract methods (no body)
+				if decl.Abstract || decl.Body == nil {
+					continue
+				}
+
+				methodStart := c.CurrentPosition()
+
+				// Enter new scope for method
+				c.EnterScope()
+
+				// Methods have implicit $this parameter
+				c.DefineVariable("this")
+
+				// Emit RECV opcodes for each parameter
+				for i, param := range decl.Parameters {
+					symbol := c.DefineVariable(param.Name.Name)
+
+					if param.Variadic {
+						c.EmitWithLine(vm.OpRecvVariadic, uint32(decl.Token.Pos.Line),
+							vm.ConstOperand(uint32(i)),
+							vm.UnusedOperand(),
+							vm.CVOperand(uint32(symbol.Index)))
+					} else if param.DefaultValue != nil {
+						if err := c.Compile(param.DefaultValue); err != nil {
+							return err
+						}
+						c.EmitWithLine(vm.OpRecvInit, uint32(decl.Token.Pos.Line),
+							vm.ConstOperand(uint32(i)),
+							vm.TmpVarOperand(0),
+							vm.CVOperand(uint32(symbol.Index)))
+					} else {
+						recvOp := vm.OpRecv
+						if param.ByRef {
+							recvOp = vm.OpSendRef
+						}
+						c.EmitWithLine(recvOp, uint32(decl.Token.Pos.Line),
+							vm.ConstOperand(uint32(i)),
+							vm.UnusedOperand(),
+							vm.CVOperand(uint32(symbol.Index)))
+					}
+				}
+
+				// Compile method body
+				if err := c.Compile(decl.Body); err != nil {
+					return err
+				}
+
+				// Add implicit return if method doesn't end with return
+				if !c.LastInstructionIs(vm.OpReturn) && !c.LastInstructionIs(vm.OpReturnByRef) {
+					c.EmitWithLine(vm.OpReturn, uint32(decl.Token.Pos.Line),
+						vm.UnusedOperand(),
+						vm.UnusedOperand(),
+						vm.UnusedOperand())
+				}
+
+				// Exit method scope
+				c.ExitScope()
+
+				methodEnd := c.CurrentPosition()
+
+				// Store method metadata
+				_ = methodNameIdx
+				_ = methodStart
+				_ = methodEnd
+
+			default:
+				// Other class body elements (constants, trait uses, etc.)
+				if err := c.Compile(stmt); err != nil {
+					return err
+				}
+			}
+		}
+
+		// Class end position
+		classEnd := c.CurrentPosition()
+
+		// DECLARE_CLASS to register the class
+		if node.Extends != nil {
+			// Class with parent - use extended value for parent index
+			c.EmitWithExtended(vm.OpDeclareClass, uint32(node.Token.Pos.Line),
+				uint32(parentIdx), // Parent class name index
+				vm.ConstOperand(uint32(classNameIdx)), // Class name
+				vm.ConstOperand(uint32(classStart)),   // Class start position
+				vm.ConstOperand(uint32(classEnd)))     // Class end position
+		} else {
+			// Class without parent
+			c.EmitWithExtended(vm.OpDeclareClass, uint32(node.Token.Pos.Line),
+				0, // No parent
+				vm.ConstOperand(uint32(classNameIdx)), // Class name
+				vm.ConstOperand(uint32(classStart)),   // Class start position
+				vm.ConstOperand(uint32(classEnd)))     // Class end position
+		}
+
+		return nil
+
+	// Method Declaration (when standalone, though usually part of class)
+	case *ast.MethodDeclaration:
+		// Methods are typically compiled as part of ClassDeclaration
+		// If encountered standalone, treat like a function
+		return fmt.Errorf("standalone method declaration not supported")
+
+	// Property Declaration (when standalone, though usually part of class)
+	case *ast.PropertyDeclaration:
+		// Properties are typically compiled as part of ClassDeclaration
+		// If encountered standalone, it's likely a parse error context
+		return fmt.Errorf("standalone property declaration not supported")
 
 	default:
 		return fmt.Errorf("compilation not yet implemented for node type: %T", node)

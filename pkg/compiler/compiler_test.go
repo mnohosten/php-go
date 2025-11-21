@@ -1819,3 +1819,472 @@ func TestCompileFunctionWithComplexBody(t *testing.T) {
 		t.Errorf("Expected at least 2 RETURN instructions, got %d", returnCount)
 	}
 }
+
+// ========================================
+// Class Compilation Tests
+// ========================================
+
+func TestCompileBasicClass(t *testing.T) {
+	input := `<?php
+class User {
+}
+`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have DECLARE_CLASS opcode
+	hasDeclareClass := false
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpDeclareClass {
+			hasDeclareClass = true
+			break
+		}
+	}
+
+	if !hasDeclareClass {
+		t.Error("Expected DECLARE_CLASS instruction")
+	}
+
+	// Should have "User" in constants
+	hasClassName := false
+	for _, c := range bytecode.Constants {
+		if str, ok := c.(string); ok && str == "User" {
+			hasClassName = true
+			break
+		}
+	}
+
+	if !hasClassName {
+		t.Error("Expected class name 'User' in constants")
+	}
+}
+
+func TestCompileClassWithProperties(t *testing.T) {
+	input := `<?php
+class User {
+    public $name;
+    public $email = "default@example.com";
+    private $password;
+}
+`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have property names in constants
+	propertyNames := []string{"name", "email", "password"}
+	for _, propName := range propertyNames {
+		found := false
+		for _, c := range bytecode.Constants {
+			if str, ok := c.(string); ok && str == propName {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Expected property name '%s' in constants", propName)
+		}
+	}
+
+	// Should have default value "default@example.com" in constants
+	hasDefaultValue := false
+	for _, c := range bytecode.Constants {
+		if str, ok := c.(string); ok && str == "default@example.com" {
+			hasDefaultValue = true
+			break
+		}
+	}
+
+	if !hasDefaultValue {
+		t.Error("Expected default value 'default@example.com' in constants")
+	}
+}
+
+func TestCompileClassWithMethod(t *testing.T) {
+	input := `<?php
+class User {
+    public function getName() {
+        return $this->name;
+    }
+}
+`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have method name "getName" in constants
+	hasMethodName := false
+	for _, c := range bytecode.Constants {
+		if str, ok := c.(string); ok && str == "getName" {
+			hasMethodName = true
+			break
+		}
+	}
+
+	if !hasMethodName {
+		t.Error("Expected method name 'getName' in constants")
+	}
+
+	// Should have RETURN opcode for method
+	hasReturn := false
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpReturn {
+			hasReturn = true
+			break
+		}
+	}
+
+	if !hasReturn {
+		t.Error("Expected RETURN instruction for method")
+	}
+}
+
+func TestCompileClassWithConstructor(t *testing.T) {
+	input := `<?php
+class User {
+    public $name;
+
+    public function __construct($name) {
+        $this->name = $name;
+    }
+}
+`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have constructor name "__construct" in constants
+	hasConstructor := false
+	for _, c := range bytecode.Constants {
+		if str, ok := c.(string); ok && str == "__construct" {
+			hasConstructor = true
+			break
+		}
+	}
+
+	if !hasConstructor {
+		t.Error("Expected constructor name '__construct' in constants")
+	}
+
+	// Should have RECV opcode for parameter
+	hasRecv := false
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpRecv {
+			hasRecv = true
+			break
+		}
+	}
+
+	if !hasRecv {
+		t.Error("Expected RECV instruction for constructor parameter")
+	}
+}
+
+func TestCompileClassWithInheritance(t *testing.T) {
+	input := `<?php
+class Animal {
+    public $name;
+}
+
+class Dog extends Animal {
+    public $breed;
+}
+`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have both class names in constants
+	classNames := []string{"Animal", "Dog"}
+	for _, className := range classNames {
+		found := false
+		for _, c := range bytecode.Constants {
+			if str, ok := c.(string); ok && str == className {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Expected class name '%s' in constants", className)
+		}
+	}
+
+	// Should have two DECLARE_CLASS opcodes
+	declareClassCount := 0
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpDeclareClass {
+			declareClassCount++
+		}
+	}
+
+	if declareClassCount != 2 {
+		t.Errorf("Expected 2 DECLARE_CLASS instructions, got %d", declareClassCount)
+	}
+}
+
+func TestCompileClassWithMultipleMethods(t *testing.T) {
+	input := `<?php
+class Calculator {
+    public function add($a, $b) {
+        return $a + $b;
+    }
+
+    public function subtract($a, $b) {
+        return $a - $b;
+    }
+
+    public function multiply($a, $b) {
+        return $a * $b;
+    }
+}
+`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have all method names in constants
+	methodNames := []string{"add", "subtract", "multiply"}
+	for _, methodName := range methodNames {
+		found := false
+		for _, c := range bytecode.Constants {
+			if str, ok := c.(string); ok && str == methodName {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Expected method name '%s' in constants", methodName)
+		}
+	}
+
+	// Should have RECV opcodes for parameters (2 parameters * 3 methods = 6)
+	recvCount := 0
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpRecv {
+			recvCount++
+		}
+	}
+
+	if recvCount != 6 {
+		t.Errorf("Expected 6 RECV instructions, got %d", recvCount)
+	}
+
+	// Should have RETURN opcodes for methods (3 methods)
+	returnCount := 0
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpReturn {
+			returnCount++
+		}
+	}
+
+	if returnCount != 3 {
+		t.Errorf("Expected 3 RETURN instructions, got %d", returnCount)
+	}
+}
+
+func TestCompileClassWithMethodParameters(t *testing.T) {
+	input := `<?php
+class User {
+    public function greet($name, $greeting = "Hello") {
+        echo $greeting . " " . $name;
+    }
+}
+`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have RECV for required parameter
+	hasRecv := false
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpRecv {
+			hasRecv = true
+			break
+		}
+	}
+
+	if !hasRecv {
+		t.Error("Expected RECV instruction for required parameter")
+	}
+
+	// Should have RECV_INIT for optional parameter
+	hasRecvInit := false
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpRecvInit {
+			hasRecvInit = true
+			break
+		}
+	}
+
+	if !hasRecvInit {
+		t.Error("Expected RECV_INIT instruction for optional parameter")
+	}
+
+	// Should have default value "Hello" in constants
+	hasDefaultValue := false
+	for _, c := range bytecode.Constants {
+		if str, ok := c.(string); ok && str == "Hello" {
+			hasDefaultValue = true
+			break
+		}
+	}
+
+	if !hasDefaultValue {
+		t.Error("Expected default value 'Hello' in constants")
+	}
+}
+
+func TestCompileClassWithComplexBody(t *testing.T) {
+	input := `<?php
+class Account {
+    private $balance = 0;
+
+    public function deposit($amount) {
+        if ($amount > 0) {
+            $this->balance = $this->balance + $amount;
+            return true;
+        }
+        return false;
+    }
+
+    public function getBalance() {
+        return $this->balance;
+    }
+}
+`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have DECLARE_CLASS opcode
+	hasDeclareClass := false
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpDeclareClass {
+			hasDeclareClass = true
+			break
+		}
+	}
+
+	if !hasDeclareClass {
+		t.Error("Expected DECLARE_CLASS instruction")
+	}
+
+	// Should have JMPZ for if statement
+	hasJmpz := false
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpJmpZ {
+			hasJmpz = true
+			break
+		}
+	}
+
+	if !hasJmpz {
+		t.Error("Expected JMPZ instruction for if statement")
+	}
+
+	// Should have multiple RETURN opcodes
+	returnCount := 0
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpReturn {
+			returnCount++
+		}
+	}
+
+	if returnCount < 2 {
+		t.Errorf("Expected at least 2 RETURN instructions, got %d", returnCount)
+	}
+}
+
+func TestCompileMultipleClasses(t *testing.T) {
+	input := `<?php
+class Point {
+    public $x;
+    public $y;
+}
+
+class Circle {
+    public $center;
+    public $radius;
+}
+
+class Rectangle {
+    public $topLeft;
+    public $bottomRight;
+}
+`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have three DECLARE_CLASS opcodes
+	declareClassCount := 0
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpDeclareClass {
+			declareClassCount++
+		}
+	}
+
+	if declareClassCount != 3 {
+		t.Errorf("Expected 3 DECLARE_CLASS instructions, got %d", declareClassCount)
+	}
+
+	// Should have all class names in constants
+	classNames := []string{"Point", "Circle", "Rectangle"}
+	for _, className := range classNames {
+		found := false
+		for _, c := range bytecode.Constants {
+			if str, ok := c.(string); ok && str == className {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Expected class name '%s' in constants", className)
+		}
+	}
+}
+
+func TestCompileClassWithVariadicMethod(t *testing.T) {
+	input := `<?php
+class Logger {
+    public function log($level, ...$messages) {
+        foreach ($messages as $msg) {
+            echo $level . ": " . $msg;
+        }
+    }
+}
+`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have RECV for required parameter
+	hasRecv := false
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpRecv {
+			hasRecv = true
+			break
+		}
+	}
+
+	if !hasRecv {
+		t.Error("Expected RECV instruction for required parameter")
+	}
+
+	// Should have RECV_VARIADIC for variadic parameter
+	hasRecvVariadic := false
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpRecvVariadic {
+			hasRecvVariadic = true
+			break
+		}
+	}
+
+	if !hasRecvVariadic {
+		t.Error("Expected RECV_VARIADIC instruction for variadic parameter")
+	}
+
+	// Should have foreach opcodes
+	hasFeFetch := false
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpFeFetchR || instr.Opcode == vm.OpFeFetchRW {
+			hasFeFetch = true
+			break
+		}
+	}
+
+	if !hasFeFetch {
+		t.Error("Expected FE_FETCH instruction for foreach loop")
+	}
+}
