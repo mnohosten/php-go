@@ -9,7 +9,7 @@ This is the master task tracking file for the entire PHP-Go project. Each task r
 - ⏸️ Blocked
 - ⏭️ Deferred
 
-**Progress**: 15% (Phase 0 ✅ Complete, Phase 1 ✅ Complete, Phase 2 🔄 In Progress, 158/1050 hours)
+**Progress**: 16% (Phase 0 ✅ Complete, Phase 1 ✅ Complete, Phase 2 🔄 In Progress, 164/1050 hours)
 
 ---
 
@@ -261,7 +261,7 @@ All commands tested and working correctly.
 
 ## Phase 2: Compiler - AST to Opcodes 🔄
 
-**Duration**: 5-6 weeks | **Status**: IN PROGRESS (16%) | **Effort**: 110 hours
+**Duration**: 5-6 weeks | **Status**: IN PROGRESS (22%) | **Effort**: 110 hours
 
 **Reference**: `docs/phases/02-compiler/README.md`
 
@@ -314,13 +314,20 @@ EmitWithLine, EmitWithExtended), instruction manipulation, and compilation for l
 arithmetic/comparison/bitwise expressions, echo, and return. Can compile simple PHP programs
 to bytecode. Symbol table support deferred to Task 2.4.
 
-### 2.4 Symbol Tables (6h)
-- [ ] Implement Scope struct (2h)
-- [ ] Variable declaration and lookup (2h)
-- [ ] Scope enter/exit (1h)
-- [ ] Global vs local variables (1h)
+### 2.4 Symbol Tables (6h) ✅ COMPLETE
+- [x] Implement Scope struct (2h)
+- [x] Variable declaration and lookup (2h)
+- [x] Scope enter/exit (1h)
+- [x] Global vs local variables (1h)
 
-**Files**: `pkg/compiler/symbols.go`
+**Files**: `pkg/compiler/symbols.go` (243 lines), `pkg/compiler/symbols_test.go` (577 lines), `pkg/compiler/compiler.go` (updated)
+**Tests**: 23 test functions, comprehensive coverage
+**Commit**: 0c8cf13
+
+**Note**: Complete symbol table system with nested scope support, variable resolution,
+free variables for closures, and full compiler integration. Supports GLOBAL, LOCAL, BUILTIN,
+and FREE scopes. Built-in functions (echo, print, var_dump, isset, empty, count, strlen)
+pre-registered. Variable compilation working with CV operands for optimized access.
 
 ### 2.5 Expression Compilation (16h) ⚠️ CRITICAL
 - [ ] Compile binary expressions (+, -, *, /, etc.) (3h)
