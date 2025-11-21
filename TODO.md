@@ -376,14 +376,20 @@ All expressions emit appropriate opcodes and handle complex chained expressions 
 - Loop context management for nested loops with proper break/continue targeting
 All statement types emit appropriate opcodes and handle complex nested control flow.
 
-### 2.7 Control Flow & Jumps (10h) ⚠️ IMPORTANT
-- [ ] Implement jump placeholders (2h)
-- [ ] Patch jump addresses after compilation (2h)
-- [ ] Track break/continue targets (2h)
-- [ ] Handle nested loops (2h)
-- [ ] Verify all jumps resolved (2h)
+### 2.7 Control Flow & Jumps (10h) ✅ COMPLETE (Integrated into Task 2.6)
+- [x] Implement jump placeholders (2h) - Done in Task 2.6
+- [x] Patch jump addresses after compilation (2h) - Done in Task 2.6
+- [x] Track break/continue targets (2h) - Done in Task 2.6
+- [x] Handle nested loops (2h) - Done in Task 2.6
+- [x] Verify all jumps resolved (2h) - Done in Task 2.6
 
-**Files**: `pkg/compiler/jumps.go`
+**Note**: All jump and control flow functionality was implemented as part of Task 2.6:
+- Jump placeholders: Emit jumps with unresolved operands, patch later
+- Jump patching: ExitLoop() patches all break/continue jumps
+- Break/continue tracking: LoopContext tracks jump positions
+- Nested loops: Loop stack (loopStack) manages nested contexts
+- Jump verification: All jumps are patched before ExitLoop returns
+This task was naturally integrated into statement compilation.
 
 ### 2.8 Function Compilation (10h)
 - [ ] Compile function declarations (2h)
