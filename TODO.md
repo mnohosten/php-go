@@ -419,7 +419,7 @@ Closures deferred until FunctionExpression AST support is added.
 - [x] Compile methods (2h)
 - [x] Compile constructors (1h)
 - [x] Handle inheritance (2h)
-- [ ] Compile static members (2h) - Deferred (not critical for basic class support)
+- [x] Compile static members (2h) - Completed (commit: 54058b4)
 - [ ] Handle interfaces and traits (1h) - Deferred (complex feature, low priority)
 
 **Files**: `pkg/compiler/compiler.go` (+169 lines), `pkg/compiler/compiler_test.go` (+469 lines)
