@@ -441,7 +441,7 @@ Closures deferred until FunctionExpression AST support is added.
 - [x] Constant folding (1 + 2 → 3) (2h)
 - [x] Dead code elimination (2h)
 - [x] Unreachable code detection (2h)
-- [ ] Strength reduction (2h) - Deferred (low priority, requires complex analysis)
+- [x] Strength reduction (2h) - Completed (commit: 4f24e4c)
 
 **Files**: `pkg/compiler/compiler.go` (+260 lines), `pkg/compiler/compiler_test.go` (+410 lines)
 **Tests Added**: 11 new test functions, all 103 tests passing
