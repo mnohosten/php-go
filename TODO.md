@@ -109,7 +109,7 @@ requires expression parsing capabilities.
 - [x] Parse property access (1h)
 - [x] Parse new expressions (1h)
 - [x] Parse instanceof (1h)
-- [ ] Parse closures and arrow functions (2h) - Deferred to Task 1.9
+- [x] Parse closures and arrow functions (2h) - Completed (commit: 7f49042)
 
 **Files**: `pkg/parser/expr.go` (535 lines), `pkg/ast/ast.go` (enhanced with 15+ expression types)
 **Tests**: `pkg/parser/expr_test.go` (20 test functions, 87.7% coverage)
