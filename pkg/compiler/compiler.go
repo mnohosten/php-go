@@ -414,7 +414,13 @@ func (c *Compiler) Compile(node ast.Node) error {
 			}
 		}
 
-		// Normal compilation if not foldable
+		// Optimization: Strength reduction
+		// Replace expensive operations with cheaper equivalents
+		if optimized, err := c.applyStrengthReduction(node); optimized {
+			return err
+		}
+
+		// Normal compilation if not foldable or reducible
 		// Compile left operand
 		if err := c.Compile(node.Left); err != nil {
 			return err
@@ -2335,4 +2341,159 @@ func foldConstantUnaryOp(operand interface{}, operator string) (interface{}, boo
 	}
 
 	return nil, false
+}
+
+// ============================================================================
+// Strength Reduction Optimization
+// ============================================================================
+
+// applyStrengthReduction applies strength reduction optimizations
+// Replaces expensive operations with cheaper equivalents
+// Returns (optimized bool, error)
+func (c *Compiler) applyStrengthReduction(node *ast.InfixExpression) (bool, error) {
+	// Check for multiplication by 0: x * 0 = 0
+	if node.Operator == "*" {
+		if isConstantZero(node.Right) {
+			// Result is always 0
+			constIdx := c.AddConstant(int64(0))
+			c.EmitWithLine(vm.OpQMAssign, uint32(node.Token.Pos.Line),
+				vm.ConstOperand(uint32(constIdx)),
+				vm.UnusedOperand(),
+				vm.TmpVarOperand(0))
+			return true, nil
+		}
+		if isConstantZero(node.Left) {
+			// 0 * x = 0
+			constIdx := c.AddConstant(int64(0))
+			c.EmitWithLine(vm.OpQMAssign, uint32(node.Token.Pos.Line),
+				vm.ConstOperand(uint32(constIdx)),
+				vm.UnusedOperand(),
+				vm.TmpVarOperand(0))
+			return true, nil
+		}
+	}
+
+	// Check for multiplication by 1: x * 1 = x
+	if node.Operator == "*" && isConstantOne(node.Right) {
+		// Just compile the left operand
+		return true, c.Compile(node.Left)
+	}
+	if node.Operator == "*" && isConstantOne(node.Left) {
+		// 1 * x = x
+		return true, c.Compile(node.Right)
+	}
+
+	// Check for addition/subtraction by 0: x + 0 = x, x - 0 = x
+	if (node.Operator == "+" || node.Operator == "-") && isConstantZero(node.Right) {
+		// x + 0 = x, x - 0 = x
+		return true, c.Compile(node.Left)
+	}
+	if node.Operator == "+" && isConstantZero(node.Left) {
+		// 0 + x = x
+		return true, c.Compile(node.Right)
+	}
+
+	// Check for multiplication by power of 2 (can use bit shift)
+	// x * 2 → x << 1, x * 4 → x << 2, etc.
+	if node.Operator == "*" {
+		if powerOf2, shiftAmount := isPowerOfTwo(node.Right); powerOf2 {
+			// Compile left operand
+			if err := c.Compile(node.Left); err != nil {
+				return true, err
+			}
+
+			// Create constant for shift amount
+			shiftIdx := c.AddConstant(int64(shiftAmount))
+
+			// Emit shift left instead of multiply
+			c.EmitWithLine(vm.OpSL, uint32(node.Token.Pos.Line),
+				vm.TmpVarOperand(0),          // Value to shift
+				vm.ConstOperand(uint32(shiftIdx)), // Shift amount
+				vm.TmpVarOperand(0))           // Result
+			return true, nil
+		}
+		if powerOf2, shiftAmount := isPowerOfTwo(node.Left); powerOf2 {
+			// 2 * x → x << 1
+			if err := c.Compile(node.Right); err != nil {
+				return true, err
+			}
+
+			shiftIdx := c.AddConstant(int64(shiftAmount))
+			c.EmitWithLine(vm.OpSL, uint32(node.Token.Pos.Line),
+				vm.TmpVarOperand(0),
+				vm.ConstOperand(uint32(shiftIdx)),
+				vm.TmpVarOperand(0))
+			return true, nil
+		}
+	}
+
+	// Check for division by power of 2 (can use bit shift)
+	// x / 2 → x >> 1, x / 4 → x >> 2, etc.
+	if node.Operator == "/" {
+		if powerOf2, shiftAmount := isPowerOfTwo(node.Right); powerOf2 {
+			// Compile left operand
+			if err := c.Compile(node.Left); err != nil {
+				return true, err
+			}
+
+			// Create constant for shift amount
+			shiftIdx := c.AddConstant(int64(shiftAmount))
+
+			// Emit shift right instead of divide
+			c.EmitWithLine(vm.OpSR, uint32(node.Token.Pos.Line),
+				vm.TmpVarOperand(0),
+				vm.ConstOperand(uint32(shiftIdx)),
+				vm.TmpVarOperand(0))
+			return true, nil
+		}
+	}
+
+	// No optimization applied
+	return false, nil
+}
+
+// isConstantZero checks if an expression is the constant 0
+func isConstantZero(expr ast.Expr) bool {
+	if val, ok := getConstantValue(expr); ok {
+		switch v := val.(type) {
+		case int64:
+			return v == 0
+		case float64:
+			return v == 0.0
+		}
+	}
+	return false
+}
+
+// isConstantOne checks if an expression is the constant 1
+func isConstantOne(expr ast.Expr) bool {
+	if val, ok := getConstantValue(expr); ok {
+		switch v := val.(type) {
+		case int64:
+			return v == 1
+		case float64:
+			return v == 1.0
+		}
+	}
+	return false
+}
+
+// isPowerOfTwo checks if an expression is a constant power of 2
+// Returns (isPowerOf2 bool, shiftAmount int)
+func isPowerOfTwo(expr ast.Expr) (bool, int) {
+	if val, ok := getConstantValue(expr); ok {
+		if i, ok := val.(int64); ok && i > 0 {
+			// Check if it's a power of 2 using bit manipulation
+			// A number is a power of 2 if it has only one bit set
+			if (i & (i - 1)) == 0 {
+				// Calculate shift amount (log2)
+				shiftAmount := 0
+				for n := i; n > 1; n >>= 1 {
+					shiftAmount++
+				}
+				return true, shiftAmount
+			}
+		}
+	}
+	return false, 0
 }
