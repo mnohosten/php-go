@@ -209,7 +209,7 @@ func (v *Value) ToInt() int64 {
 	case TypeResource:
 		// Resources convert to their ID
 		res := v.data.(*Resource)
-		return int64(res.ID)
+		return int64(res.ID())
 	case TypeReference:
 		// Dereference and convert
 		return v.data.(*Value).ToInt()
@@ -247,7 +247,7 @@ func (v *Value) ToFloat() float64 {
 		return 1.0
 	case TypeResource:
 		res := v.data.(*Resource)
-		return float64(res.ID)
+		return float64(res.ID())
 	case TypeReference:
 		return v.data.(*Value).ToFloat()
 	default:
@@ -330,7 +330,7 @@ func (v *Value) ToString() string {
 		return "Object"
 	case TypeResource:
 		res := v.data.(*Resource)
-		return fmt.Sprintf("Resource id #%d", res.ID)
+		return fmt.Sprintf("Resource id #%d", res.ID())
 	case TypeReference:
 		return v.data.(*Value).ToString()
 	default:
@@ -356,6 +356,24 @@ func (v *Value) ToArray() *Array {
 		arr.Set(NewInt(0), v.Copy())
 		return arr
 	}
+}
+
+// ToObject converts value to Object
+// Returns nil if value is not an object
+func (v *Value) ToObject() *Object {
+	if v == nil || v.typ != TypeObject {
+		return nil
+	}
+	return v.data.(*Object)
+}
+
+// ToResource converts value to Resource
+// Returns nil if value is not a resource
+func (v *Value) ToResource() *Resource {
+	if v == nil || v.typ != TypeResource {
+		return nil
+	}
+	return v.data.(*Resource)
 }
 
 // ============================================================================
@@ -601,7 +619,7 @@ func (v *Value) String() string {
 		return "object"
 	case TypeResource:
 		res := v.data.(*Resource)
-		return fmt.Sprintf("resource(%d)", res.ID)
+		return fmt.Sprintf("resource(%d)", res.ID())
 	case TypeReference:
 		return "&" + v.data.(*Value).String()
 	default:

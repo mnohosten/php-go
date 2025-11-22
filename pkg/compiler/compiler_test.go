@@ -1628,8 +1628,8 @@ func TestCompileFunctionWithVariadicParameter(t *testing.T) {
 
 func TestCompileFunctionWithReturnValue(t *testing.T) {
 	input := `<?php
-	function double($x) {
-		return $x * 2;
+	function triple($x) {
+		return $x * 3;
 	}
 	`
 
@@ -3067,7 +3067,7 @@ func TestIntegrationMixedOptimizations(t *testing.T) {
 	input := `<?php
 function test() {
     $a = 1 + 2;  // Should be folded to 3
-    $b = $a * 4;  // Should not be folded (uses variable)
+    $b = $a * 5;  // Should not be folded (uses variable), uses non-power-of-2
     return $b;
     $c = 5;  // Dead code, should be eliminated
 }
@@ -3095,7 +3095,7 @@ function test() {
 		}
 	}
 
-	// Should have MUL opcode (variable operation)
+	// Should have MUL opcode (variable operation with non-power-of-2)
 	hasMul := false
 	for _, instr := range bytecode.Instructions {
 		if instr.Opcode == vm.OpMul {

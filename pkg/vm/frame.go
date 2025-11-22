@@ -2,6 +2,11 @@ package vm
 
 import "github.com/krizos/php-go/pkg/types"
 
+// CallParams holds parameters being collected for a function call
+type CallParams struct {
+	params []*types.Value
+}
+
 // Frame represents a single execution frame (function call)
 type Frame struct {
 	// The function being executed
@@ -18,6 +23,19 @@ type Frame struct {
 
 	// Base pointer (for stack-based operations)
 	bp int
+
+	// Object/class context (for method calls)
+	thisObject    *types.Object     // $this for instance methods
+	currentClass  *types.ClassEntry // Current class context for self/parent
+	calledClass   *types.ClassEntry // Called class for late static binding (static::)
+
+	// Pending method call information (set by OpInitMethodCall)
+	pendingMethod *types.MethodDef // Method to be called
+	pendingObject *types.Object    // Object for instance method calls (nil for static)
+
+	// Pending function call information (set by OpInitFcall)
+	pendingFunction *CompiledFunction // Function to be called
+	pendingParams   *CallParams       // Parameters being collected
 }
 
 // NewFrame creates a new execution frame for a function
@@ -51,6 +69,9 @@ func (f *Frame) getLocal(index int) *types.Value {
 	if val == nil {
 		return types.NewNull()
 	}
+
+	// Debug: log local variable access (disabled)
+	// fmt.Printf("DEBUG getLocal [%s]: index=%d, value=%v, type=%v\n", f.fn.Name, index, val, val.Type())
 
 	return val
 }

@@ -784,59 +784,120 @@ Closures deferred until FunctionExpression AST support is added.
 
 ---
 
-## Phase 5: Object System ⬜
+## Phase 5: Object System 🔄 IN PROGRESS
 
-**Duration**: 7-8 weeks | **Status**: NOT STARTED | **Effort**: 130 hours
+**Duration**: 7-8 weeks | **Status**: IN PROGRESS (52h / 130h completed - 40%) | **Effort**: 130 hours
 
 **Reference**: `docs/phases/05-objects/README.md`
 
-**Dependencies**: Phase 4 complete
+**Dependencies**: Phase 4 complete ✅
 
-### 5.1 Class Structure (10h)
-- [ ] Class struct definition (3h)
-- [ ] Property definitions (2h)
-- [ ] Method definitions (2h)
-- [ ] Class registry (2h)
-- [ ] Constant handling (1h)
+### 5.1 Class Structure (10h) ✅ COMPLETE
+- [x] Class struct definition (3h)
+- [x] Property definitions (2h)
+- [x] Method definitions (2h)
+- [x] Class registry (2h)
+- [x] Constant handling (1h)
 
-**Files**: `pkg/types/class.go`
+**Files**: `pkg/types/object.go` (437 lines)
+**Tests**: `pkg/types/object_test.go` (24 tests, all passing)
+**Commit**: TBD
 
-### 5.2 Object Creation (8h)
-- [ ] Object struct (2h)
-- [ ] OpNew - Create object (2h)
-- [ ] OpInitMethodCall - Method call setup (2h)
-- [ ] Constructor invocation (2h)
+**Note**: Implemented comprehensive ClassEntry structure with full PHP 8.4 OOP support:
+- ClassEntry with all metadata (inheritance, interfaces, traits, properties, methods)
+- PropertyDef with visibility, readonly (PHP 8.1+), hooks (PHP 8.4+)
+- MethodDef with full method metadata
+- InterfaceEntry and TraitEntry for composition
+- Property/method visibility checking (public, protected, private)
+- Constructor promoted properties (PHP 8.0+)
+- Readonly classes (PHP 8.2+)
+- Enum support structures (PHP 8.1+)
 
-**Files**: `pkg/types/object.go`
+### 5.2 Object Creation (8h) ✅ COMPLETE
+- [x] Object struct (2h)
+- [x] OpNew - Create object (2h)
+- [x] OpInitMethodCall - Method call setup (2h)
+- [x] Constructor invocation (2h)
 
-### 5.3 Property Access (10h)
-- [ ] OpFetchObj - Read property (2h)
-- [ ] OpAssignObj - Write property (2h)
-- [ ] Visibility checking (2h)
-- [ ] Static property access (2h)
-- [ ] Dynamic property names (2h)
+**Files**: `pkg/types/object.go`, `pkg/vm/handlers_object.go` (lines 552-650), `pkg/vm/handlers_functions.go` (183 lines)
+**Tests**: `pkg/vm/handlers_method_test.go` (4 OpNew tests), `pkg/vm/handlers_constructor_test.go` (6 tests)
+**Commit**: TBD
 
-**Files**: `pkg/vm/handlers_object.go`
+**Note**: Full object instantiation system:
+- OpNew with abstract/interface checks
+- OpInitMethodCall for instance methods
+- OpInitStaticMethodCall with self/parent/static keyword support
+- Function call mechanism (OpInitFcall, OpSendVal, OpDoFcall, OpDoUcall, OpDoIcall)
+- Constructor automatic invocation with parameter passing
+- Frame management with thisObject, currentClass, calledClass
+- Fixed critical temp var/parameter overlap bug
 
-### 5.4 Method Calls (10h)
-- [ ] Instance method calls (2h)
-- [ ] Static method calls (::) (2h)
-- [ ] Method lookup (2h)
-- [ ] $this binding (2h)
-- [ ] self/parent/static resolution (2h)
+### 5.3 Property Access (10h) ✅ COMPLETE
+- [x] OpFetchObj - Read property (2h)
+- [x] OpAssignObj - Write property (2h)
+- [x] Visibility checking (2h)
+- [x] Static property access (2h)
+- [x] Dynamic property names (2h)
 
-**Files**: `pkg/vm/handlers_method.go`
+**Files**: `pkg/vm/handlers_object.go` (878 lines total, 15 property opcodes)
+**Tests**: `pkg/vm/handlers_object_test.go` (16 tests, all passing)
+**Commit**: TBD
 
-### 5.5 Inheritance (14h) ⚠️ COMPLEX
-- [ ] Class extension (3h)
-- [ ] Method override checking (3h)
-- [ ] Property inheritance (2h)
-- [ ] Parent method calls (parent::) (2h)
-- [ ] Abstract class enforcement (2h)
-- [ ] Final class/method enforcement (2h)
+**Note**: Complete property access implementation:
+- 6 fetch variants (OpFetchObjR/W/RW/Is/FuncArg/Unset)
+- 3 assignment opcodes (OpAssignObj/ObjOp/ObjRef)
+- 4 increment/decrement opcodes (OpPreInc/Dec/PostInc/DecObj)
+- 2 special operations (OpUnsetObj, OpIssetIsemptyPropObj)
+- Full visibility checking with access context
+- Auto-vivification support
 
-**Files**: `pkg/types/inheritance.go`
-**Reference**: `php-src/Zend/zend_inheritance.c` (142KB!)
+### 5.4 Method Calls (10h) ✅ COMPLETE
+- [x] Instance method calls (2h)
+- [x] Static method calls (::) (2h)
+- [x] Method lookup (2h)
+- [x] $this binding (2h)
+- [x] self/parent/static resolution (2h)
+
+**Files**: `pkg/vm/handlers_object.go` (lines 590-878), `pkg/vm/handlers_functions.go`
+**Tests**: `pkg/vm/handlers_method_test.go` (21 tests), `pkg/vm/handlers_constructor_test.go` (6 tests)
+**Commit**: TBD
+
+**Note**: Full method call system:
+- OpInitMethodCall for instance methods with visibility checking
+- OpInitStaticMethodCall with self/parent/static keyword resolution
+- OpDoFcall/OpDoUcall/OpDoIcall execution with frame management
+- OpClone for object cloning with __clone hook support
+- OpInstanceof for type checking with inheritance/interface support
+- OpGetClass and OpFetchThis helpers
+- Function call mechanism with OpSendVal for parameters
+- Proper temp var allocation (after parameters to avoid conflicts)
+
+**Total Tests**: 726 (24 object tests + 16 property tests + 21 method tests + 6 constructor tests + 3 function tests)
+
+### 5.5 Inheritance (14h) ✅ COMPLETE
+- [x] Class extension (3h)
+- [x] Method override checking (3h)
+- [x] Property inheritance (2h)
+- [x] Parent method calls (parent::) (2h)
+- [x] Abstract class enforcement (2h)
+- [x] Final class/method enforcement (2h)
+
+**Files**: `pkg/types/object.go` (+169 lines inheritance code)
+**Tests**: `pkg/types/inheritance_test.go` (11 tests), `pkg/vm/handlers_inheritance_test.go` (6 tests)
+**Commit**: TBD
+
+**Note**: Complete inheritance system with all PHP features:
+- `InheritFrom()` method to copy properties/methods from parent to child
+- Property inheritance (public and protected only, private excluded)
+- Method inheritance with override validation
+- Constructor exclusion (constructors are not inherited)
+- Final class enforcement (cannot extend final classes)
+- Final method enforcement (cannot override final methods)
+- Abstract method tracking with `HasAbstractMethods()`
+- Visibility reduction prevention (cannot make public method protected)
+- parent:: keyword support via existing OpInitStaticMethodCall
+- Multi-level inheritance support (grandparent → parent → child)
+- Constant inheritance
 
 ### 5.6 Interfaces (8h)
 - [ ] Interface definitions (2h)

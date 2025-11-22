@@ -48,13 +48,9 @@ type Closure struct {
 	ReturnByRef     bool                     // Returns by reference
 }
 
-// CompiledClass represents a compiled PHP class
-type CompiledClass struct {
-	Name       string
-	ParentName string
-	Properties map[string]*types.Value
-	Methods    map[string]*CompiledFunction
-}
+// CompiledClass is deprecated - use types.ClassEntry instead
+// Kept for backwards compatibility
+type CompiledClass = types.ClassEntry
 
 // New creates a new virtual machine
 func New() *VM {
@@ -124,6 +120,22 @@ func (vm *VM) run() error {
 			continue
 		}
 
+		// Fetch next instruction
+		instr := frame.fn.Instructions[frame.ip]
+		frame.ip++
+
+		// Dispatch instruction
+		if err := vm.dispatch(frame, instr); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// runFrame executes a single frame until completion
+func (vm *VM) runFrame(frame *Frame) error {
+	for frame.ip < len(frame.fn.Instructions) {
 		// Fetch next instruction
 		instr := frame.fn.Instructions[frame.ip]
 		frame.ip++
@@ -209,6 +221,16 @@ func (vm *VM) dispatch(frame *Frame, instr Instruction) error {
 	// Functions
 	case OpReturn:
 		return vm.opReturn(frame, instr)
+	case OpInitFcall:
+		return vm.opInitFcall(frame, instr)
+	case OpSendVal:
+		return vm.opSendVal(frame, instr)
+	case OpDoFcall:
+		return vm.opDoFcall(frame, instr)
+	case OpDoUcall:
+		return vm.opDoUcall(frame, instr)
+	case OpDoIcall:
+		return vm.opDoIcall(frame, instr)
 
 	// I/O
 	case OpEcho:
@@ -217,12 +239,100 @@ func (vm *VM) dispatch(frame *Frame, instr Instruction) error {
 	// String operations
 	case OpConcat:
 		return vm.opConcat(frame, instr)
+	case OpFastConcat:
+		return vm.opFastConcat(frame, instr)
+
+	// Array operations
+	case OpInitArray:
+		return vm.opInitArray(frame, instr)
+	case OpAddArrayElement:
+		return vm.opAddArrayElement(frame, instr)
+	case OpFetchDimR:
+		return vm.opFetchDimR(frame, instr)
+	case OpFetchDimW:
+		return vm.opFetchDimW(frame, instr)
+	case OpFetchDimRW:
+		return vm.opFetchDimRW(frame, instr)
+	case OpFetchDimIs:
+		return vm.opFetchDimIs(frame, instr)
+	case OpFetchDimFuncArg:
+		return vm.opFetchDimFuncArg(frame, instr)
+	case OpFetchDimUnset:
+		return vm.opFetchDimUnset(frame, instr)
+	case OpAssignDim:
+		return vm.opAssignDim(frame, instr)
+	case OpAssignDimOp:
+		return vm.opAssignDimOp(frame, instr)
+	case OpUnsetDim:
+		return vm.opUnsetDim(frame, instr)
+	case OpIssetIsemptyDimObj:
+		return vm.opIssetIsemptyDimObj(frame, instr)
+	case OpCount:
+		return vm.opCount(frame, instr)
+	case OpInArray:
+		return vm.opInArray(frame, instr)
+	case OpArrayKeyExists:
+		return vm.opArrayKeyExists(frame, instr)
 
 	// Closure operations
 	case OpDeclareLambdaFunction:
 		return vm.opDeclareLambdaFunction(frame, instr)
 	case OpBindLexical:
 		return vm.opBindLexical(frame, instr)
+
+	// Object property operations - Fetch
+	case OpFetchObjR:
+		return vm.opFetchObjR(frame, instr)
+	case OpFetchObjW:
+		return vm.opFetchObjW(frame, instr)
+	case OpFetchObjRW:
+		return vm.opFetchObjRW(frame, instr)
+	case OpFetchObjIs:
+		return vm.opFetchObjIs(frame, instr)
+	case OpFetchObjFuncArg:
+		return vm.opFetchObjFuncArg(frame, instr)
+	case OpFetchObjUnset:
+		return vm.opFetchObjUnset(frame, instr)
+
+	// Object property operations - Assignment
+	case OpAssignObj:
+		return vm.opAssignObj(frame, instr)
+	case OpAssignObjOp:
+		return vm.opAssignObjOp(frame, instr)
+	case OpAssignObjRef:
+		return vm.opAssignObjRef(frame, instr)
+
+	// Object property operations - Unset/Isset
+	case OpUnsetObj:
+		return vm.opUnsetObj(frame, instr)
+	case OpIssetIsemptyPropObj:
+		return vm.opIssetIsemptyPropObj(frame, instr)
+
+	// Object property operations - Increment/Decrement
+	case OpPreIncObj:
+		return vm.opPreIncObj(frame, instr)
+	case OpPreDecObj:
+		return vm.opPreDecObj(frame, instr)
+	case OpPostIncObj:
+		return vm.opPostIncObj(frame, instr)
+	case OpPostDecObj:
+		return vm.opPostDecObj(frame, instr)
+
+	// Object creation and method calls
+	case OpNew:
+		return vm.opNew(frame, instr)
+	case OpInitMethodCall:
+		return vm.opInitMethodCall(frame, instr)
+	case OpInitStaticMethodCall:
+		return vm.opInitStaticMethodCall(frame, instr)
+	case OpClone:
+		return vm.opClone(frame, instr)
+	case OpInstanceof:
+		return vm.opInstanceof(frame, instr)
+	case OpGetClass:
+		return vm.opGetClass(frame, instr)
+	case OpFetchThis:
+		return vm.opFetchThis(frame, instr)
 
 	default:
 		return fmt.Errorf("unknown opcode: %s", instr.Opcode)
@@ -352,11 +462,11 @@ func (vm *VM) getOperandValue(frame *Frame, op Operand) (*types.Value, error) {
 	case OpConst:
 		return vm.GetConstant(int(op.Value))
 	case OpVar, OpCV:
-		// Local variable
+		// Compiled variable (parameters are at the start of locals)
 		return frame.getLocal(int(op.Value)), nil
 	case OpTmpVar:
-		// Temporary variable (on stack)
-		return frame.getLocal(int(op.Value)), nil
+		// Temporary variable (starts after parameters to avoid conflicts)
+		return frame.getLocal(int(op.Value) + frame.fn.NumParams), nil
 	case OpUnused:
 		return types.NewNull(), nil
 	default:
@@ -367,8 +477,13 @@ func (vm *VM) getOperandValue(frame *Frame, op Operand) (*types.Value, error) {
 // setOperandValue sets the value of an operand
 func (vm *VM) setOperandValue(frame *Frame, op Operand, value *types.Value) error {
 	switch op.Type {
-	case OpVar, OpCV, OpTmpVar:
+	case OpVar, OpCV:
+		// Compiled variable (parameters)
 		frame.setLocal(int(op.Value), value)
+		return nil
+	case OpTmpVar:
+		// Temporary variable (starts after parameters)
+		frame.setLocal(int(op.Value)+frame.fn.NumParams, value)
 		return nil
 	case OpUnused:
 		// Do nothing
@@ -431,9 +546,14 @@ func (vm *VM) opDeclareLambdaFunction(frame *Frame, instr Instruction) error {
 	// For now, we'll store it as a PHP object with the closure embedded
 	obj := &types.Object{
 		ClassName:  "Closure",
-		Properties: map[string]*types.Value{
-			"__closure__": {}, // Store actual closure here (hack for now)
+		Properties: map[string]*types.Property{
+			"__closure__": {
+				Value:      types.NewNull(), // Store actual closure here (hack for now)
+				Visibility: types.VisibilityPublic,
+			},
 		},
+		ObjectID:   0, // Will be assigned by nextObjectID()
+		IsDestroyed: false,
 	}
 	closureValue := types.NewObject(obj)
 	frame.setLocal(0, closureValue) // Store in temp var 0

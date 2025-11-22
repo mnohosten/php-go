@@ -735,7 +735,7 @@ func TestToFloat_Resource(t *testing.T) {
 	v := NewResource(res)
 
 	// Should convert to resource ID
-	expected := float64(res.ID)
+	expected := float64(res.ID())
 	if v.ToFloat() != expected {
 		t.Errorf("Resource should convert to ID as float, expected %f, got %f", expected, v.ToFloat())
 	}
@@ -763,7 +763,7 @@ func TestToInt_Resource(t *testing.T) {
 	res := NewResourceHandle("file", nil)
 	v := NewResource(res)
 
-	expected := int64(res.ID)
+	expected := int64(res.ID())
 	if v.ToInt() != expected {
 		t.Errorf("Resource should convert to ID, expected %d, got %d", expected, v.ToInt())
 	}
