@@ -274,9 +274,20 @@ func (c *Compiler) Compile(node ast.Node) error {
 		return nil
 
 	case *ast.BlockStatement:
-		for _, stmt := range node.Statements {
+		for i, stmt := range node.Statements {
 			if err := c.Compile(stmt); err != nil {
 				return err
+			}
+
+			// Optimization: Dead code elimination
+			// Stop compiling after a return statement (code after return is unreachable)
+			if _, isReturn := stmt.(*ast.ReturnStatement); isReturn {
+				// Skip remaining statements in this block
+				if i < len(node.Statements)-1 {
+					// There is unreachable code after the return
+					// For now, we silently skip it (could add a warning in the future)
+					break
+				}
 			}
 		}
 		return nil
@@ -346,6 +357,24 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 	// Infix Expressions (binary operators)
 	case *ast.InfixExpression:
+		// Optimization: Constant folding
+		// If both operands are constant literals, evaluate at compile time
+		if isConstantLiteral(node.Left) && isConstantLiteral(node.Right) {
+			leftVal, _ := getConstantValue(node.Left)
+			rightVal, _ := getConstantValue(node.Right)
+
+			if result, ok := foldConstantBinaryOp(leftVal, rightVal, node.Operator); ok {
+				// Emit a single constant instead of the operation
+				constIdx := c.AddConstant(result)
+				c.EmitWithLine(vm.OpQMAssign, uint32(node.Token.Pos.Line),
+					vm.ConstOperand(uint32(constIdx)),
+					vm.UnusedOperand(),
+					vm.TmpVarOperand(0))
+				return nil
+			}
+		}
+
+		// Normal compilation if not foldable
 		// Compile left operand
 		if err := c.Compile(node.Left); err != nil {
 			return err
@@ -419,6 +448,22 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 	// Prefix Expressions (unary operators)
 	case *ast.PrefixExpression:
+		// Optimization: Constant folding for unary operations
+		if isConstantLiteral(node.Right) {
+			operandVal, _ := getConstantValue(node.Right)
+
+			if result, ok := foldConstantUnaryOp(operandVal, node.Operator); ok {
+				// Emit a single constant instead of the operation
+				constIdx := c.AddConstant(result)
+				c.EmitWithLine(vm.OpQMAssign, uint32(node.Token.Pos.Line),
+					vm.ConstOperand(uint32(constIdx)),
+					vm.UnusedOperand(),
+					vm.TmpVarOperand(0))
+				return nil
+			}
+		}
+
+		// Normal compilation if not foldable
 		// Compile operand
 		if err := c.Compile(node.Right); err != nil {
 			return err
@@ -1641,4 +1686,217 @@ func (c *Compiler) CurrentLoop() *LoopContext {
 // InLoop returns true if currently inside a loop
 func (c *Compiler) InLoop() bool {
 	return len(c.loopStack) > 0
+}
+
+// ========================================
+// Optimization Helpers
+// ========================================
+
+// isConstantLiteral checks if an expression is a constant literal value
+func isConstantLiteral(expr ast.Expr) bool {
+	switch expr.(type) {
+	case *ast.IntegerLiteral, *ast.FloatLiteral, *ast.StringLiteral, *ast.BooleanLiteral, *ast.NullLiteral:
+		return true
+	default:
+		return false
+	}
+}
+
+// getConstantValue extracts the constant value from a literal expression
+func getConstantValue(expr ast.Expr) (interface{}, bool) {
+	switch node := expr.(type) {
+	case *ast.IntegerLiteral:
+		return node.Value, true
+	case *ast.FloatLiteral:
+		return node.Value, true
+	case *ast.StringLiteral:
+		return node.Value, true
+	case *ast.BooleanLiteral:
+		return node.Value, true
+	case *ast.NullLiteral:
+		return nil, true
+	default:
+		return nil, false
+	}
+}
+
+// foldConstantBinaryOp performs constant folding for binary operations
+// Returns (result value, success boolean)
+func foldConstantBinaryOp(left, right interface{}, operator string) (interface{}, bool) {
+	// Arithmetic operations on integers
+	leftInt, leftIsInt := left.(int64)
+	rightInt, rightIsInt := right.(int64)
+	if leftIsInt && rightIsInt {
+		switch operator {
+		case "+":
+			return leftInt + rightInt, true
+		case "-":
+			return leftInt - rightInt, true
+		case "*":
+			return leftInt * rightInt, true
+		case "/":
+			if rightInt == 0 {
+				return nil, false // Don't fold division by zero
+			}
+			return leftInt / rightInt, true
+		case "%":
+			if rightInt == 0 {
+				return nil, false // Don't fold modulo by zero
+			}
+			return leftInt % rightInt, true
+		case "**":
+			// Simple power for small exponents
+			if rightInt >= 0 && rightInt < 100 {
+				result := int64(1)
+				for i := int64(0); i < rightInt; i++ {
+					result *= leftInt
+				}
+				return result, true
+			}
+			return nil, false
+		case "==":
+			return leftInt == rightInt, true
+		case "!=":
+			return leftInt != rightInt, true
+		case "===":
+			return leftInt == rightInt, true
+		case "!==":
+			return leftInt != rightInt, true
+		case "<":
+			return leftInt < rightInt, true
+		case "<=":
+			return leftInt <= rightInt, true
+		case ">":
+			return leftInt > rightInt, true
+		case ">=":
+			return leftInt >= rightInt, true
+		case "|":
+			return leftInt | rightInt, true
+		case "&":
+			return leftInt & rightInt, true
+		case "^":
+			return leftInt ^ rightInt, true
+		case "<<":
+			return leftInt << uint(rightInt), true
+		case ">>":
+			return leftInt >> uint(rightInt), true
+		case "<=>":
+			if leftInt < rightInt {
+				return int64(-1), true
+			} else if leftInt > rightInt {
+				return int64(1), true
+			}
+			return int64(0), true
+		}
+	}
+
+	// Arithmetic operations on floats (or mixed int/float)
+	var leftFloat, rightFloat float64
+	var hasFloat bool
+	if leftIsInt {
+		leftFloat = float64(leftInt)
+		hasFloat = true
+	} else if f, ok := left.(float64); ok {
+		leftFloat = f
+		hasFloat = true
+	}
+	if rightIsInt {
+		rightFloat = float64(rightInt)
+		hasFloat = true
+	} else if f, ok := right.(float64); ok {
+		rightFloat = f
+		hasFloat = true
+	}
+
+	if hasFloat && (leftIsInt || rightIsInt || left != nil && right != nil) {
+		switch operator {
+		case "+":
+			return leftFloat + rightFloat, true
+		case "-":
+			return leftFloat - rightFloat, true
+		case "*":
+			return leftFloat * rightFloat, true
+		case "/":
+			if rightFloat == 0.0 {
+				return nil, false
+			}
+			return leftFloat / rightFloat, true
+		case "<":
+			return leftFloat < rightFloat, true
+		case "<=":
+			return leftFloat <= rightFloat, true
+		case ">":
+			return leftFloat > rightFloat, true
+		case ">=":
+			return leftFloat >= rightFloat, true
+		case "==":
+			return leftFloat == rightFloat, true
+		case "!=":
+			return leftFloat != rightFloat, true
+		}
+	}
+
+	// String concatenation
+	leftStr, leftIsStr := left.(string)
+	rightStr, rightIsStr := right.(string)
+	if leftIsStr && rightIsStr && operator == "." {
+		return leftStr + rightStr, true
+	}
+
+	// Boolean operations
+	leftBool, leftIsBool := left.(bool)
+	rightBool, rightIsBool := right.(bool)
+	if leftIsBool && rightIsBool {
+		switch operator {
+		case "==":
+			return leftBool == rightBool, true
+		case "!=":
+			return leftBool != rightBool, true
+		case "===":
+			return leftBool == rightBool, true
+		case "!==":
+			return leftBool != rightBool, true
+		}
+	}
+
+	return nil, false
+}
+
+// foldConstantUnaryOp performs constant folding for unary operations
+// Returns (result value, success boolean)
+func foldConstantUnaryOp(operand interface{}, operator string) (interface{}, bool) {
+	switch operator {
+	case "!":
+		// Boolean not
+		if b, ok := operand.(bool); ok {
+			return !b, true
+		}
+		// PHP truthiness for other types
+		if operand == nil {
+			return true, true // !null = true
+		}
+		if i, ok := operand.(int64); ok {
+			return i == 0, true // !0 = true, !nonzero = false
+		}
+		if s, ok := operand.(string); ok {
+			return s == "" || s == "0", true // !"" = true, !"0" = true
+		}
+
+	case "-":
+		// Unary minus
+		if i, ok := operand.(int64); ok {
+			return -i, true
+		}
+		if f, ok := operand.(float64); ok {
+			return -f, true
+		}
+
+	case "~":
+		// Bitwise not
+		if i, ok := operand.(int64); ok {
+			return ^i, true
+		}
+	}
+
+	return nil, false
 }

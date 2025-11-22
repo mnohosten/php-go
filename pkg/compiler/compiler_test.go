@@ -335,27 +335,28 @@ func TestCompileInfixExpressions(t *testing.T) {
 		input    string
 		operator vm.Opcode
 	}{
-		{"<?php 1 + 2;", vm.OpAdd},
-		{"<?php 1 - 2;", vm.OpSub},
-		{"<?php 1 * 2;", vm.OpMul},
-		{"<?php 1 / 2;", vm.OpDiv},
-		{"<?php 1 % 2;", vm.OpMod},
-		{"<?php 1 ** 2;", vm.OpPow},
-		{"<?php \"a\" . \"b\";", vm.OpConcat},
-		{"<?php 1 == 2;", vm.OpIsEqual},
-		{"<?php 1 != 2;", vm.OpIsNotEqual},
-		{"<?php 1 === 2;", vm.OpIsIdentical},
-		{"<?php 1 !== 2;", vm.OpIsNotIdentical},
-		{"<?php 1 < 2;", vm.OpIsSmaller},
-		{"<?php 1 <= 2;", vm.OpIsSmallerOrEqual},
-		{"<?php 1 > 2;", vm.OpIsSmaller}, // Swaps operands
-		{"<?php 1 >= 2;", vm.OpIsSmallerOrEqual}, // Swaps operands
-		{"<?php 1 | 2;", vm.OpBWOr},
-		{"<?php 1 & 2;", vm.OpBWAnd},
-		{"<?php 1 ^ 2;", vm.OpBWXor},
-		{"<?php 1 << 2;", vm.OpSL},
-		{"<?php 1 >> 2;", vm.OpSR},
-		{"<?php 1 <=> 2;", vm.OpSpaceship},
+		// Use variables to prevent constant folding
+		{"<?php $a + $b;", vm.OpAdd},
+		{"<?php $a - $b;", vm.OpSub},
+		{"<?php $a * $b;", vm.OpMul},
+		{"<?php $a / $b;", vm.OpDiv},
+		{"<?php $a % $b;", vm.OpMod},
+		{"<?php $a ** $b;", vm.OpPow},
+		{"<?php $a . $b;", vm.OpConcat},
+		{"<?php $a == $b;", vm.OpIsEqual},
+		{"<?php $a != $b;", vm.OpIsNotEqual},
+		{"<?php $a === $b;", vm.OpIsIdentical},
+		{"<?php $a !== $b;", vm.OpIsNotIdentical},
+		{"<?php $a < $b;", vm.OpIsSmaller},
+		{"<?php $a <= $b;", vm.OpIsSmallerOrEqual},
+		{"<?php $a > $b;", vm.OpIsSmaller}, // Swaps operands
+		{"<?php $a >= $b;", vm.OpIsSmallerOrEqual}, // Swaps operands
+		{"<?php $a | $b;", vm.OpBWOr},
+		{"<?php $a & $b;", vm.OpBWAnd},
+		{"<?php $a ^ $b;", vm.OpBWXor},
+		{"<?php $a << $b;", vm.OpSL},
+		{"<?php $a >> $b;", vm.OpSR},
+		{"<?php $a <=> $b;", vm.OpSpaceship},
 	}
 
 	for _, tt := range tests {
@@ -381,9 +382,10 @@ func TestCompilePrefixExpressions(t *testing.T) {
 		input    string
 		operator vm.Opcode
 	}{
-		{"<?php !true;", vm.OpBoolNot},
-		{"<?php -5;", vm.OpSub}, // Unary minus becomes 0 - x
-		{"<?php ~5;", vm.OpBWNot},
+		// Use variables to prevent constant folding
+		{"<?php !$x;", vm.OpBoolNot},
+		{"<?php -$x;", vm.OpSub}, // Unary minus becomes 0 - x
+		{"<?php ~$x;", vm.OpBWNot},
 	}
 
 	for _, tt := range tests {
@@ -558,8 +560,9 @@ func TestCompileSimpleProgram(t *testing.T) {
 }
 
 func TestCompileArithmeticExpression(t *testing.T) {
+	// Use variables to prevent constant folding
 	input := `<?php
-	2 + 3 * 4;
+	$a + $b * $c;
 	`
 
 	bytecode := parseAndCompile(t, input)
@@ -582,11 +585,6 @@ func TestCompileArithmeticExpression(t *testing.T) {
 	}
 	if !hasAdd {
 		t.Error("Expected ADD instruction")
-	}
-
-	// Should have constants 2, 3, 4
-	if len(bytecode.Constants) != 3 {
-		t.Errorf("Expected 3 constants, got %d", len(bytecode.Constants))
 	}
 }
 
@@ -921,8 +919,9 @@ func TestCompileInstanceof(t *testing.T) {
 }
 
 func TestCompileGroupedExpression(t *testing.T) {
+	// Use variables to prevent constant folding
 	input := `<?php
-	$x = (1 + 2) * 3;
+	$x = ($a + $b) * $c;
 	`
 
 	bytecode := parseAndCompile(t, input)
@@ -2286,5 +2285,354 @@ class Logger {
 
 	if !hasFeFetch {
 		t.Error("Expected FE_FETCH instruction for foreach loop")
+	}
+}
+
+// ========================================
+// Optimization Tests
+// ========================================
+
+func TestConstantFoldingArithmetic(t *testing.T) {
+	input := `<?php
+$x = 1 + 2;
+$y = 10 - 5;
+$z = 3 * 4;
+$a = 20 / 4;
+$b = 17 % 5;
+`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Check that constants 3, 5, 12, 5, 2 are in the constant pool
+	expectedConstants := []int64{3, 5, 12, 5, 2}
+	for _, expected := range expectedConstants {
+		found := false
+		for _, c := range bytecode.Constants {
+			if i, ok := c.(int64); ok && i == expected {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Expected folded constant %d in constant pool", expected)
+		}
+	}
+
+	// Check that we don't have ADD, SUB, MUL, DIV, MOD opcodes (they were folded)
+	for _, instr := range bytecode.Instructions {
+		switch instr.Opcode {
+		case vm.OpAdd, vm.OpSub, vm.OpMul, vm.OpDiv, vm.OpMod:
+			t.Errorf("Found arithmetic opcode %s - constant folding didn't work", instr.Opcode)
+		}
+	}
+}
+
+func TestConstantFoldingComparison(t *testing.T) {
+	input := `<?php
+$a = 5 > 3;
+$b = 10 <= 10;
+$c = 5 == 5;
+$d = 5 != 3;
+`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Check that boolean results are in the constant pool
+	hasTrue := false
+	for _, c := range bytecode.Constants {
+		if b, ok := c.(bool); ok && b {
+			hasTrue = true
+			break
+		}
+	}
+
+	if !hasTrue {
+		t.Error("Expected 'true' constant from folded comparisons")
+	}
+
+	// Check that we don't have comparison opcodes (they were folded)
+	for _, instr := range bytecode.Instructions {
+		switch instr.Opcode {
+		case vm.OpIsSmaller, vm.OpIsSmallerOrEqual, vm.OpIsEqual, vm.OpIsNotEqual:
+			t.Errorf("Found comparison opcode %s - constant folding didn't work", instr.Opcode)
+		}
+	}
+}
+
+func TestConstantFoldingBitwise(t *testing.T) {
+	input := `<?php
+$a = 12 | 5;
+$b = 12 & 5;
+$c = 12 ^ 5;
+$d = 8 << 2;
+$e = 32 >> 3;
+`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Check that results are in the constant pool
+	// 12 | 5 = 13, 12 & 5 = 4, 12 ^ 5 = 9, 8 << 2 = 32, 32 >> 3 = 4
+	expectedConstants := []int64{13, 4, 9, 32, 4}
+	for _, expected := range expectedConstants {
+		found := false
+		for _, c := range bytecode.Constants {
+			if i, ok := c.(int64); ok && i == expected {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Expected folded constant %d in constant pool", expected)
+		}
+	}
+
+	// Check that we don't have bitwise opcodes (they were folded)
+	for _, instr := range bytecode.Instructions {
+		switch instr.Opcode {
+		case vm.OpBWOr, vm.OpBWAnd, vm.OpBWXor, vm.OpSL, vm.OpSR:
+			t.Errorf("Found bitwise opcode %s - constant folding didn't work", instr.Opcode)
+		}
+	}
+}
+
+func TestConstantFoldingStringConcat(t *testing.T) {
+	input := `<?php
+$x = "Hello" . " " . "World";
+`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Due to the way InfixExpression works, we can fold pairs
+	// "Hello" . " " will be folded to "Hello "
+	// Then "Hello " . "World" won't be folded in one pass (requires multiple passes)
+	// For now, just check that at least one CONCAT was eliminated
+
+	concatCount := 0
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpConcat {
+			concatCount++
+		}
+	}
+
+	// We should have fewer than 2 CONCAT operations
+	// (original would be 2, but at least one should be folded)
+	if concatCount >= 2 {
+		t.Errorf("Expected fewer CONCAT operations due to folding, got %d", concatCount)
+	}
+}
+
+func TestConstantFoldingUnaryOperations(t *testing.T) {
+	input := `<?php
+$a = !true;
+$b = !false;
+$c = -42;
+$d = ~7;
+`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Check folded constants: !true = false, !false = true, -42 = -42, ~7 = -8
+	expectedValues := map[interface{}]bool{
+		false:   true,
+		true:    true,
+		int64(-42): true,
+		int64(-8):  true,
+	}
+
+	for _, c := range bytecode.Constants {
+		delete(expectedValues, c)
+	}
+
+	if len(expectedValues) > 0 {
+		t.Errorf("Missing expected folded constants: %v", expectedValues)
+	}
+
+	// Check that we don't have BOOL_NOT, BW_NOT opcodes (they were folded)
+	for _, instr := range bytecode.Instructions {
+		switch instr.Opcode {
+		case vm.OpBoolNot, vm.OpBWNot:
+			t.Errorf("Found unary opcode %s - constant folding didn't work", instr.Opcode)
+		}
+	}
+}
+
+func TestConstantFoldingPower(t *testing.T) {
+	input := `<?php
+$a = 2 ** 3;
+$b = 5 ** 2;
+$c = 10 ** 0;
+`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Check folded constants: 2**3 = 8, 5**2 = 25, 10**0 = 1
+	expectedConstants := []int64{8, 25, 1}
+	for _, expected := range expectedConstants {
+		found := false
+		for _, c := range bytecode.Constants {
+			if i, ok := c.(int64); ok && i == expected {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Expected folded constant %d in constant pool", expected)
+		}
+	}
+
+	// Check that we don't have POW opcodes (they were folded)
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpPow {
+			t.Error("Found POW opcode - constant folding didn't work")
+		}
+	}
+}
+
+func TestDeadCodeEliminationAfterReturn(t *testing.T) {
+	input := `<?php
+function test() {
+    $x = 1;
+    return $x;
+    $y = 2;
+    echo $y;
+}
+`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Count variable assignments
+	// We should only have one ASSIGN (for $x), not two
+	// The $y = 2 should be eliminated
+	assignCount := 0
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpAssign {
+			assignCount++
+		}
+	}
+
+	if assignCount > 1 {
+		t.Errorf("Expected dead code elimination to remove assignment after return, got %d assignments", assignCount)
+	}
+
+	// We should not have ECHO opcode (it's after return)
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpEcho {
+			t.Error("Found ECHO opcode after return - dead code elimination didn't work")
+		}
+	}
+}
+
+func TestDeadCodeEliminationMultipleReturns(t *testing.T) {
+	input := `<?php
+function test() {
+    if (true) {
+        return 1;
+        $a = 2;
+    }
+    return 2;
+    $b = 3;
+}
+`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Count variable assignments
+	// Both $a and $b should be eliminated
+	assignCount := 0
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpAssign {
+			assignCount++
+		}
+	}
+
+	if assignCount > 0 {
+		t.Errorf("Expected dead code elimination to remove all assignments after returns, got %d", assignCount)
+	}
+}
+
+func TestNoConstantFoldingWithVariables(t *testing.T) {
+	input := `<?php
+$a = 5;
+$b = $a + 3;
+`
+
+	bytecode := parseAndCompile(t, input)
+
+	// We should have an ADD opcode because $a is a variable
+	hasAdd := false
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpAdd {
+			hasAdd = true
+			break
+		}
+	}
+
+	if !hasAdd {
+		t.Error("Expected ADD opcode for variable + constant")
+	}
+}
+
+func TestConstantFoldingMixedTypes(t *testing.T) {
+	input := `<?php
+$a = 5 + 2.5;
+$b = 10.0 - 3;
+$c = 2 * 1.5;
+`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Check folded float constants: 5 + 2.5 = 7.5, 10.0 - 3 = 7.0, 2 * 1.5 = 3.0
+	expectedConstants := []float64{7.5, 7.0, 3.0}
+	for _, expected := range expectedConstants {
+		found := false
+		for _, c := range bytecode.Constants {
+			if f, ok := c.(float64); ok && f == expected {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Expected folded float constant %f in constant pool", expected)
+		}
+	}
+
+	// Check that we don't have arithmetic opcodes (they were folded)
+	for _, instr := range bytecode.Instructions {
+		switch instr.Opcode {
+		case vm.OpAdd, vm.OpSub, vm.OpMul:
+			t.Errorf("Found arithmetic opcode %s - constant folding didn't work", instr.Opcode)
+		}
+	}
+}
+
+func TestConstantFoldingSpaceship(t *testing.T) {
+	input := `<?php
+$a = 5 <=> 3;
+$b = 3 <=> 5;
+$c = 5 <=> 5;
+`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Check folded constants: 5 <=> 3 = 1, 3 <=> 5 = -1, 5 <=> 5 = 0
+	expectedConstants := []int64{1, -1, 0}
+	for _, expected := range expectedConstants {
+		found := false
+		for _, c := range bytecode.Constants {
+			if i, ok := c.(int64); ok && i == expected {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Expected folded constant %d in constant pool", expected)
+		}
+	}
+
+	// Check that we don't have SPACESHIP opcodes (they were folded)
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpSpaceship {
+			t.Error("Found SPACESHIP opcode - constant folding didn't work")
+		}
 	}
 }
