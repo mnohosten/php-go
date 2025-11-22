@@ -2636,3 +2636,776 @@ $c = 5 <=> 5;
 		}
 	}
 }
+
+// ========================================
+// Helper Method Tests
+// ========================================
+
+func TestInstructionsMethod(t *testing.T) {
+	input := "<?php $x = 1;"
+	bytecode := parseAndCompile(t, input)
+
+	// Should have instructions
+	instructions := bytecode.Instructions
+	if len(instructions) == 0 {
+		t.Error("Expected non-empty instructions after compilation")
+	}
+}
+
+func TestIsVariableDefined(t *testing.T) {
+	c := New()
+
+	// Variable not defined initially
+	if c.IsVariableDefined("x") {
+		t.Error("Variable 'x' should not be defined initially")
+	}
+
+	// Define variable
+	c.DefineVariable("x")
+
+	// Now it should be defined
+	if !c.IsVariableDefined("x") {
+		t.Error("Variable 'x' should be defined after DefineVariable")
+	}
+
+	// Other variable still not defined
+	if c.IsVariableDefined("y") {
+		t.Error("Variable 'y' should not be defined")
+	}
+}
+
+func TestSymbolString(t *testing.T) {
+	sym := &Symbol{
+		Name:  "testVar",
+		Scope: LocalScope,
+		Index: 5,
+	}
+
+	str := sym.String()
+	if str == "" {
+		t.Error("Symbol.String() should return non-empty string")
+	}
+
+	// Should contain the name
+	if len(str) < len("testVar") {
+		t.Error("Symbol.String() should contain variable name")
+	}
+}
+
+func TestSymbolTableString(t *testing.T) {
+	st := NewSymbolTable()
+	st.Define("x")
+	st.Define("y")
+
+	str := st.String()
+	if str == "" {
+		t.Error("SymbolTable.String() should return non-empty string")
+	}
+}
+
+// ========================================
+// Optimization Edge Case Tests
+// ========================================
+
+func TestConstantFoldingBooleanLiterals(t *testing.T) {
+	input := `<?php
+$c = true == true;
+$d = false != true;
+$e = true === false;
+`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Check for boolean constants (true from true==true, true from false!=true, false from true===false)
+	hasTrue := false
+	hasFalse := false
+	for _, c := range bytecode.Constants {
+		if b, ok := c.(bool); ok {
+			if b {
+				hasTrue = true
+			} else {
+				hasFalse = true
+			}
+		}
+	}
+
+	if !hasTrue {
+		t.Error("Expected 'true' constant in bytecode")
+	}
+	if !hasFalse {
+		t.Error("Expected 'false' constant in bytecode")
+	}
+}
+
+func TestConstantFoldingNullOperations(t *testing.T) {
+	input := `<?php
+$a = !null;
+`
+
+	bytecode := parseAndCompile(t, input)
+
+	// !null should be folded to true
+	hasTrue := false
+	for _, c := range bytecode.Constants {
+		if b, ok := c.(bool); ok && b {
+			hasTrue = true
+			break
+		}
+	}
+
+	if !hasTrue {
+		t.Error("Expected 'true' constant from !null")
+	}
+
+	// Should NOT have BOOL_NOT opcode (it was folded)
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpBoolNot {
+			t.Error("Found BOOL_NOT opcode - constant folding didn't work for !null")
+		}
+	}
+}
+
+func TestConstantFoldingDivisionByZero(t *testing.T) {
+	// Division by zero should NOT be folded (would cause runtime error)
+	input := `<?php
+$x = 10 / 0;
+`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have DIV opcode (not folded)
+	hasDiv := false
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpDiv {
+			hasDiv = true
+			break
+		}
+	}
+
+	if !hasDiv {
+		t.Error("Division by zero should not be folded, expected DIV opcode")
+	}
+}
+
+func TestConstantFoldingModuloByZero(t *testing.T) {
+	// Modulo by zero should NOT be folded
+	input := `<?php
+$x = 10 % 0;
+`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have MOD opcode (not folded)
+	hasMod := false
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpMod {
+			hasMod = true
+			break
+		}
+	}
+
+	if !hasMod {
+		t.Error("Modulo by zero should not be folded, expected MOD opcode")
+	}
+}
+
+func TestConstantFoldingFloatDivision(t *testing.T) {
+	input := `<?php
+$x = 10.0 / 0.0;
+`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Division by float zero should NOT be folded
+	hasDiv := false
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpDiv {
+			hasDiv = true
+			break
+		}
+	}
+
+	if !hasDiv {
+		t.Error("Float division by zero should not be folded, expected DIV opcode")
+	}
+}
+
+func TestConstantFoldingLargePower(t *testing.T) {
+	// Large power should NOT be folded (>= 100)
+	input := `<?php
+$x = 2 ** 100;
+`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have POW opcode (not folded)
+	hasPow := false
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpPow {
+			hasPow = true
+			break
+		}
+	}
+
+	if !hasPow {
+		t.Error("Large power exponent should not be folded, expected POW opcode")
+	}
+}
+
+func TestConstantFoldingNegativePower(t *testing.T) {
+	// Negative power should NOT be folded
+	input := `<?php
+$x = 2 ** -3;
+`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have POW opcode (not folded)
+	hasPow := false
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpPow {
+			hasPow = true
+			break
+		}
+	}
+
+	if !hasPow {
+		t.Error("Negative power exponent should not be folded, expected POW opcode")
+	}
+}
+
+// ========================================
+// Integration Tests
+// ========================================
+
+func TestIntegrationComplexControlFlow(t *testing.T) {
+	input := `<?php
+function factorial($n) {
+    if ($n <= 1) {
+        return 1;
+    }
+    return $n * factorial($n - 1);
+}
+
+$result = factorial(5);
+`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have function declaration
+	hasDeclareFunction := false
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpDeclareFunction {
+			hasDeclareFunction = true
+			break
+		}
+	}
+
+	if !hasDeclareFunction {
+		t.Error("Expected DECLARE_FUNCTION opcode")
+	}
+
+	// Should have "factorial" constant
+	hasFactorial := false
+	for _, c := range bytecode.Constants {
+		if str, ok := c.(string); ok && str == "factorial" {
+			hasFactorial = true
+			break
+		}
+	}
+
+	if !hasFactorial {
+		t.Error("Expected 'factorial' constant")
+	}
+}
+
+func TestIntegrationNestedClassesAndMethods(t *testing.T) {
+	input := `<?php
+class Outer {
+    public $value = 10;
+
+    public function getValue() {
+        return $this->value;
+    }
+
+    public function setValue($v) {
+        $this->value = $v;
+    }
+}
+
+class Inner extends Outer {
+    public function doubleValue() {
+        return $this->getValue() * 2;
+    }
+}
+
+$obj = new Inner();
+$obj->setValue(20);
+$result = $obj->doubleValue();
+`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have both class declarations
+	declareClassCount := 0
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpDeclareClass {
+			declareClassCount++
+		}
+	}
+
+	if declareClassCount != 2 {
+		t.Errorf("Expected 2 DECLARE_CLASS opcodes, got %d", declareClassCount)
+	}
+
+	// Should have class names
+	classNames := []string{"Outer", "Inner"}
+	for _, className := range classNames {
+		found := false
+		for _, c := range bytecode.Constants {
+			if str, ok := c.(string); ok && str == className {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Expected class name '%s' in constants", className)
+		}
+	}
+}
+
+func TestIntegrationLoopsWithBreakAndContinue(t *testing.T) {
+	input := `<?php
+$i = 0;
+while ($i < 10) {
+    if ($i == 5) {
+        break;
+    }
+    if ($i % 2 == 0) {
+        continue;
+    }
+    echo $i;
+    $i = $i + 1;
+}
+`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have JMP opcodes for break/continue
+	hasJmp := false
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpJmp {
+			hasJmp = true
+			break
+		}
+	}
+
+	if !hasJmp {
+		t.Error("Expected JMP opcode for break/continue")
+	}
+}
+
+func TestIntegrationTryCatchFinally(t *testing.T) {
+	input := `<?php
+try {
+    $x = 10 / $y;
+} catch (Exception $e) {
+    echo "Error: " . $e;
+} finally {
+    echo "Done";
+}
+`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have CATCH opcode
+	hasCatch := false
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpCatch {
+			hasCatch = true
+			break
+		}
+	}
+
+	if !hasCatch {
+		t.Error("Expected CATCH opcode")
+	}
+}
+
+func TestIntegrationArrayManipulation(t *testing.T) {
+	input := `<?php
+$arr = [1, 2, 3];
+$x = $arr[0];
+$arr2 = ["key" => "value", "num" => 42];
+$y = $arr2["key"];
+`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have array operations
+	hasInitArray := false
+	hasFetchDim := false
+
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpInitArray {
+			hasInitArray = true
+		}
+		if instr.Opcode == vm.OpFetchDimR {
+			hasFetchDim = true
+		}
+	}
+
+	if !hasInitArray {
+		t.Error("Expected INIT_ARRAY opcode")
+	}
+	if !hasFetchDim {
+		t.Error("Expected FETCH_DIM_R opcode")
+	}
+}
+
+func TestIntegrationMixedOptimizations(t *testing.T) {
+	input := `<?php
+function test() {
+    $a = 1 + 2;  // Should be folded to 3
+    $b = $a * 4;  // Should not be folded (uses variable)
+    return $b;
+    $c = 5;  // Dead code, should be eliminated
+}
+`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have constant 3 (from 1+2 folding)
+	hasThree := false
+	for _, c := range bytecode.Constants {
+		if i, ok := c.(int64); ok && i == 3 {
+			hasThree = true
+			break
+		}
+	}
+
+	if !hasThree {
+		t.Error("Expected constant 3 from folded 1+2")
+	}
+
+	// Should NOT have ADD opcode (it was folded)
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpAdd {
+			t.Error("Found ADD opcode - constant folding didn't work")
+		}
+	}
+
+	// Should have MUL opcode (variable operation)
+	hasMul := false
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpMul {
+			hasMul = true
+			break
+		}
+	}
+
+	if !hasMul {
+		t.Error("Expected MUL opcode for variable multiplication")
+	}
+}
+
+// ========================================
+// Additional Edge Case Tests for Coverage
+// ========================================
+
+func TestConstantFoldingStringTruthiness(t *testing.T) {
+	input := `<?php
+$a = !"";
+$b = !"0";
+$c = !"hello";
+`
+
+	bytecode := parseAndCompile(t, input)
+
+	// !"" and !"0" should be folded to true
+	// !"hello" should be folded to false
+	hasTrue := false
+	hasFalse := false
+	for _, c := range bytecode.Constants {
+		if b, ok := c.(bool); ok {
+			if b {
+				hasTrue = true
+			} else {
+				hasFalse = true
+			}
+		}
+	}
+
+	if !hasTrue {
+		t.Error("Expected 'true' from !'' and !'0'")
+	}
+	if !hasFalse {
+		t.Error("Expected 'false' from !'hello'")
+	}
+}
+
+func TestConstantFoldingIntTruthiness(t *testing.T) {
+	input := `<?php
+$a = !0;
+$b = !1;
+$c = !42;
+`
+
+	bytecode := parseAndCompile(t, input)
+
+	// !0 should be folded to true
+	// !1 and !42 should be folded to false
+	hasTrue := false
+	hasFalse := false
+	for _, c := range bytecode.Constants {
+		if b, ok := c.(bool); ok {
+			if b {
+				hasTrue = true
+			} else {
+				hasFalse = true
+			}
+		}
+	}
+
+	if !hasTrue {
+		t.Error("Expected 'true' from !0")
+	}
+	if !hasFalse {
+		t.Error("Expected 'false' from !1 or !42")
+	}
+}
+
+func TestConstantFoldingUnaryMinusFloat(t *testing.T) {
+	input := `<?php
+$a = -3.14;
+$b = -0.5;
+`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Should have negative float constants
+	hasNegativePi := false
+	for _, c := range bytecode.Constants {
+		if f, ok := c.(float64); ok {
+			if f < -3.0 && f > -3.2 {
+				hasNegativePi = true
+				break
+			}
+		}
+	}
+
+	if !hasNegativePi {
+		t.Error("Expected -3.14 constant")
+	}
+
+	// Should NOT have SUB opcode for float negation (should be folded)
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpSub {
+			t.Error("Found SUB opcode - unary minus should be folded for float literal")
+		}
+	}
+}
+
+func TestCompilerResetMethod(t *testing.T) {
+	input := "<?php $x = 1 + 2;"
+	bytecode := parseAndCompile(t, input)
+
+	// Should have instructions and constants
+	if len(bytecode.Instructions) == 0 {
+		t.Error("Expected instructions after compilation")
+	}
+	if len(bytecode.Constants) == 0 {
+		t.Error("Expected constants after compilation")
+	}
+
+	// Create new compiler and compile again (testing reset implicitly)
+	c := New()
+	p := parser.New(lexer.New(input, "test"))
+	program := p.ParseProgram()
+	if len(p.Errors()) > 0 {
+		t.Fatalf("Parse errors: %v", p.Errors())
+	}
+
+	c.Compile(program)
+
+	// Should have instructions
+	if len(c.Instructions()) == 0 {
+		t.Error("Expected instructions")
+	}
+
+	// Reset and verify
+	c.Reset()
+
+	if len(c.Instructions()) != 0 {
+		t.Error("Expected empty instructions after reset")
+	}
+	if len(c.Constants()) != 0 {
+		t.Error("Expected empty constants after reset")
+	}
+}
+
+func TestChangeOperandMethod(t *testing.T) {
+	c := New()
+
+	// Emit an instruction
+	pos := c.Emit(vm.OpJmp, vm.ConstOperand(999), vm.UnusedOperand(), vm.UnusedOperand())
+
+	// Change Op1 (operand number 1)
+	c.ChangeOperand(pos, 1, vm.ConstOperand(123))
+
+	// Verify the change
+	instr := c.Instructions()[pos]
+	if instr.Op1.Type != vm.OpConst || instr.Op1.Value != 123 {
+		t.Errorf("ChangeOperand didn't work correctly: Op1.Type=%v, Op1.Value=%v", instr.Op1.Type, instr.Op1.Value)
+	}
+}
+
+func TestRemoveLastInstructionMethod(t *testing.T) {
+	c := New()
+
+	// Emit two instructions
+	c.Emit(vm.OpEcho, vm.TmpVarOperand(0))
+	initialLen := len(c.Instructions())
+
+	c.Emit(vm.OpEcho, vm.TmpVarOperand(1))
+	afterSecondLen := len(c.Instructions())
+
+	if afterSecondLen <= initialLen {
+		t.Error("Second instruction wasn't added")
+	}
+
+	// Remove last instruction
+	c.RemoveLastInstruction()
+
+	// Length should be back to initial
+	if len(c.Instructions()) != initialLen {
+		t.Errorf("RemoveLastInstruction didn't work: expected %d, got %d", initialLen, len(c.Instructions()))
+	}
+}
+
+func TestCurrentLoopMethod(t *testing.T) {
+	c := New()
+
+	// Not in a loop initially
+	if c.CurrentLoop() != nil {
+		t.Error("CurrentLoop should return nil when not in a loop")
+	}
+
+	// Enter a loop
+	c.EnterLoop(0)
+
+	// Now should have a current loop
+	if c.CurrentLoop() == nil {
+		t.Error("CurrentLoop should return a loop context when in a loop")
+	}
+
+	// Exit the loop
+	c.ExitLoop(10)
+
+	// Should be nil again
+	if c.CurrentLoop() != nil {
+		t.Error("CurrentLoop should return nil after exiting loop")
+	}
+}
+
+func TestConstantFoldingIdenticalOperators(t *testing.T) {
+	input := `<?php
+$a = 5 === 5;
+$b = 5 !== 5;
+$c = 10 === 10;
+`
+
+	bytecode := parseAndCompile(t, input)
+
+	// 5 === 5 and 10 === 10 should be folded to true
+	// 5 !== 5 should be folded to false
+	hasTrue := false
+	hasFalse := false
+	for _, c := range bytecode.Constants {
+		if b, ok := c.(bool); ok {
+			if b {
+				hasTrue = true
+			} else {
+				hasFalse = true
+			}
+		}
+	}
+
+	if !hasTrue {
+		t.Error("Expected 'true' constant from === comparisons")
+	}
+	if !hasFalse {
+		t.Error("Expected 'false' constant from !== comparison")
+	}
+}
+
+func TestConstantFoldingFloatComparison(t *testing.T) {
+	input := `<?php
+$a = 3.14 > 2.71;
+$b = 1.5 <= 2.5;
+$c = 10.0 == 10.0;
+$d = 5.5 != 5.5;
+`
+
+	bytecode := parseAndCompile(t, input)
+
+	// All comparisons should be folded to boolean constants
+	hasTrue := false
+	hasFalse := false
+	for _, c := range bytecode.Constants {
+		if b, ok := c.(bool); ok {
+			if b {
+				hasTrue = true
+			} else {
+				hasFalse = true
+			}
+		}
+	}
+
+	if !hasTrue {
+		t.Error("Expected 'true' constants from float comparisons")
+	}
+	if !hasFalse {
+		t.Error("Expected 'false' constant from 5.5 != 5.5")
+	}
+}
+
+func TestGetConstantMethod(t *testing.T) {
+	c := New()
+
+	// Add some constants
+	idx1 := c.AddConstant(int64(42))
+	idx2 := c.AddConstant("hello")
+	idx3 := c.AddConstant(true)
+
+	// Retrieve and verify
+	val1, err1 := c.GetConstant(idx1)
+	if err1 != nil {
+		t.Errorf("GetConstant error: %v", err1)
+	}
+	if val1 != int64(42) {
+		t.Errorf("Expected int64(42), got %v", val1)
+	}
+
+	val2, err2 := c.GetConstant(idx2)
+	if err2 != nil {
+		t.Errorf("GetConstant error: %v", err2)
+	}
+	if val2 != "hello" {
+		t.Errorf("Expected 'hello', got %v", val2)
+	}
+
+	val3, err3 := c.GetConstant(idx3)
+	if err3 != nil {
+		t.Errorf("GetConstant error: %v", err3)
+	}
+	if val3 != true {
+		t.Errorf("Expected true, got %v", val3)
+	}
+
+	// Test invalid index
+	_, err := c.GetConstant(999)
+	if err == nil {
+		t.Error("Expected GetConstant to return error for invalid index")
+	}
+}
