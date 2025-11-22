@@ -538,3 +538,541 @@ func Strstr(haystack *types.Value, needle *types.Value, beforeNeedle ...*types.V
 func Strchr(haystack *types.Value, needle *types.Value, beforeNeedle ...*types.Value) *types.Value {
 	return Strstr(haystack, needle, beforeNeedle...)
 }
+
+// ============================================================================
+// String Formatting Functions
+// ============================================================================
+
+// Sprintf returns a formatted string
+// sprintf(string $format, mixed ...$values): string
+func Sprintf(format *types.Value, values ...*types.Value) *types.Value {
+	if format == nil {
+		return types.NewString("")
+	}
+
+	f := format.ToString()
+	result := formatString(f, values)
+	return types.NewString(result)
+}
+
+// Printf outputs a formatted string
+// printf(string $format, mixed ...$values): int
+func Printf(format *types.Value, values ...*types.Value) *types.Value {
+	result := Sprintf(format, values...)
+	output := result.ToString()
+	// In a real implementation, this would write to stdout
+	// For now, we just return the length
+	return types.NewInt(int64(len(output)))
+}
+
+// formatString implements basic sprintf-style formatting
+func formatString(format string, values []*types.Value) string {
+	var result strings.Builder
+	valueIdx := 0
+
+	for i := 0; i < len(format); i++ {
+		if format[i] != '%' {
+			result.WriteByte(format[i])
+			continue
+		}
+
+		// Handle %%
+		if i+1 < len(format) && format[i+1] == '%' {
+			result.WriteByte('%')
+			i++
+			continue
+		}
+
+		// No more values
+		if valueIdx >= len(values) {
+			result.WriteByte('%')
+			continue
+		}
+
+		// Parse format specifier
+		i++
+		if i >= len(format) {
+			break
+		}
+
+		// Skip padding/width for now (simplified implementation)
+		for i < len(format) && (format[i] == '-' || format[i] == '+' || format[i] == ' ' || format[i] == '0' || (format[i] >= '0' && format[i] <= '9') || format[i] == '.') {
+			i++
+		}
+
+		if i >= len(format) {
+			break
+		}
+
+		// Handle format type
+		value := values[valueIdx]
+		valueIdx++
+
+		switch format[i] {
+		case 's': // String
+			result.WriteString(value.ToString())
+		case 'd', 'i': // Integer
+			result.WriteString(value.ToString())
+		case 'f', 'F': // Float
+			result.WriteString(value.ToString())
+		case 'x': // Hex lowercase
+			result.WriteString(value.ToString())
+		case 'X': // Hex uppercase
+			result.WriteString(strings.ToUpper(value.ToString()))
+		case 'c': // Character
+			if value.Type() == types.TypeInt {
+				result.WriteByte(byte(value.ToInt()))
+			} else {
+				s := value.ToString()
+				if len(s) > 0 {
+					result.WriteByte(s[0])
+				}
+			}
+		default:
+			result.WriteByte('%')
+			result.WriteByte(format[i])
+		}
+	}
+
+	return result.String()
+}
+
+// ============================================================================
+// String Comparison Functions
+// ============================================================================
+
+// Strcmp performs binary safe string comparison
+// strcmp(string $string1, string $string2): int
+func Strcmp(str1 *types.Value, str2 *types.Value) *types.Value {
+	s1 := str1.ToString()
+	s2 := str2.ToString()
+
+	if s1 == s2 {
+		return types.NewInt(0)
+	}
+	if s1 < s2 {
+		return types.NewInt(-1)
+	}
+	return types.NewInt(1)
+}
+
+// Strcasecmp performs case-insensitive string comparison
+// strcasecmp(string $string1, string $string2): int
+func Strcasecmp(str1 *types.Value, str2 *types.Value) *types.Value {
+	s1 := strings.ToLower(str1.ToString())
+	s2 := strings.ToLower(str2.ToString())
+
+	if s1 == s2 {
+		return types.NewInt(0)
+	}
+	if s1 < s2 {
+		return types.NewInt(-1)
+	}
+	return types.NewInt(1)
+}
+
+// Strncmp performs binary safe string comparison of first n characters
+// strncmp(string $string1, string $string2, int $length): int
+func Strncmp(str1 *types.Value, str2 *types.Value, length *types.Value) *types.Value {
+	s1 := str1.ToString()
+	s2 := str2.ToString()
+	n := int(length.ToInt())
+
+	if n <= 0 {
+		return types.NewInt(0)
+	}
+
+	if len(s1) > n {
+		s1 = s1[:n]
+	}
+	if len(s2) > n {
+		s2 = s2[:n]
+	}
+
+	if s1 == s2 {
+		return types.NewInt(0)
+	}
+	if s1 < s2 {
+		return types.NewInt(-1)
+	}
+	return types.NewInt(1)
+}
+
+// Strncasecmp performs case-insensitive string comparison of first n characters
+// strncasecmp(string $string1, string $string2, int $length): int
+func Strncasecmp(str1 *types.Value, str2 *types.Value, length *types.Value) *types.Value {
+	s1 := strings.ToLower(str1.ToString())
+	s2 := strings.ToLower(str2.ToString())
+	n := int(length.ToInt())
+
+	if n <= 0 {
+		return types.NewInt(0)
+	}
+
+	if len(s1) > n {
+		s1 = s1[:n]
+	}
+	if len(s2) > n {
+		s2 = s2[:n]
+	}
+
+	if s1 == s2 {
+		return types.NewInt(0)
+	}
+	if s1 < s2 {
+		return types.NewInt(-1)
+	}
+	return types.NewInt(1)
+}
+
+// Stristr finds the first occurrence of a string (case-insensitive)
+// stristr(string $haystack, mixed $needle, bool $before_needle = false): string|false
+func Stristr(haystack *types.Value, needle *types.Value, beforeNeedle ...*types.Value) *types.Value {
+	h := strings.ToLower(haystack.ToString())
+	n := strings.ToLower(needle.ToString())
+	hOrig := haystack.ToString()
+
+	index := strings.Index(h, n)
+	if index == -1 {
+		return types.NewBool(false)
+	}
+
+	before := false
+	if len(beforeNeedle) > 0 && beforeNeedle[0] != nil {
+		before = beforeNeedle[0].ToBool()
+	}
+
+	if before {
+		return types.NewString(hOrig[:index])
+	}
+
+	return types.NewString(hOrig[index:])
+}
+
+// Strrchr finds the last occurrence of a character in a string
+// strrchr(string $haystack, mixed $needle): string|false
+func Strrchr(haystack *types.Value, needle *types.Value) *types.Value {
+	h := haystack.ToString()
+	n := needle.ToString()
+
+	if n == "" {
+		return types.NewBool(false)
+	}
+
+	// Use first character of needle
+	char := n[0]
+	index := strings.LastIndexByte(h, char)
+
+	if index == -1 {
+		return types.NewBool(false)
+	}
+
+	return types.NewString(h[index:])
+}
+
+// ============================================================================
+// HTML/Special Character Functions
+// ============================================================================
+
+// Htmlspecialchars converts special characters to HTML entities
+// htmlspecialchars(string $string, int $flags = ENT_COMPAT | ENT_HTML401): string
+func Htmlspecialchars(str *types.Value, flags ...*types.Value) *types.Value {
+	if str == nil {
+		return types.NewString("")
+	}
+
+	s := str.ToString()
+
+	// Basic entity encoding (simplified)
+	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	s = strings.ReplaceAll(s, "\"", "&quot;")
+	s = strings.ReplaceAll(s, "'", "&#039;")
+
+	return types.NewString(s)
+}
+
+// Htmlentities converts all applicable characters to HTML entities
+// htmlentities(string $string, int $flags = ENT_COMPAT | ENT_HTML401): string
+func Htmlentities(str *types.Value, flags ...*types.Value) *types.Value {
+	// For simplified implementation, htmlentities behaves like htmlspecialchars
+	// In full implementation, would encode more characters
+	return Htmlspecialchars(str, flags...)
+}
+
+// HtmlspecialcharsDecode converts special HTML entities back to characters
+// htmlspecialchars_decode(string $string, int $flags = ENT_COMPAT | ENT_HTML401): string
+func HtmlspecialcharsDecode(str *types.Value, flags ...*types.Value) *types.Value {
+	if str == nil {
+		return types.NewString("")
+	}
+
+	s := str.ToString()
+
+	s = strings.ReplaceAll(s, "&quot;", "\"")
+	s = strings.ReplaceAll(s, "&#039;", "'")
+	s = strings.ReplaceAll(s, "&gt;", ">")
+	s = strings.ReplaceAll(s, "&lt;", "<")
+	s = strings.ReplaceAll(s, "&amp;", "&")
+
+	return types.NewString(s)
+}
+
+// ============================================================================
+// Slashing Functions
+// ============================================================================
+
+// Addslashes adds backslashes before characters that need to be escaped
+// addslashes(string $string): string
+func Addslashes(str *types.Value) *types.Value {
+	if str == nil {
+		return types.NewString("")
+	}
+
+	s := str.ToString()
+	var result strings.Builder
+
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		if ch == '\'' || ch == '"' || ch == '\\' || ch == 0 {
+			result.WriteByte('\\')
+		}
+		result.WriteByte(ch)
+	}
+
+	return types.NewString(result.String())
+}
+
+// Stripslashes removes backslashes from a string
+// stripslashes(string $string): string
+func Stripslashes(str *types.Value) *types.Value {
+	if str == nil {
+		return types.NewString("")
+	}
+
+	s := str.ToString()
+	var result strings.Builder
+
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) {
+			i++ // Skip the backslash
+		}
+		result.WriteByte(s[i])
+	}
+
+	return types.NewString(result.String())
+}
+
+// ============================================================================
+// Text Formatting Functions
+// ============================================================================
+
+// Nl2br inserts HTML line breaks before all newlines
+// nl2br(string $string, bool $use_xhtml = true): string
+func Nl2br(str *types.Value, useXhtml ...*types.Value) *types.Value {
+	if str == nil {
+		return types.NewString("")
+	}
+
+	s := str.ToString()
+	xhtml := true
+	if len(useXhtml) > 0 && useXhtml[0] != nil {
+		xhtml = useXhtml[0].ToBool()
+	}
+
+	br := "<br />"
+	if !xhtml {
+		br = "<br>"
+	}
+
+	// Replace \r\n first, then \n, then \r
+	s = strings.ReplaceAll(s, "\r\n", br+"\r\n")
+	s = strings.ReplaceAll(s, "\n", br+"\n")
+	s = strings.ReplaceAll(s, "\r", br+"\r")
+
+	return types.NewString(s)
+}
+
+// Wordwrap wraps a string to a given number of characters
+// wordwrap(string $string, int $width = 75, string $break = "\n", bool $cut_long_words = false): string
+func Wordwrap(str *types.Value, width *types.Value, breakStr ...*types.Value) *types.Value {
+	if str == nil {
+		return types.NewString("")
+	}
+
+	s := str.ToString()
+	w := int(width.ToInt())
+	if w <= 0 {
+		w = 75
+	}
+
+	brk := "\n"
+	if len(breakStr) > 0 && breakStr[0] != nil {
+		brk = breakStr[0].ToString()
+	}
+
+	// Simplified implementation: break at word boundaries
+	words := strings.Fields(s)
+	if len(words) == 0 {
+		return types.NewString(s)
+	}
+
+	var result strings.Builder
+	lineLen := 0
+
+	for _, word := range words {
+		wordLen := len(word)
+
+		if lineLen > 0 && lineLen+1+wordLen > w {
+			result.WriteString(brk)
+			lineLen = 0
+		} else if lineLen > 0 {
+			result.WriteByte(' ')
+			lineLen++
+		}
+
+		result.WriteString(word)
+		lineLen += wordLen
+	}
+
+	return types.NewString(result.String())
+}
+
+// ============================================================================
+// URL Encoding Functions
+// ============================================================================
+
+// Urlencode encodes a URL string
+// urlencode(string $string): string
+func Urlencode(str *types.Value) *types.Value {
+	if str == nil {
+		return types.NewString("")
+	}
+
+	s := str.ToString()
+	var result strings.Builder
+
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '_' || ch == '.' || ch == '~' {
+			result.WriteByte(ch)
+		} else if ch == ' ' {
+			result.WriteByte('+')
+		} else {
+			result.WriteByte('%')
+			result.WriteByte(hexDigit(ch >> 4))
+			result.WriteByte(hexDigit(ch & 0xF))
+		}
+	}
+
+	return types.NewString(result.String())
+}
+
+// Urldecode decodes a URL-encoded string
+// urldecode(string $string): string
+func Urldecode(str *types.Value) *types.Value {
+	if str == nil {
+		return types.NewString("")
+	}
+
+	s := str.ToString()
+	var result strings.Builder
+
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		if ch == '+' {
+			result.WriteByte(' ')
+		} else if ch == '%' && i+2 < len(s) {
+			h1 := unhex(s[i+1])
+			h2 := unhex(s[i+2])
+			if h1 >= 0 && h2 >= 0 {
+				result.WriteByte(byte(h1<<4 | h2))
+				i += 2
+			} else {
+				result.WriteByte(ch)
+			}
+		} else {
+			result.WriteByte(ch)
+		}
+	}
+
+	return types.NewString(result.String())
+}
+
+// Rawurlencode encodes a URL according to RFC 3986
+// rawurlencode(string $string): string
+func Rawurlencode(str *types.Value) *types.Value {
+	if str == nil {
+		return types.NewString("")
+	}
+
+	s := str.ToString()
+	var result strings.Builder
+
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '_' || ch == '.' || ch == '~' {
+			result.WriteByte(ch)
+		} else {
+			result.WriteByte('%')
+			result.WriteByte(hexDigit(ch >> 4))
+			result.WriteByte(hexDigit(ch & 0xF))
+		}
+	}
+
+	return types.NewString(result.String())
+}
+
+// Rawurldecode decodes a URL-encoded string
+// rawurldecode(string $string): string
+func Rawurldecode(str *types.Value) *types.Value {
+	if str == nil {
+		return types.NewString("")
+	}
+
+	s := str.ToString()
+	var result strings.Builder
+
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		if ch == '%' && i+2 < len(s) {
+			h1 := unhex(s[i+1])
+			h2 := unhex(s[i+2])
+			if h1 >= 0 && h2 >= 0 {
+				result.WriteByte(byte(h1<<4 | h2))
+				i += 2
+			} else {
+				result.WriteByte(ch)
+			}
+		} else {
+			result.WriteByte(ch)
+		}
+	}
+
+	return types.NewString(result.String())
+}
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+func hexDigit(val byte) byte {
+	if val < 10 {
+		return '0' + val
+	}
+	return 'A' + val - 10
+}
+
+func unhex(ch byte) int {
+	if ch >= '0' && ch <= '9' {
+		return int(ch - '0')
+	}
+	if ch >= 'a' && ch <= 'f' {
+		return int(ch - 'a' + 10)
+	}
+	if ch >= 'A' && ch <= 'F' {
+		return int(ch - 'A' + 10)
+	}
+	return -1
+}
