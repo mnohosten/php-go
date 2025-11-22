@@ -9,7 +9,7 @@ This is the master task tracking file for the entire PHP-Go project. Each task r
 - ⏸️ Blocked
 - ⏭️ Deferred
 
-**Progress**: 27% (Phase 0 ✅ Complete, Phase 1 ✅ Complete, Phase 2 🔄 In Progress, 280/1050 hours)
+**Progress**: 28% (Phase 0 ✅ Complete, Phase 1 ✅ Complete, Phase 2 ✅ Complete, 290/1050 hours)
 
 ---
 
@@ -259,9 +259,9 @@ All commands tested and working correctly.
 
 ---
 
-## Phase 2: Compiler - AST to Opcodes 🔄
+## Phase 2: Compiler - AST to Opcodes ✅ COMPLETE
 
-**Duration**: 5-6 weeks | **Status**: IN PROGRESS (91%) | **Effort**: 110 hours (100 hours completed)
+**Duration**: 5-6 weeks | **Status**: COMPLETE (100%) | **Effort**: 110 hours (110 hours completed)
 
 **Reference**: `docs/phases/02-compiler/README.md`
 
@@ -463,14 +463,34 @@ Closures deferred until FunctionExpression AST support is added.
 
 **Note**: Strength reduction deferred as it requires more complex analysis and provides marginal benefit compared to constant folding.
 
-### 2.11 Phase 2 Testing (12h)
-- [ ] Unit tests for compilation (6h)
-- [ ] Control flow tests (3h)
-- [ ] Integration tests (3h)
+### 2.11 Phase 2 Testing (12h) ✅ COMPLETE
+- [x] Unit tests for compilation (6h)
+- [x] Control flow tests (3h)
+- [x] Integration tests (3h)
 
-**Target**: 85%+ code coverage
+**Files**: `pkg/compiler/compiler_test.go` (+773 lines)
+**Tests Added**: 27 new test functions, total 130 tests
+**Commit**: 1ccdcfd
 
-**Milestone**: Can compile PHP code to bytecode ✓
+**Coverage Achievement**: 85.1% ✅ TARGET EXCEEDED
+- Previous coverage: 79.6%
+- Current coverage: 85.1%
+- Improvement: +5.5%
+
+**Tests Added**:
+- Helper method tests (4): Instructions(), IsVariableDefined(), Symbol.String(), SymbolTable.String()
+- Optimization edge cases (12): division by zero, modulo by zero, large exponents, PHP truthiness, string operations, float operations
+- Integration tests (6): complex control flow, nested classes, loops with break/continue, try-catch-finally, array manipulation, mixed optimizations
+- Additional method tests (5): Reset(), ChangeOperand(), RemoveLastInstruction(), CurrentLoop(), GetConstant()
+
+**Coverage by Function**:
+- foldConstantUnaryOp: 93.8% (was 56.2%)
+- getConstantValue: 85.7%
+- foldConstantBinaryOp: 83.3%
+- Compile: 81.1%
+- Overall: 85.1%
+
+**Milestone**: Can compile PHP code to bytecode with comprehensive testing ✅
 
 ---
 
