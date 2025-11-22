@@ -914,6 +914,63 @@ func (c *Compiler) Compile(node ast.Node) error {
 			vm.TmpVarOperand(2)) // Result in temp 2
 		return nil
 
+	// Static Property Access (Class::$property)
+	case *ast.StaticPropertyExpression:
+		// Compile the class name (could be identifier or dynamic)
+		if err := c.Compile(node.Class); err != nil {
+			return err
+		}
+		classTemp := vm.TmpVarOperand(0)
+
+		// Compile the property (usually a variable)
+		if err := c.Compile(node.Property); err != nil {
+			return err
+		}
+		propTemp := vm.TmpVarOperand(1)
+
+		// Fetch static property
+		c.EmitWithLine(vm.OpFetchStaticPropR, uint32(node.Token.Pos.Line),
+			classTemp,
+			propTemp,
+			vm.TmpVarOperand(2)) // Result in temp 2
+		return nil
+
+	// Static Method Call (Class::method())
+	case *ast.StaticCallExpression:
+		// Compile the class name (could be identifier or dynamic)
+		if err := c.Compile(node.Class); err != nil {
+			return err
+		}
+		classTemp := vm.TmpVarOperand(0)
+
+		// Compile the method name (could be identifier or dynamic)
+		if err := c.Compile(node.Method); err != nil {
+			return err
+		}
+		methodTemp := vm.TmpVarOperand(1)
+
+		// Compile arguments
+		for _, arg := range node.Arguments {
+			if err := c.Compile(arg); err != nil {
+				return err
+			}
+			// TODO: Push arguments onto stack properly
+		}
+
+		// Initialize static method call
+		c.EmitWithLine(vm.OpInitStaticMethodCall, uint32(node.Token.Pos.Line),
+			classTemp,
+			methodTemp,
+			vm.UnusedOperand())
+
+		// Execute method call with argument count in extended value
+		c.EmitWithExtended(vm.OpDoFcall, uint32(node.Token.Pos.Line),
+			uint32(len(node.Arguments)),
+			vm.UnusedOperand(),
+			vm.UnusedOperand(),
+			vm.TmpVarOperand(2)) // Result in temp 2
+		return nil
+
 	// Ternary Operator
 	case *ast.TernaryExpression:
 		// Compile the condition
@@ -1669,16 +1726,34 @@ func (c *Compiler) Compile(node ast.Node) error {
 			switch decl := stmt.(type) {
 			case *ast.PropertyDeclaration:
 				// Compile property declarations
-				// Properties are initialized when the class is instantiated
-				// For now, we just note their existence
+				// Instance properties are initialized when the class is instantiated
+				// Static properties are initialized at class declaration time
 				for _, prop := range decl.Properties {
 					// Store property name as constant
-					c.AddConstant(prop.Name.Name)
+					propNameIdx := c.AddConstant(prop.Name.Name)
 
-					// If property has default value, compile it
-					if prop.DefaultValue != nil {
-						if err := c.Compile(prop.DefaultValue); err != nil {
-							return err
+					if decl.Static {
+						// Static property: initialize immediately
+						if prop.DefaultValue != nil {
+							// Compile default value
+							if err := c.Compile(prop.DefaultValue); err != nil {
+								return err
+							}
+
+							// ASSIGN_STATIC_PROP to initialize the static property
+							c.EmitWithLine(vm.OpAssignStaticProp, uint32(node.Token.Pos.Line),
+								vm.ConstOperand(uint32(classNameIdx)), // Class name
+								vm.ConstOperand(uint32(propNameIdx)),  // Property name
+								vm.TmpVarOperand(0))                   // Value in temp var 0
+						}
+						// If no default value, static property remains uninitialized (null)
+					} else {
+						// Instance property: just note existence
+						// Will be initialized when the class is instantiated
+						if prop.DefaultValue != nil {
+							if err := c.Compile(prop.DefaultValue); err != nil {
+								return err
+							}
 						}
 					}
 				}
@@ -1697,8 +1772,11 @@ func (c *Compiler) Compile(node ast.Node) error {
 				// Enter new scope for method
 				c.EnterScope()
 
-				// Methods have implicit $this parameter
-				c.DefineVariable("this")
+				// Instance methods have implicit $this parameter
+				// Static methods do NOT have $this
+				if !decl.Static {
+					c.DefineVariable("this")
+				}
 
 				// Emit RECV opcodes for each parameter
 				for i, param := range decl.Parameters {
