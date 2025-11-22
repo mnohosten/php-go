@@ -9,7 +9,7 @@ This is the master task tracking file for the entire PHP-Go project. Each task r
 - ⏸️ Blocked
 - ⏭️ Deferred
 
-**Progress**: 25% (Phase 0 ✅ Complete, Phase 1 ✅ Complete, Phase 2 🔄 In Progress, 266/1050 hours)
+**Progress**: 27% (Phase 0 ✅ Complete, Phase 1 ✅ Complete, Phase 2 🔄 In Progress, 280/1050 hours)
 
 ---
 
@@ -261,7 +261,7 @@ All commands tested and working correctly.
 
 ## Phase 2: Compiler - AST to Opcodes 🔄
 
-**Duration**: 5-6 weeks | **Status**: IN PROGRESS (78%) | **Effort**: 110 hours (86 hours completed)
+**Duration**: 5-6 weeks | **Status**: IN PROGRESS (91%) | **Effort**: 110 hours (100 hours completed)
 
 **Reference**: `docs/phases/02-compiler/README.md`
 
@@ -437,13 +437,31 @@ Closures deferred until FunctionExpression AST support is added.
 
 **Note**: Static members and interfaces/traits are deferred as they are not critical for basic class functionality and can be added in future enhancements.
 
-### 2.10 Optimizations (8h)
-- [ ] Constant folding (1 + 2 → 3) (2h)
-- [ ] Dead code elimination (2h)
-- [ ] Unreachable code detection (2h)
-- [ ] Strength reduction (2h)
+### 2.10 Optimizations (8h) ✅ COMPLETE
+- [x] Constant folding (1 + 2 → 3) (2h)
+- [x] Dead code elimination (2h)
+- [x] Unreachable code detection (2h)
+- [ ] Strength reduction (2h) - Deferred (low priority, requires complex analysis)
 
-**Files**: `pkg/compiler/optimizer.go`
+**Files**: `pkg/compiler/compiler.go` (+260 lines), `pkg/compiler/compiler_test.go` (+410 lines)
+**Tests Added**: 11 new test functions, all 103 tests passing
+**Commit**: cd9a814
+
+**Implemented**:
+- Constant folding for binary operations (arithmetic: +/-/*//%/**; comparison: ==/>/</>=/<=; bitwise: |/&/^/<</>>/; string concat: .)
+- Constant folding for unary operations (boolean not: !, unary minus: -, bitwise not: ~)
+- Dead code elimination for statements after return in blocks
+- Smart optimization that only folds when both operands are constant literals
+- PHP truthiness evaluation for boolean operations
+- Mixed type support (int+float folding, string operations)
+
+**Benefits**:
+- Reduces bytecode size by evaluating constant expressions at compile time
+- Eliminates unreachable code automatically
+- No runtime overhead for constant operations
+- Maintains correctness (no folding when dynamic evaluation required)
+
+**Note**: Strength reduction deferred as it requires more complex analysis and provides marginal benefit compared to constant folding.
 
 ### 2.11 Phase 2 Testing (12h)
 - [ ] Unit tests for compilation (6h)
