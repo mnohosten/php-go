@@ -56,7 +56,7 @@ func New() *VM {
 		functions:     make(map[string]*CompiledFunction),
 		classes:       make(map[string]*CompiledClass),
 		frames:        make([]*Frame, 1024), // Pre-allocate frame stack
-		frameIndex:    0,
+		frameIndex:    -1,                   // -1 means no frames on stack
 		output:        make([]byte, 0),
 		maxStackDepth: 1000,
 	}
@@ -159,6 +159,8 @@ func (vm *VM) dispatch(frame *Frame, instr Instruction) error {
 		return vm.opIsSmaller(frame, instr)
 	case OpIsSmallerOrEqual:
 		return vm.opIsSmallerOrEqual(frame, instr)
+	case OpSpaceship:
+		return vm.opSpaceship(frame, instr)
 
 	// Bitwise operations
 	case OpBWAnd:
@@ -227,7 +229,7 @@ func (vm *VM) currentFrame() *Frame {
 
 // pushFrame pushes a new frame onto the call stack
 func (vm *VM) pushFrame(frame *Frame) error {
-	if vm.frameIndex >= vm.maxStackDepth {
+	if vm.frameIndex+1 >= vm.maxStackDepth {
 		return fmt.Errorf("stack overflow: maximum depth %d exceeded", vm.maxStackDepth)
 	}
 
