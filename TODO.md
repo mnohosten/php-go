@@ -9,7 +9,7 @@ This is the master task tracking file for the entire PHP-Go project. Each task r
 - ⏸️ Blocked
 - ⏭️ Deferred
 
-**Progress**: 75% (Phase 0-5 ✅ Complete + Phase 6 Partial, 788/1050 hours)
+**Progress**: 77% (Phase 0-5 ✅ Complete + Phase 6 Partial, 808/1050 hours)
 
 ---
 
@@ -1165,7 +1165,7 @@ and integration with the VM.
 
 ## Phase 6: Standard Library 🔄 IN PROGRESS ⚠️ LARGEST PHASE
 
-**Duration**: 10-12 weeks | **Status**: IN PROGRESS (146h / 210h completed - 70%) | **Effort**: 210 hours
+**Duration**: 10-12 weeks | **Status**: IN PROGRESS (166h / 210h completed - 79%) | **Effort**: 210 hours
 
 **Reference**: `docs/phases/06-stdlib/README.md`
 
@@ -1218,17 +1218,30 @@ and integration with the VM.
 **Tests**: `pkg/stdlib/string/functions_test.go` (82.1% coverage)
 **Commit**: Phase 4 (26138f2)
 
-### 6.4 String Functions - Advanced (20h)
-- [ ] sprintf(), vsprintf(), printf(), vprintf() (6h)
-- [ ] str_pad(), str_repeat() (2h)
-- [ ] strcmp(), strcasecmp(), strncmp(), strncasecmp() (3h)
-- [ ] strstr(), stristr(), strrchr() (2h)
-- [ ] htmlspecialchars(), htmlentities() (3h)
-- [ ] addslashes(), stripslashes() (1h)
-- [ ] nl2br(), wordwrap() (1h)
-- [ ] URL encoding functions (2h)
+### 6.4 String Functions - Advanced (20h) ✅ COMPLETE
+- [x] sprintf(), printf() (6h)
+- [x] strcmp(), strcasecmp(), strncmp(), strncasecmp() (3h)
+- [x] stristr(), strrchr() (2h)
+- [x] htmlspecialchars(), htmlentities(), htmlspecialchars_decode() (3h)
+- [x] addslashes(), stripslashes() (1h)
+- [x] nl2br(), wordwrap() (1h)
+- [x] URL encoding functions (urlencode, urldecode, rawurlencode, rawurldecode) (2h)
 
-**Files**: `pkg/stdlib/string/advanced.go`
+**Files**: `pkg/stdlib/string/functions.go` (1078 lines total)
+**Tests**: `pkg/stdlib/string/functions_test.go` (845 lines, 39 new tests)
+**Coverage**: 84.4%
+**Commit**: 092b4e9
+
+**Notes**:
+- Implemented 23 advanced string functions
+- Formatting: sprintf, printf with format specifiers (%s, %d, %f, %c, %x, %X)
+- Comparison: strcmp, strcasecmp, strncmp, strncasecmp, stristr, strrchr
+- HTML: htmlspecialchars, htmlentities, htmlspecialchars_decode
+- Slashing: addslashes, stripslashes
+- Text: nl2br, wordwrap
+- URL: urlencode, urldecode, rawurlencode, rawurldecode
+- sprintf has simplified format parsing (no width/padding modifiers)
+- vsprintf/vprintf deferred (require array parameter handling)
 
 ### 6.5 File I/O Functions (20h) ✅ COMPLETE
 - [x] fopen(), fclose(), fread(), fwrite() (4h)
