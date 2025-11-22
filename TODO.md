@@ -9,7 +9,7 @@ This is the master task tracking file for the entire PHP-Go project. Each task r
 - ⏸️ Blocked
 - ⏭️ Deferred
 
-**Progress**: 69% (Phase 0-5 ✅ Complete + Phase 6 Partial, 720/1050 hours)
+**Progress**: 72% (Phase 0-5 ✅ Complete + Phase 6 Partial, 752/1050 hours)
 
 ---
 
@@ -1165,22 +1165,24 @@ and integration with the VM.
 
 ## Phase 6: Standard Library 🔄 IN PROGRESS ⚠️ LARGEST PHASE
 
-**Duration**: 10-12 weeks | **Status**: IN PROGRESS (78h / 210h completed - 37%) | **Effort**: 210 hours
+**Duration**: 10-12 weeks | **Status**: IN PROGRESS (110h / 210h completed - 52%) | **Effort**: 210 hours
 
 **Reference**: `docs/phases/06-stdlib/README.md`
 
 **Dependencies**: Phase 5 complete ✅
 
-### 6.1 Array Functions - Basic (16h)
-- [ ] count(), sizeof() (1h)
-- [ ] array_keys(), array_values() (2h)
-- [ ] array_push(), array_pop(), array_shift(), array_unshift() (4h)
-- [ ] array_merge() (2h)
-- [ ] in_array(), array_search() (2h)
-- [ ] array_slice(), array_splice() (3h)
-- [ ] array_unique(), array_reverse() (2h)
+### 6.1 Array Functions - Basic (16h) ✅ COMPLETE (from Phase 4)
+- [x] count(), sizeof() (1h)
+- [x] array_keys(), array_values() (2h)
+- [x] array_push(), array_pop(), array_shift(), array_unshift() (4h)
+- [x] array_merge() (2h)
+- [x] in_array(), array_search() (2h)
+- [x] array_slice(), array_splice() (3h)
+- [x] array_unique(), array_reverse() (2h)
 
-**Files**: `pkg/stdlib/array/basic.go`
+**Files**: `pkg/stdlib/array/functions.go` (441 lines, from Phase 4)
+**Tests**: `pkg/stdlib/array/functions_test.go` (77.7% coverage)
+**Commit**: Phase 4 (26138f2)
 
 ### 6.2 Array Functions - Advanced (20h)
 - [ ] Sorting functions (sort, rsort, asort, arsort, ksort, krsort, usort, uasort, uksort) (8h)
@@ -1191,16 +1193,18 @@ and integration with the VM.
 
 **Files**: `pkg/stdlib/array/advanced.go`
 
-### 6.3 String Functions - Basic (16h)
-- [ ] strlen(), substr() (2h)
-- [ ] strpos(), strrpos(), stripos(), strripos() (3h)
-- [ ] str_replace(), str_ireplace() (3h)
-- [ ] strtolower(), strtoupper(), ucfirst(), ucwords() (2h)
-- [ ] trim(), ltrim(), rtrim() (2h)
-- [ ] explode(), implode() (2h)
-- [ ] str_split(), chunk_split() (2h)
+### 6.3 String Functions - Basic (16h) ✅ COMPLETE (from Phase 4)
+- [x] strlen(), substr() (2h)
+- [x] strpos(), strrpos(), stripos(), strripos() (3h)
+- [x] str_replace(), str_ireplace() (3h)
+- [x] strtolower(), strtoupper(), ucfirst(), ucwords() (2h)
+- [x] trim(), ltrim(), rtrim() (2h)
+- [x] explode(), implode() (2h)
+- [x] str_split(), chunk_split() (2h)
 
-**Files**: `pkg/stdlib/string/basic.go`
+**Files**: `pkg/stdlib/string/functions.go` (540 lines, from Phase 4)
+**Tests**: `pkg/stdlib/string/functions_test.go` (82.1% coverage)
+**Commit**: Phase 4 (26138f2)
 
 ### 6.4 String Functions - Advanced (20h)
 - [ ] sprintf(), vsprintf(), printf(), vprintf() (6h)
