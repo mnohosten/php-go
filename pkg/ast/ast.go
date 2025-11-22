@@ -366,6 +366,48 @@ func (ge *GroupedExpression) String() string {
 	return "(" + ge.Expr.String() + ")"
 }
 
+// ClosureExpression represents an anonymous function (closure)
+// Example: function($x) use ($y) { return $x + $y; }
+type ClosureExpression struct {
+	Token      lexer.Token   // The FUNCTION token
+	Parameters []*Parameter  // Function parameters
+	Use        []*UseClause  // Variables captured from parent scope
+	ReturnType Expr          // Return type hint (can be nil)
+	Body       *BlockStatement
+	ByRef      bool          // Returns reference (&function)
+	Static     bool          // static function() (cannot use $this)
+}
+
+func (ce *ClosureExpression) expressionNode()      {}
+func (ce *ClosureExpression) TokenLiteral() string { return ce.Token.Literal }
+func (ce *ClosureExpression) String() string {
+	return "function(...) { ... }"
+}
+
+// UseClause represents a variable captured in a closure's use clause
+// Example: use ($x, &$y)
+type UseClause struct {
+	Variable *Variable
+	ByRef    bool // Capture by reference (&$var)
+}
+
+// ArrowFunctionExpression represents an arrow function (PHP 7.4+)
+// Example: fn($x) => $x * 2
+type ArrowFunctionExpression struct {
+	Token      lexer.Token  // The FN token
+	Parameters []*Parameter // Function parameters
+	ReturnType Expr         // Return type hint (can be nil)
+	Body       Expr         // Single expression (not a block)
+	ByRef      bool         // Returns reference
+	Static     bool         // static fn()
+}
+
+func (af *ArrowFunctionExpression) expressionNode()      {}
+func (af *ArrowFunctionExpression) TokenLiteral() string { return af.Token.Literal }
+func (af *ArrowFunctionExpression) String() string {
+	return "fn(...) => ..."
+}
+
 // EchoStatement represents echo statement
 type EchoStatement struct {
 	Token       lexer.Token // The ECHO token

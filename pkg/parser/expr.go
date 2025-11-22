@@ -39,6 +39,9 @@ func (p *Parser) registerExpressionParsers() {
 	p.prefixParseFns[lexer.LBRACKET] = p.parseArrayExpression
 	p.prefixParseFns[lexer.NEW] = p.parseNewExpression
 	p.prefixParseFns[lexer.MATCH] = p.parseMatchExpression
+	p.prefixParseFns[lexer.FUNCTION] = p.parseClosureExpression
+	p.prefixParseFns[lexer.FN] = p.parseArrowFunctionExpression
+	p.prefixParseFns[lexer.STATIC] = p.parseStaticClosureOrProperty
 
 	// Infix parsers (operators that appear between expressions)
 	p.infixParseFns = make(map[lexer.TokenType]infixParseFn)
@@ -554,5 +557,183 @@ func (p *Parser) parsePostfixExpression(left ast.Expr) ast.Expr {
 		Token:    p.curToken,
 		Operator: p.curToken.Literal + "(postfix)",
 		Right:    left,
+	}
+}
+
+// parseClosureExpression parses a closure (anonymous function)
+// Example: function($x, $y) use ($z) { return $x + $y + $z; }
+func (p *Parser) parseClosureExpression() ast.Expr {
+	expr := &ast.ClosureExpression{
+		Token: p.curToken, // FUNCTION token
+	}
+
+	// Check for reference return
+	if p.peekTokenIs(lexer.BITWISE_AND) {
+		p.nextToken()
+		expr.ByRef = true
+	}
+
+	// Expect '('
+	if !p.expectPeek(lexer.LPAREN) {
+		return nil
+	}
+
+	// Parse parameters
+	expr.Parameters = p.parseFunctionParameters()
+
+	// Check for 'use' clause
+	if p.peekTokenIs(lexer.USE) {
+		p.nextToken() // consume USE
+
+		if !p.expectPeek(lexer.LPAREN) {
+			return nil
+		}
+		p.nextToken() // move to first variable
+
+		expr.Use = p.parseUseClause()
+
+		if !p.curTokenIs(lexer.RPAREN) {
+			return nil
+		}
+	}
+
+	// Check for return type hint
+	if p.peekTokenIs(lexer.COLON) {
+		p.nextToken() // consume COLON
+		p.nextToken() // move to type
+		expr.ReturnType = p.parseType()
+	}
+
+	// Expect body
+	if !p.expectPeek(lexer.LBRACE) {
+		return nil
+	}
+
+	expr.Body = p.parseBlockStatement()
+
+	return expr
+}
+
+// parseUseClause parses the use clause of a closure
+// Example: ($x, &$y, $z)
+func (p *Parser) parseUseClause() []*ast.UseClause {
+	useClauses := []*ast.UseClause{}
+
+	// Handle empty use clause
+	if p.curTokenIs(lexer.RPAREN) {
+		return useClauses
+	}
+
+	for {
+		useClause := &ast.UseClause{}
+
+		// Check for reference capture
+		if p.curTokenIs(lexer.BITWISE_AND) {
+			useClause.ByRef = true
+			p.nextToken()
+		}
+
+		// Expect variable
+		if !p.curTokenIs(lexer.VARIABLE) {
+			p.errors = append(p.errors, "expected variable in use clause, got "+p.curToken.Literal)
+			return nil
+		}
+
+		useClause.Variable = &ast.Variable{
+			Token: p.curToken,
+			Name:  p.curToken.Literal,
+		}
+
+		useClauses = append(useClauses, useClause)
+
+		// Check for more variables
+		if !p.peekTokenIs(lexer.COMMA) {
+			break
+		}
+		p.nextToken() // consume COMMA
+		p.nextToken() // move to next variable
+	}
+
+	// Expect closing )
+	if !p.expectPeek(lexer.RPAREN) {
+		return nil
+	}
+
+	return useClauses
+}
+
+// parseArrowFunctionExpression parses an arrow function (PHP 7.4+)
+// Example: fn($x): int => $x * 2
+func (p *Parser) parseArrowFunctionExpression() ast.Expr {
+	expr := &ast.ArrowFunctionExpression{
+		Token: p.curToken, // FN token
+	}
+
+	// Check for reference return
+	if p.peekTokenIs(lexer.BITWISE_AND) {
+		p.nextToken()
+		expr.ByRef = true
+	}
+
+	// Expect '('
+	if !p.expectPeek(lexer.LPAREN) {
+		return nil
+	}
+
+	// Parse parameters
+	expr.Parameters = p.parseFunctionParameters()
+
+	// Check for return type hint
+	if p.peekTokenIs(lexer.COLON) {
+		p.nextToken() // consume COLON
+		p.nextToken() // move to type
+		expr.ReturnType = p.parseType()
+	}
+
+	// Expect '=>'
+	if !p.expectPeek(lexer.DOUBLE_ARROW) {
+		return nil
+	}
+
+	// Parse body expression
+	p.nextToken()
+	expr.Body = p.parseExpression(LOWEST)
+
+	return expr
+}
+
+// parseStaticClosureOrProperty handles 'static' keyword which can be:
+// - static function() { ... }  (static closure)
+// - static fn() => ...  (static arrow function)
+// - static::$property  (static property access - handled elsewhere)
+func (p *Parser) parseStaticClosureOrProperty() ast.Expr {
+	staticToken := p.curToken
+
+	// Look ahead to determine what follows
+	if p.peekTokenIs(lexer.FUNCTION) {
+		p.nextToken() // consume FUNCTION
+
+		expr := p.parseClosureExpression()
+		if closure, ok := expr.(*ast.ClosureExpression); ok {
+			closure.Static = true
+		}
+		return expr
+	}
+
+	if p.peekTokenIs(lexer.FN) {
+		p.nextToken() // consume FN
+
+		expr := p.parseArrowFunctionExpression()
+		if arrowFn, ok := expr.(*ast.ArrowFunctionExpression); ok {
+			arrowFn.Static = true
+		}
+		return expr
+	}
+
+	// If not followed by function or fn, it's likely static::$property
+	// Treat 'static' as an identifier for static property/method access
+	return &ast.Identifier{
+		Token: staticToken,
+		Value: staticToken.Literal,
 	}
 }
