@@ -589,6 +589,183 @@ func (c *Compiler) Compile(node ast.Node) error {
 	case *ast.GroupedExpression:
 		return c.Compile(node.Expr)
 
+	// Closure Expression (anonymous function)
+	case *ast.ClosureExpression:
+		// Remember closure start position
+		closureStart := c.CurrentPosition()
+
+		// Enter new scope for closure
+		c.EnterScope()
+
+		// Emit RECV opcodes for each parameter
+		for i, param := range node.Parameters {
+			// Define parameter variable in closure scope
+			symbol := c.DefineVariable(param.Name.Name)
+
+			if param.Variadic {
+				// RECV_VARIADIC for ...args
+				c.EmitWithLine(vm.OpRecvVariadic, uint32(node.Token.Pos.Line),
+					vm.ConstOperand(uint32(i)), // Parameter index
+					vm.UnusedOperand(),
+					vm.CVOperand(uint32(symbol.Index))) // Store in compiled variable
+			} else if param.DefaultValue != nil {
+				// RECV_INIT for parameters with defaults
+				// Compile default value
+				if err := c.Compile(param.DefaultValue); err != nil {
+					return err
+				}
+
+				c.EmitWithLine(vm.OpRecvInit, uint32(node.Token.Pos.Line),
+					vm.ConstOperand(uint32(i)),             // Parameter index
+					vm.TmpVarOperand(0),                    // Default value in temp 0
+					vm.CVOperand(uint32(symbol.Index)))      // Store in compiled variable
+			} else {
+				// RECV for required parameters
+				recvOp := vm.OpRecv
+				if param.ByRef {
+					recvOp = vm.OpSendRef // Use SEND_REF for by-reference parameters
+				}
+
+				c.EmitWithLine(recvOp, uint32(node.Token.Pos.Line),
+					vm.ConstOperand(uint32(i)),    // Parameter index
+					vm.UnusedOperand(),
+					vm.CVOperand(uint32(symbol.Index))) // Store in compiled variable
+			}
+		}
+
+		// Compile closure body
+		if err := c.Compile(node.Body); err != nil {
+			return err
+		}
+
+		// Add implicit return if closure doesn't end with return
+		if !c.LastInstructionIs(vm.OpReturn) && !c.LastInstructionIs(vm.OpReturnByRef) {
+			// Return null
+			c.EmitWithLine(vm.OpReturn, uint32(node.Token.Pos.Line),
+				vm.UnusedOperand(),
+				vm.UnusedOperand(),
+				vm.UnusedOperand())
+		}
+
+		// Exit closure scope
+		c.ExitScope()
+
+		// Closure end position
+		closureEnd := c.CurrentPosition()
+
+		// DECLARE_LAMBDA_FUNCTION to create the closure object
+		// Store closure metadata: num params, start pos, end pos, flags
+		flags := uint32(0)
+		if node.Static {
+			flags |= 1 // Static flag
+		}
+		if node.ByRef {
+			flags |= 2 // Return by reference flag
+		}
+
+		c.EmitWithExtended(vm.OpDeclareLambdaFunction, uint32(node.Token.Pos.Line),
+			uint32(len(node.Parameters)),  // Number of parameters
+			vm.ConstOperand(uint32(flags)), // Flags (static, byref)
+			vm.ConstOperand(uint32(closureStart)), // Closure start position
+			vm.ConstOperand(uint32(closureEnd)))   // Closure end position
+
+		// Bind captured variables from use clause
+		for _, useVar := range node.Use {
+			// Get the variable from parent scope
+			varNameIdx := c.AddConstant(useVar.Variable.Name)
+			byRefFlag := uint32(0)
+			if useVar.ByRef {
+				byRefFlag = 1
+			}
+
+			c.EmitWithLine(vm.OpBindLexical, uint32(node.Token.Pos.Line),
+				vm.ConstOperand(uint32(varNameIdx)), // Variable name
+				vm.ConstOperand(byRefFlag),           // By reference flag
+				vm.TmpVarOperand(0))                  // Closure object in temp 0
+		}
+
+		return nil
+
+	// Arrow Function Expression (PHP 7.4+)
+	case *ast.ArrowFunctionExpression:
+		// Remember arrow function start position
+		arrowStart := c.CurrentPosition()
+
+		// Enter new scope for arrow function
+		c.EnterScope()
+
+		// Emit RECV opcodes for each parameter
+		for i, param := range node.Parameters {
+			// Define parameter variable in arrow function scope
+			symbol := c.DefineVariable(param.Name.Name)
+
+			if param.Variadic {
+				c.EmitWithLine(vm.OpRecvVariadic, uint32(node.Token.Pos.Line),
+					vm.ConstOperand(uint32(i)),
+					vm.UnusedOperand(),
+					vm.CVOperand(uint32(symbol.Index)))
+			} else if param.DefaultValue != nil {
+				if err := c.Compile(param.DefaultValue); err != nil {
+					return err
+				}
+				c.EmitWithLine(vm.OpRecvInit, uint32(node.Token.Pos.Line),
+					vm.ConstOperand(uint32(i)),
+					vm.TmpVarOperand(0),
+					vm.CVOperand(uint32(symbol.Index)))
+			} else {
+				recvOp := vm.OpRecv
+				if param.ByRef {
+					recvOp = vm.OpSendRef
+				}
+				c.EmitWithLine(recvOp, uint32(node.Token.Pos.Line),
+					vm.ConstOperand(uint32(i)),
+					vm.UnusedOperand(),
+					vm.CVOperand(uint32(symbol.Index)))
+			}
+		}
+
+		// Compile the body expression
+		if err := c.Compile(node.Body); err != nil {
+			return err
+		}
+
+		// Arrow functions implicitly return the expression value
+		returnOp := vm.OpReturn
+		if node.ByRef {
+			returnOp = vm.OpReturnByRef
+		}
+		c.EmitWithLine(returnOp, uint32(node.Token.Pos.Line),
+			vm.TmpVarOperand(0), // Return value from expression
+			vm.UnusedOperand(),
+			vm.UnusedOperand())
+
+		// Exit arrow function scope
+		c.ExitScope()
+
+		// Arrow function end position
+		arrowEnd := c.CurrentPosition()
+
+		// DECLARE_LAMBDA_FUNCTION to create the arrow function object
+		flags := uint32(0)
+		if node.Static {
+			flags |= 1 // Static flag
+		}
+		if node.ByRef {
+			flags |= 2 // Return by reference flag
+		}
+
+		c.EmitWithExtended(vm.OpDeclareLambdaFunction, uint32(node.Token.Pos.Line),
+			uint32(len(node.Parameters)),           // Number of parameters
+			vm.ConstOperand(uint32(flags)),          // Flags (static, byref)
+			vm.ConstOperand(uint32(arrowStart)),     // Arrow function start position
+			vm.ConstOperand(uint32(arrowEnd)))       // Arrow function end position
+
+		// Arrow functions auto-capture variables from parent scope
+		// For now, we'll skip auto-capture implementation (would need sophisticated analysis)
+		// In a full implementation, we'd analyze node.Body to find referenced variables
+
+		return nil
+
 	// Array Literal
 	case *ast.ArrayExpression:
 		// Initialize empty array
