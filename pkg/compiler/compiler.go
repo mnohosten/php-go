@@ -1900,6 +1900,147 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 		return nil
 
+	// Interface Declaration
+	case *ast.InterfaceDeclaration:
+		// Store interface name as constant
+		interfaceNameIdx := c.AddConstant(node.Name.Value)
+
+		// Store parent interface names if extends
+		parentIndices := []int{}
+		for _, parent := range node.Extends {
+			parentIdx := c.AddConstant(parent.Value)
+			parentIndices = append(parentIndices, parentIdx)
+		}
+
+		// For now, interfaces are compile-time metadata
+		// We'll just note their existence
+		// TODO: Implement runtime interface checking and type validation
+
+		// Store method signatures for interface validation
+		for _, methodSig := range node.Body {
+			_ = methodSig // Store method signature metadata
+			methodNameIdx := c.AddConstant(methodSig.Name.Value)
+			_ = methodNameIdx
+		}
+
+		// Placeholder - interfaces don't generate runtime code
+		// They're used for compile-time type checking
+		_ = interfaceNameIdx
+		_ = parentIndices
+
+		return nil
+
+	// Trait Declaration
+	case *ast.TraitDeclaration:
+		// Store trait name as constant
+		traitNameIdx := c.AddConstant(node.Name.Value)
+
+		// Traits are similar to classes but cannot be instantiated
+		// They provide methods that can be included in classes
+
+		// Remember trait body start position
+		traitStart := c.CurrentPosition()
+
+		// Compile trait body (properties and methods)
+		for _, stmt := range node.Body {
+			switch decl := stmt.(type) {
+			case *ast.PropertyDeclaration:
+				// Trait properties
+				for _, prop := range decl.Properties {
+					propNameIdx := c.AddConstant(prop.Name.Name)
+					_ = propNameIdx
+
+					if prop.DefaultValue != nil {
+						if err := c.Compile(prop.DefaultValue); err != nil {
+							return err
+						}
+					}
+				}
+
+			case *ast.MethodDeclaration:
+				// Trait methods - compile similar to class methods
+				methodNameIdx := c.AddConstant(decl.Name.Value)
+
+				if decl.Abstract || decl.Body == nil {
+					continue
+				}
+
+				methodStart := c.CurrentPosition()
+
+				c.EnterScope()
+
+				// Trait methods can access $this when used in a class
+				if !decl.Static {
+					c.DefineVariable("this")
+				}
+
+				// Emit RECV opcodes for parameters
+				for i, param := range decl.Parameters {
+					symbol := c.DefineVariable(param.Name.Name)
+
+					if param.Variadic {
+						c.EmitWithLine(vm.OpRecvVariadic, uint32(decl.Token.Pos.Line),
+							vm.ConstOperand(uint32(i)),
+							vm.UnusedOperand(),
+							vm.CVOperand(uint32(symbol.Index)))
+					} else if param.DefaultValue != nil {
+						if err := c.Compile(param.DefaultValue); err != nil {
+							return err
+						}
+						c.EmitWithLine(vm.OpRecvInit, uint32(decl.Token.Pos.Line),
+							vm.ConstOperand(uint32(i)),
+							vm.TmpVarOperand(0),
+							vm.CVOperand(uint32(symbol.Index)))
+					} else {
+						recvOp := vm.OpRecv
+						if param.ByRef {
+							recvOp = vm.OpSendRef
+						}
+						c.EmitWithLine(recvOp, uint32(decl.Token.Pos.Line),
+							vm.ConstOperand(uint32(i)),
+							vm.UnusedOperand(),
+							vm.CVOperand(uint32(symbol.Index)))
+					}
+				}
+
+				// Compile method body
+				if err := c.Compile(decl.Body); err != nil {
+					return err
+				}
+
+				// Add implicit return if method doesn't end with return
+				if !c.LastInstructionIs(vm.OpReturn) && !c.LastInstructionIs(vm.OpReturnByRef) {
+					c.EmitWithLine(vm.OpReturn, uint32(decl.Token.Pos.Line),
+						vm.UnusedOperand(),
+						vm.UnusedOperand(),
+						vm.UnusedOperand())
+				}
+
+				c.ExitScope()
+
+				methodEnd := c.CurrentPosition()
+
+				_ = methodNameIdx
+				_ = methodStart
+				_ = methodEnd
+
+			default:
+				if err := c.Compile(stmt); err != nil {
+					return err
+				}
+			}
+		}
+
+		traitEnd := c.CurrentPosition()
+
+		// TODO: Implement DECLARE_TRAIT opcode for runtime trait registration
+		// For now, traits are compile-time metadata
+		_ = traitNameIdx
+		_ = traitStart
+		_ = traitEnd
+
+		return nil
+
 	// Method Declaration (when standalone, though usually part of class)
 	case *ast.MethodDeclaration:
 		// Methods are typically compiled as part of ClassDeclaration
