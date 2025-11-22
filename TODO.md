@@ -74,7 +74,7 @@ This is the master task tracking file for the entire PHP-Go project. Each task r
 - [x] Scan heredoc syntax (2h) - Complete with indented closing tags (PHP 7.3+)
 - [x] Scan nowdoc syntax (1h) - Complete with both ' and " quotes
 - [x] String interpolation detection (2h) - Basic detection complete
-- [ ] Full interpolation tokenization {$obj->prop} (1h) - Deferred to parser phase
+- [x] Full interpolation tokenization {$obj->prop} (1h) - Completed (commit: e4627dc) - Basic $variable interpolation
 
 **Files**: `pkg/lexer/strings.go` (395 lines), `pkg/lexer/lexer.go` (enhanced)
 **Tests**: `pkg/lexer/strings_test.go` (490 lines, comprehensive coverage)
