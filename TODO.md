@@ -801,7 +801,7 @@ Closures deferred until FunctionExpression AST support is added.
 
 **Files**: `pkg/types/object.go` (437 lines)
 **Tests**: `pkg/types/object_test.go` (24 tests, all passing)
-**Commit**: TBD
+**Commit**: 26138f2
 
 **Note**: Implemented comprehensive ClassEntry structure with full PHP 8.4 OOP support:
 - ClassEntry with all metadata (inheritance, interfaces, traits, properties, methods)
@@ -821,7 +821,7 @@ Closures deferred until FunctionExpression AST support is added.
 
 **Files**: `pkg/types/object.go`, `pkg/vm/handlers_object.go` (lines 552-650), `pkg/vm/handlers_functions.go` (183 lines)
 **Tests**: `pkg/vm/handlers_method_test.go` (4 OpNew tests), `pkg/vm/handlers_constructor_test.go` (6 tests)
-**Commit**: TBD
+**Commit**: 26138f2
 
 **Note**: Full object instantiation system:
 - OpNew with abstract/interface checks
@@ -841,7 +841,7 @@ Closures deferred until FunctionExpression AST support is added.
 
 **Files**: `pkg/vm/handlers_object.go` (878 lines total, 15 property opcodes)
 **Tests**: `pkg/vm/handlers_object_test.go` (16 tests, all passing)
-**Commit**: TBD
+**Commit**: 26138f2
 
 **Note**: Complete property access implementation:
 - 6 fetch variants (OpFetchObjR/W/RW/Is/FuncArg/Unset)
@@ -860,7 +860,7 @@ Closures deferred until FunctionExpression AST support is added.
 
 **Files**: `pkg/vm/handlers_object.go` (lines 590-878), `pkg/vm/handlers_functions.go`
 **Tests**: `pkg/vm/handlers_method_test.go` (21 tests), `pkg/vm/handlers_constructor_test.go` (6 tests)
-**Commit**: TBD
+**Commit**: 26138f2
 
 **Note**: Full method call system:
 - OpInitMethodCall for instance methods with visibility checking
@@ -884,7 +884,7 @@ Closures deferred until FunctionExpression AST support is added.
 
 **Files**: `pkg/types/object.go` (+169 lines inheritance code)
 **Tests**: `pkg/types/inheritance_test.go` (11 tests), `pkg/vm/handlers_inheritance_test.go` (6 tests)
-**Commit**: TBD
+**Commit**: 26138f2
 
 **Note**: Complete inheritance system with all PHP features:
 - `InheritFrom()` method to copy properties/methods from parent to child
@@ -907,7 +907,7 @@ Closures deferred until FunctionExpression AST support is added.
 
 **Files**: `pkg/types/object.go` (+95 lines interface validation)
 **Tests**: `pkg/types/interface_test.go` (15 tests), `pkg/vm/handlers_interface_test.go` (6 tests)
-**Commit**: TBD
+**Commit**: 3ddb7eb
 
 **Note**: Complete interface system with all PHP features:
 - InterfaceEntry structure already existed with full metadata
@@ -932,7 +932,7 @@ Closures deferred until FunctionExpression AST support is added.
 
 **Files**: `pkg/types/object.go` (+360 lines trait application logic)
 **Tests**: `pkg/types/trait_test.go` (16 tests, all passing)
-**Commit**: TBD
+**Commit**: 3ddb7eb
 
 **Note**: Complete trait system implementing PHP's horizontal inheritance:
 - TraitEntry structure already existed with properties, methods, and UsedTraits
@@ -955,7 +955,7 @@ Closures deferred until FunctionExpression AST support is added.
 
 **Files**: `pkg/types/object.go` (+159 lines enum support)
 **Tests**: `pkg/types/enum_test.go` (19 tests, all passing)
-**Commit**: TBD
+**Commit**: 3ddb7eb
 
 **Note**: Complete PHP 8.1+ enum system with pure and backed enums:
 - `NewEnumEntry()` creates enum class entries (pure or backed with int/string)
@@ -980,7 +980,7 @@ Closures deferred until FunctionExpression AST support is added.
 
 **Files**: `pkg/types/object.go` (+158 lines magic method support)
 **Tests**: `pkg/types/magic_test.go` (19 tests, all passing)
-**Commit**: TBD
+**Commit**: 3ddb7eb
 
 **Note**: Complete magic method system with validation and inheritance:
 - `HasMagicMethod()` checks if class has a specific magic method (with parent lookup)
@@ -1006,7 +1006,7 @@ Closures deferred until FunctionExpression AST support is added.
 
 **Files**: `pkg/types/object.go` (+298 lines type checking)
 **Tests**: `pkg/types/typecheck_test.go` (24 tests, all passing)
-**Commit**: TBD
+**Commit**: 3ddb7eb
 
 **Note**: Complete type checking system for PHP 7.4+ and PHP 8.x type features:
 - `ParseType()` parses type strings with full support for:
@@ -1034,7 +1034,7 @@ Closures deferred until FunctionExpression AST support is added.
 
 **Files**: `pkg/types/object.go` (+116 lines late static binding)
 **Tests**: `pkg/types/static_test.go` (13 tests, all passing)
-**Commit**: TBD
+**Commit**: 3ddb7eb
 
 **Note**: Complete late static binding system for PHP 5.3+ static:: keyword:
 - `ResolveStaticClass()` resolves static:: to the called class (late binding)
@@ -1058,7 +1058,7 @@ Closures deferred until FunctionExpression AST support is added.
 
 **Files**: `pkg/types/object.go` (+208 lines reflection API)
 **Tests**: `pkg/types/reflection_test.go` (34 tests, all passing)
-**Commit**: TBD
+**Commit**: 3ddb7eb
 
 **Note**: Complete reflection API for runtime class introspection:
 - **Class Information**:
