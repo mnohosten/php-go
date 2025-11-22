@@ -339,6 +339,46 @@ func (c *Compiler) Compile(node ast.Node) error {
 			vm.TmpVarOperand(0))
 		return nil
 
+	// Interpolated String - compile as series of concatenations
+	case *ast.InterpolatedStringExpression:
+		if len(node.Parts) == 0 {
+			// Empty interpolated string - just return empty string
+			constIdx := c.AddConstant("")
+			c.EmitWithLine(vm.OpQMAssign, uint32(node.Token.Pos.Line),
+				vm.ConstOperand(uint32(constIdx)),
+				vm.UnusedOperand(),
+				vm.TmpVarOperand(0))
+			return nil
+		}
+
+		// Compile first part
+		if err := c.Compile(node.Parts[0]); err != nil {
+			return err
+		}
+		// Result in temp var 0
+
+		// Concatenate remaining parts
+		for i := 1; i < len(node.Parts); i++ {
+			// Move previous result from temp 0 to temp 1
+			c.EmitWithLine(vm.OpQMAssign, uint32(node.Token.Pos.Line),
+				vm.TmpVarOperand(0),
+				vm.UnusedOperand(),
+				vm.TmpVarOperand(1))
+
+			// Compile next part into temp var 0
+			if err := c.Compile(node.Parts[i]); err != nil {
+				return err
+			}
+
+			// Concatenate: temp var 1 . temp var 0 -> temp var 0
+			c.EmitWithLine(vm.OpConcat, uint32(node.Token.Pos.Line),
+				vm.TmpVarOperand(1), // Previous result
+				vm.TmpVarOperand(0), // Current part
+				vm.TmpVarOperand(0)) // Result back in temp var 0
+		}
+
+		return nil
+
 	case *ast.BooleanLiteral:
 		constIdx := c.AddConstant(node.Value)
 		c.EmitWithLine(vm.OpQMAssign, uint32(node.Token.Pos.Line),

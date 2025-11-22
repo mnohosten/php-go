@@ -190,9 +190,121 @@ func (p *Parser) parseFloatLiteral() ast.Expr {
 }
 
 func (p *Parser) parseStringLiteral() ast.Expr {
-	return &ast.StringLiteral{
-		Token: p.curToken,
-		Value: p.curToken.Literal,
+	strValue := p.curToken.Literal
+	token := p.curToken
+
+	// Check if string contains interpolation (simple $variable detection)
+	if !p.hasInterpolation(strValue) {
+		// No interpolation - return simple string literal
+		return &ast.StringLiteral{
+			Token: token,
+			Value: strValue,
+		}
+	}
+
+	// String has interpolation - parse it into parts
+	return p.parseInterpolatedString(token, strValue)
+}
+
+// hasInterpolation checks if a string contains variable interpolation
+func (p *Parser) hasInterpolation(str string) bool {
+	for i := 0; i < len(str); i++ {
+		if str[i] == '\\' && i+1 < len(str) {
+			// Skip escaped characters
+			i++
+			continue
+		}
+		if str[i] == '$' && i+1 < len(str) {
+			// Check if next char is valid variable start (letter or underscore)
+			next := str[i+1]
+			if (next >= 'a' && next <= 'z') || (next >= 'A' && next <= 'Z') || next == '_' {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// parseInterpolatedString parses a string with interpolated variables
+// Example: "Hello $name" becomes ["Hello ", $name]
+func (p *Parser) parseInterpolatedString(token lexer.Token, str string) ast.Expr {
+	parts := []ast.Expr{}
+	var currentPart []byte
+	i := 0
+
+	for i < len(str) {
+		if str[i] == '\\' && i+1 < len(str) {
+			// Handle escape sequences
+			i++
+			switch str[i] {
+			case 'n':
+				currentPart = append(currentPart, '\n')
+			case 't':
+				currentPart = append(currentPart, '\t')
+			case 'r':
+				currentPart = append(currentPart, '\r')
+			case '\\':
+				currentPart = append(currentPart, '\\')
+			case '$':
+				currentPart = append(currentPart, '$')
+			default:
+				currentPart = append(currentPart, str[i])
+			}
+			i++
+			continue
+		}
+
+		if str[i] == '$' && i+1 < len(str) {
+			next := str[i+1]
+			if (next >= 'a' && next <= 'z') || (next >= 'A' && next <= 'Z') || next == '_' {
+				// Found variable interpolation
+				// Add current string part if non-empty
+				if len(currentPart) > 0 {
+					parts = append(parts, &ast.StringLiteral{
+						Token: token,
+						Value: string(currentPart),
+					})
+					currentPart = nil
+				}
+
+				// Extract variable name
+				i++ // skip $
+				varStart := i
+				for i < len(str) && (isLetter(str[i]) || isDigit(str[i]) || str[i] == '_') {
+					i++
+				}
+				varName := str[varStart:i]
+
+				// Add variable to parts
+				parts = append(parts, &ast.Variable{
+					Token: token,
+					Name:  varName,
+				})
+				continue
+			}
+		}
+
+		// Regular character
+		currentPart = append(currentPart, str[i])
+		i++
+	}
+
+	// Add final string part if non-empty
+	if len(currentPart) > 0 {
+		parts = append(parts, &ast.StringLiteral{
+			Token: token,
+			Value: string(currentPart),
+		})
+	}
+
+	// If only one part, return it directly
+	if len(parts) == 1 {
+		return parts[0]
+	}
+
+	return &ast.InterpolatedStringExpression{
+		Token: token,
+		Parts: parts,
 	}
 }
 
@@ -736,4 +848,16 @@ func (p *Parser) parseStaticClosureOrProperty() ast.Expr {
 		Token: staticToken,
 		Value: staticToken.Literal,
 	}
+}
+
+// Helper functions for string interpolation
+
+// isLetter checks if a byte is a letter (a-z, A-Z)
+func isLetter(ch byte) bool {
+	return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')
+}
+
+// isDigit checks if a byte is a digit (0-9)
+func isDigit(ch byte) bool {
+	return ch >= '0' && ch <= '9'
 }

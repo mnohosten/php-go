@@ -108,6 +108,18 @@ func (sl *StringLiteral) expressionNode()      {}
 func (sl *StringLiteral) TokenLiteral() string { return sl.Token.Literal }
 func (sl *StringLiteral) String() string       { return sl.Token.Literal }
 
+// InterpolatedStringExpression represents a string with interpolated expressions
+// Example: "Hello $name" or "Value: {$obj->prop}"
+// This is converted to a series of concatenations at compile time
+type InterpolatedStringExpression struct {
+	Token lexer.Token // The opening quote
+	Parts []Expr      // Mix of StringLiteral and other expressions
+}
+
+func (ise *InterpolatedStringExpression) expressionNode()      {}
+func (ise *InterpolatedStringExpression) TokenLiteral() string { return ise.Token.Literal }
+func (ise *InterpolatedStringExpression) String() string       { return `"...(interpolated)..."` }
+
 // BooleanLiteral represents a boolean literal
 type BooleanLiteral struct {
 	Token lexer.Token
