@@ -53,10 +53,13 @@
 
 ### Missing Features
 
-4. **test_arrays.php** - `Compilation error: assignment to non-variable not yet implemented`
+4. **test_arrays.php** - Array assignment compiles but outputs wrong value
    - **Priority**: MEDIUM
-   - **Issue**: Array element assignment not implemented
-   - **Example**: `$arr[0] = value`
+   - **Issue**: Temp variable allocation conflict in ASSIGN_DIM compilation
+   - **Root Cause**: Assignment compiles value first, then array, then index - all use TMPVAR(0)
+   - **Example**: `$arr[0] = "first"` - value gets overwritten during compilation
+   - **Fix Required**: Restructure AssignmentExpression to check IndexExpression before compiling Right
+   - **Status**: Compilation support added, runtime behavior incorrect
 
 5. **test_class_simple.php** - `Runtime error: unknown opcode: DECLARE_CLASS`
    - **Priority**: MEDIUM
