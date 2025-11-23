@@ -660,8 +660,8 @@ func (c *Compiler) Compile(node ast.Node) error {
 			// Define parameter variable in closure scope
 			symbol := c.DefineVariable(param.Name.Name)
 
-		// Add parameter index to constants pool
-		paramIdxConst := c.AddConstant(int64(i))
+			// Add parameter index to constants pool
+			paramIdxConst := c.AddConstant(int64(i))
 
 			if param.Variadic {
 				// RECV_VARIADIC for ...args
@@ -677,9 +677,9 @@ func (c *Compiler) Compile(node ast.Node) error {
 				}
 
 				c.EmitWithLine(vm.OpRecvInit, uint32(node.Token.Pos.Line),
-					vm.ConstOperand(uint32(paramIdxConst)),             // Parameter index
+					vm.ConstOperand(uint32(paramIdxConst)), // Parameter index
 					vm.TmpVarOperand(0),                    // Default value in temp 0
-					vm.CVOperand(uint32(symbol.Index)))      // Store in compiled variable
+					vm.CVOperand(uint32(symbol.Index)))     // Store in compiled variable
 			} else {
 				// RECV for required parameters
 				recvOp := vm.OpRecv
@@ -688,7 +688,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 				}
 
 				c.EmitWithLine(recvOp, uint32(node.Token.Pos.Line),
-					vm.ConstOperand(uint32(paramIdxConst)),    // Parameter index
+					vm.ConstOperand(uint32(paramIdxConst)), // Parameter index
 					vm.UnusedOperand(),
 					vm.CVOperand(uint32(symbol.Index))) // Store in compiled variable
 			}
@@ -725,8 +725,8 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 		c.EmitWithExtended(vm.OpDeclareLambdaFunction, uint32(node.Token.Pos.Line),
-			uint32(len(node.Parameters)),  // Number of parameters
-			vm.ConstOperand(uint32(flags)), // Flags (static, byref)
+			uint32(len(node.Parameters)),          // Number of parameters
+			vm.ConstOperand(uint32(flags)),        // Flags (static, byref)
 			vm.ConstOperand(uint32(closureStart)), // Closure start position
 			vm.ConstOperand(uint32(closureEnd)))   // Closure end position
 
@@ -741,8 +741,8 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 			c.EmitWithLine(vm.OpBindLexical, uint32(node.Token.Pos.Line),
 				vm.ConstOperand(uint32(varNameIdx)), // Variable name
-				vm.ConstOperand(byRefFlag),           // By reference flag
-				vm.TmpVarOperand(0))                  // Closure object in temp 0
+				vm.ConstOperand(byRefFlag),          // By reference flag
+				vm.TmpVarOperand(0))                 // Closure object in temp 0
 		}
 
 		return nil
@@ -781,8 +781,8 @@ func (c *Compiler) Compile(node ast.Node) error {
 			// Define parameter variable in arrow function scope
 			symbol := c.DefineVariable(param.Name.Name)
 
-		// Add parameter index to constants pool
-		paramIdxConst := c.AddConstant(int64(i))
+			// Add parameter index to constants pool
+			paramIdxConst := c.AddConstant(int64(i))
 
 			if param.Variadic {
 				c.EmitWithLine(vm.OpRecvVariadic, uint32(node.Token.Pos.Line),
@@ -840,10 +840,10 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 		c.EmitWithExtended(vm.OpDeclareLambdaFunction, uint32(node.Token.Pos.Line),
-			uint32(len(node.Parameters)),           // Number of parameters
-			vm.ConstOperand(uint32(flags)),          // Flags (static, byref)
-			vm.ConstOperand(uint32(arrowStart)),     // Arrow function start position
-			vm.ConstOperand(uint32(arrowEnd)))       // Arrow function end position
+			uint32(len(node.Parameters)),        // Number of parameters
+			vm.ConstOperand(uint32(flags)),      // Flags (static, byref)
+			vm.ConstOperand(uint32(arrowStart)), // Arrow function start position
+			vm.ConstOperand(uint32(arrowEnd)))   // Arrow function end position
 
 		// Arrow functions auto-capture variables from parent scope
 		// Emit BIND_LEXICAL for each captured variable
@@ -858,8 +858,8 @@ func (c *Compiler) Compile(node ast.Node) error {
 			// Result: closure object (from previous DECLARE_LAMBDA_FUNCTION)
 			c.EmitWithLine(vm.OpBindLexical, uint32(node.Token.Pos.Line),
 				vm.ConstOperand(uint32(nameIdx)), // Variable name
-				vm.ConstOperand(0),                // By-value (0 = false)
-				vm.TmpVarOperand(0))               // Closure in temp var 0
+				vm.ConstOperand(0),               // By-value (0 = false)
+				vm.TmpVarOperand(0))              // Closure in temp var 0
 		}
 
 		return nil
@@ -1354,8 +1354,10 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 		// JMP back to start
+		// Add start position to constants for backward jump
+		startPosConst := c.AddConstant(int64(startPos))
 		c.EmitWithLine(vm.OpJmp, uint32(node.Token.Pos.Line),
-			vm.ConstOperand(uint32(startPos)),
+			vm.ConstOperand(uint32(startPosConst)),
 			vm.UnusedOperand(),
 			vm.UnusedOperand())
 
@@ -1429,8 +1431,10 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 		// JMP back to condition
+		// Add condition start position to constants for backward jump
+		condStartConst := c.AddConstant(int64(condStart))
 		c.EmitWithLine(vm.OpJmp, uint32(node.Token.Pos.Line),
-			vm.ConstOperand(uint32(condStart)),
+			vm.ConstOperand(uint32(condStartConst)),
 			vm.UnusedOperand(),
 			vm.UnusedOperand())
 
@@ -1515,8 +1519,10 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 		// JMP back to FE_FETCH
+		// Add start position to constants for backward jump
+		foreachStartConst := c.AddConstant(int64(startPos))
 		c.EmitWithLine(vm.OpJmp, uint32(node.Token.Pos.Line),
-			vm.ConstOperand(uint32(startPos)),
+			vm.ConstOperand(uint32(foreachStartConst)),
 			vm.UnusedOperand(),
 			vm.UnusedOperand())
 
@@ -1768,10 +1774,10 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 		// Emit placeholder DECLARE_FUNCTION (will be patched)
 		declareFuncPos := c.EmitWithExtended(vm.OpDeclareFunction, uint32(node.Token.Pos.Line),
-			uint32(len(node.Parameters)), // Number of parameters
+			uint32(len(node.Parameters)),         // Number of parameters
 			vm.ConstOperand(uint32(funcNameIdx)), // Function name
-			vm.UnusedOperand(), // Function start position (will be patched)
-			vm.UnusedOperand()) // Function end position (will be patched)
+			vm.UnusedOperand(),                   // Function start position (will be patched)
+			vm.UnusedOperand())                   // Function end position (will be patched)
 
 		// Emit JMP to skip over function body (will be patched later)
 		jmpPos := c.EmitWithLine(vm.OpJmp, uint32(node.Token.Pos.Line),
@@ -1807,9 +1813,9 @@ func (c *Compiler) Compile(node ast.Node) error {
 				}
 
 				c.EmitWithLine(vm.OpRecvInit, uint32(node.Token.Pos.Line),
-					vm.ConstOperand(uint32(paramIdxConst)),    // Parameter index from constants
-					vm.TmpVarOperand(0),           // Default value in temp 0
-					vm.CVOperand(uint32(symbol.Index))) // Store in compiled variable
+					vm.ConstOperand(uint32(paramIdxConst)), // Parameter index from constants
+					vm.TmpVarOperand(0),                    // Default value in temp 0
+					vm.CVOperand(uint32(symbol.Index)))     // Store in compiled variable
 			} else {
 				// RECV for required parameters
 				recvOp := vm.OpRecv
@@ -1818,7 +1824,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 				}
 
 				c.EmitWithLine(recvOp, uint32(node.Token.Pos.Line),
-					vm.ConstOperand(uint32(paramIdxConst)),    // Parameter index from constants
+					vm.ConstOperand(uint32(paramIdxConst)), // Parameter index from constants
 					vm.UnusedOperand(),
 					vm.CVOperand(uint32(symbol.Index))) // Store in compiled variable
 			}
@@ -1930,8 +1936,8 @@ func (c *Compiler) Compile(node ast.Node) error {
 				for i, param := range decl.Parameters {
 					symbol := c.DefineVariable(param.Name.Name)
 
-				// Add parameter index to constants pool
-				paramIdxConst := c.AddConstant(int64(i))
+					// Add parameter index to constants pool
+					paramIdxConst := c.AddConstant(int64(i))
 
 					if param.Variadic {
 						c.EmitWithLine(vm.OpRecvVariadic, uint32(decl.Token.Pos.Line),
@@ -1996,14 +2002,14 @@ func (c *Compiler) Compile(node ast.Node) error {
 		if node.Extends != nil {
 			// Class with parent - use extended value for parent index
 			c.EmitWithExtended(vm.OpDeclareClass, uint32(node.Token.Pos.Line),
-				uint32(parentIdx), // Parent class name index
+				uint32(parentIdx),                     // Parent class name index
 				vm.ConstOperand(uint32(classNameIdx)), // Class name
 				vm.ConstOperand(uint32(classStart)),   // Class start position
 				vm.ConstOperand(uint32(classEnd)))     // Class end position
 		} else {
 			// Class without parent
 			c.EmitWithExtended(vm.OpDeclareClass, uint32(node.Token.Pos.Line),
-				0, // No parent
+				0,                                     // No parent
 				vm.ConstOperand(uint32(classNameIdx)), // Class name
 				vm.ConstOperand(uint32(classStart)),   // Class start position
 				vm.ConstOperand(uint32(classEnd)))     // Class end position
@@ -2521,9 +2527,9 @@ func (c *Compiler) applyStrengthReduction(node *ast.InfixExpression) (bool, erro
 
 			// Emit shift left instead of multiply
 			c.EmitWithLine(vm.OpSL, uint32(node.Token.Pos.Line),
-				vm.TmpVarOperand(0),          // Value to shift
+				vm.TmpVarOperand(0),               // Value to shift
 				vm.ConstOperand(uint32(shiftIdx)), // Shift amount
-				vm.TmpVarOperand(0))           // Result
+				vm.TmpVarOperand(0))               // Result
 			return true, nil
 		}
 		if powerOf2, shiftAmount := isPowerOfTwo(node.Left); powerOf2 {
@@ -2728,9 +2734,9 @@ func findVarsRecursive(node ast.Node, vars map[string]bool) {
 
 	// Literal values don't reference variables
 	case *ast.IntegerLiteral, *ast.FloatLiteral, *ast.StringLiteral,
-	     *ast.BooleanLiteral, *ast.NullLiteral:
+		*ast.BooleanLiteral, *ast.NullLiteral:
 		// No variables in literals
 
-	// Default: ignore unknown node types
+		// Default: ignore unknown node types
 	}
 }
