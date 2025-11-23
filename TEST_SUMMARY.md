@@ -62,10 +62,10 @@
 **Impact**: Complex expressions with mixed operators may evaluate incorrectly
 **Root Cause**: Temp variable handling in nested binary expressions
 
-### 2. Functions with Parameters Not Working
-**Error**: "unknown opcode: RECV"
-**Impact**: Cannot use user-defined functions with parameters
-**Missing**: OpRecv, OpRecvInit, OpRecvVariadic handlers in VM
+### 2. Functions with Parameters ✅ FIXED
+**Status**: Now working correctly
+**Fixed**: Implemented OpRecv, OpRecvInit handlers in VM
+**Note**: Function declarations now properly register and execute with parameters
 
 ### 3. Classes Not Working
 **Error**: "unknown opcode: DECLARE_CLASS"
@@ -75,10 +75,10 @@
 ## ❌ Unimplemented Features
 
 ### Missing VM Opcode Handlers
-- `RECV` - Receive function parameters
-- `RECV_INIT` - Receive parameters with default values
-- `RECV_VARIADIC` - Receive variadic parameters
-- `DECLARE_CLASS` - Declare classes
+- ~~`RECV` - Receive function parameters~~ ✅ IMPLEMENTED
+- ~~`RECV_INIT` - Receive parameters with default values~~ ✅ IMPLEMENTED
+- `RECV_VARIADIC` - Receive variadic parameters (not yet needed)
+- `DECLARE_CLASS` - Declare classes (implemented but needs testing)
 - `NEW` - Instantiate objects
 - `FETCH_OBJ_*` - Object property access
 - `ASSIGN_OBJ` - Object property assignment
