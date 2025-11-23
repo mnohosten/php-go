@@ -157,6 +157,24 @@ type ParameterDef struct {
 	Visibility   PropertyVisibility // Visibility if promoted
 }
 
+// FunctionDef defines a standalone function (not a method)
+type FunctionDef struct {
+	Name         string          // Function name
+	FileName     string          // File where function is defined
+	StartLine    int             // Starting line number
+	EndLine      int             // Ending line number
+	Instructions []interface{}   // Bytecode instructions
+	NumLocals    int             // Number of local variables
+	NumParams    int             // Number of parameters
+	Parameters   []*ParameterDef // Parameter definitions
+	ReturnType   string          // Return type declaration
+	ReturnByRef  bool            // Returns by reference
+	IsInternal   bool            // Is this a built-in function?
+	IsGenerator  bool            // Is this a generator function?
+	IsDeprecated bool            // Is this function deprecated?
+	DocComment   string          // Documentation comment
+}
+
 // ClassConstant represents a class constant with visibility
 type ClassConstant struct {
 	Name       string             // Constant name
