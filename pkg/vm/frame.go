@@ -39,6 +39,15 @@ type Frame struct {
 
 	// Generator context (if this frame is executing a generator)
 	generator interface{} // *runtime.Generator (using interface{} to avoid import cycle)
+
+	// Exception context (if an exception is being handled)
+	exception interface{} // *runtime.Exception (using interface{} to avoid import cycle)
+
+	// Last executed line number (for stack traces)
+	lastLine uint32
+
+	// Class entry context (for method/property access)
+	classEntry *types.ClassEntry
 }
 
 // NewFrame creates a new execution frame for a function

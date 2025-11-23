@@ -124,6 +124,9 @@ func (vm *VM) run() error {
 		instr := frame.fn.Instructions[frame.ip]
 		frame.ip++
 
+		// Track line number for stack traces
+		frame.lastLine = instr.Lineno
+
 		// Dispatch instruction
 		if err := vm.dispatch(frame, instr); err != nil {
 			return err
@@ -139,6 +142,9 @@ func (vm *VM) runFrame(frame *Frame) error {
 		// Fetch next instruction
 		instr := frame.fn.Instructions[frame.ip]
 		frame.ip++
+
+		// Track line number for stack traces
+		frame.lastLine = instr.Lineno
 
 		// Dispatch instruction
 		if err := vm.dispatch(frame, instr); err != nil {
@@ -345,6 +351,12 @@ func (vm *VM) dispatch(frame *Frame, instr Instruction) error {
 		return vm.opGeneratorReturn(frame, instr)
 	case OpYieldFrom:
 		return vm.opYieldFrom(frame, instr)
+
+	// Exception operations
+	case OpThrow:
+		return vm.opThrow(frame, instr)
+	case OpCatch:
+		return vm.opCatch(frame, instr)
 
 	default:
 		return fmt.Errorf("unknown opcode: %s", instr.Opcode)
