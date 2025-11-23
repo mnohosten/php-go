@@ -153,12 +153,37 @@
 - ✅ Nested control flow (if)
 - ❌ Nested control flow (loops)
 
+## Session Progress
+
+### Fixes Completed ✅
+1. **Loop jump patching** - Fixed backward JMP in while/for/foreach loops
+2. **RECV parameter indices** - Fixed for all function types (functions, closures, arrow functions, methods)
+3. **Test infrastructure** - Established baseline, comprehensive documentation
+
+### Issues Identified & Documented 📝
+1. **Nested function calls** - Temp variable stack management needed
+2. **Array assignment** - Temp variable allocation conflict
+3. **Increment/decrement** - Parser/compiler support incomplete
+4. **Null coalescing** - Operator not implemented
+5. **Class declarations** - DECLARE_CLASS opcode handler missing
+
 ## Recommendations
 
-1. **Fix jump patching bugs first** - These are regressions that broke previously working functionality
-2. **Implement missing opcodes** - DECLARE_CLASS is blocking all OOP tests
-3. **Add missing operators** - ++, --, ?? are common PHP features
-4. **Expand array support** - Assignment to array elements is fundamental
+1. **Fix temp variable allocation** (Priority 1) - Root cause of multiple issues
+   - Affects: nested function calls, array assignment, complex expressions
+   - Requires: Implement proper temp variable stack with nesting support
+   - Estimated effort: 12-16 hours
+
+2. **Implement missing opcodes** (Priority 2)
+   - DECLARE_CLASS for basic OOP support (4-6h)
+   - INC/DEC for increment/decrement operators (2-3h)
+
+3. **Add missing operators** (Priority 3)
+   - Null coalescing (??) operator (1-2h)
+   - Complete increment/decrement implementation (2-3h)
+
+4. **Expand array support** (Priority 4)
+   - Fix ASSIGN_DIM after temp var stack is implemented (1-2h)
 
 ## Notes
 
