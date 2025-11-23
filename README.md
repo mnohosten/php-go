@@ -114,7 +114,7 @@ $response = go_call('http.Get', 'https://api.example.com');
 $hash = go_call('crypto.SHA256', $data);
 ```
 
-See [docs/examples/](docs/examples/) for more examples.
+See [examples/](examples/) for working examples and [docs/examples/](docs/examples/) for planned examples.
 
 ## Performance
 
@@ -218,8 +218,14 @@ php-go/
 │   └── goext/           # Go integration
 ├── docs/                # Documentation
 ├── tests/               # Test suite
+│   ├── phptest/        # PHPT test runner
+│   └── php/            # PHP test scripts
 ├── benchmarks/          # Performance benchmarks
 └── examples/            # Example code
+    ├── basic/          # Basic language features
+    ├── oop/            # Object-oriented examples
+    ├── parallel/       # Parallelization (future)
+    └── advanced/       # Advanced features
 ```
 
 ## References
