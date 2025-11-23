@@ -660,10 +660,13 @@ func (c *Compiler) Compile(node ast.Node) error {
 			// Define parameter variable in closure scope
 			symbol := c.DefineVariable(param.Name.Name)
 
+		// Add parameter index to constants pool
+		paramIdxConst := c.AddConstant(int64(i))
+
 			if param.Variadic {
 				// RECV_VARIADIC for ...args
 				c.EmitWithLine(vm.OpRecvVariadic, uint32(node.Token.Pos.Line),
-					vm.ConstOperand(uint32(i)), // Parameter index
+					vm.ConstOperand(uint32(paramIdxConst)), // Parameter index
 					vm.UnusedOperand(),
 					vm.CVOperand(uint32(symbol.Index))) // Store in compiled variable
 			} else if param.DefaultValue != nil {
@@ -674,7 +677,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 				}
 
 				c.EmitWithLine(vm.OpRecvInit, uint32(node.Token.Pos.Line),
-					vm.ConstOperand(uint32(i)),             // Parameter index
+					vm.ConstOperand(uint32(paramIdxConst)),             // Parameter index
 					vm.TmpVarOperand(0),                    // Default value in temp 0
 					vm.CVOperand(uint32(symbol.Index)))      // Store in compiled variable
 			} else {
@@ -685,7 +688,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 				}
 
 				c.EmitWithLine(recvOp, uint32(node.Token.Pos.Line),
-					vm.ConstOperand(uint32(i)),    // Parameter index
+					vm.ConstOperand(uint32(paramIdxConst)),    // Parameter index
 					vm.UnusedOperand(),
 					vm.CVOperand(uint32(symbol.Index))) // Store in compiled variable
 			}
@@ -778,9 +781,12 @@ func (c *Compiler) Compile(node ast.Node) error {
 			// Define parameter variable in arrow function scope
 			symbol := c.DefineVariable(param.Name.Name)
 
+		// Add parameter index to constants pool
+		paramIdxConst := c.AddConstant(int64(i))
+
 			if param.Variadic {
 				c.EmitWithLine(vm.OpRecvVariadic, uint32(node.Token.Pos.Line),
-					vm.ConstOperand(uint32(i)),
+					vm.ConstOperand(uint32(paramIdxConst)),
 					vm.UnusedOperand(),
 					vm.CVOperand(uint32(symbol.Index)))
 			} else if param.DefaultValue != nil {
@@ -788,7 +794,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 					return err
 				}
 				c.EmitWithLine(vm.OpRecvInit, uint32(node.Token.Pos.Line),
-					vm.ConstOperand(uint32(i)),
+					vm.ConstOperand(uint32(paramIdxConst)),
 					vm.TmpVarOperand(0),
 					vm.CVOperand(uint32(symbol.Index)))
 			} else {
@@ -797,7 +803,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 					recvOp = vm.OpSendRef
 				}
 				c.EmitWithLine(recvOp, uint32(node.Token.Pos.Line),
-					vm.ConstOperand(uint32(i)),
+					vm.ConstOperand(uint32(paramIdxConst)),
 					vm.UnusedOperand(),
 					vm.CVOperand(uint32(symbol.Index)))
 			}
@@ -1924,9 +1930,12 @@ func (c *Compiler) Compile(node ast.Node) error {
 				for i, param := range decl.Parameters {
 					symbol := c.DefineVariable(param.Name.Name)
 
+				// Add parameter index to constants pool
+				paramIdxConst := c.AddConstant(int64(i))
+
 					if param.Variadic {
 						c.EmitWithLine(vm.OpRecvVariadic, uint32(decl.Token.Pos.Line),
-							vm.ConstOperand(uint32(i)),
+							vm.ConstOperand(uint32(paramIdxConst)),
 							vm.UnusedOperand(),
 							vm.CVOperand(uint32(symbol.Index)))
 					} else if param.DefaultValue != nil {
@@ -1934,7 +1943,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 							return err
 						}
 						c.EmitWithLine(vm.OpRecvInit, uint32(decl.Token.Pos.Line),
-							vm.ConstOperand(uint32(i)),
+							vm.ConstOperand(uint32(paramIdxConst)),
 							vm.TmpVarOperand(0),
 							vm.CVOperand(uint32(symbol.Index)))
 					} else {
@@ -1943,7 +1952,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 							recvOp = vm.OpSendRef
 						}
 						c.EmitWithLine(recvOp, uint32(decl.Token.Pos.Line),
-							vm.ConstOperand(uint32(i)),
+							vm.ConstOperand(uint32(paramIdxConst)),
 							vm.UnusedOperand(),
 							vm.CVOperand(uint32(symbol.Index)))
 					}

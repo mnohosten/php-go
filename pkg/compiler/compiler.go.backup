@@ -1117,7 +1117,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 			// Patch JMP_SET to jump here
 			endPos := c.CurrentPosition()
-			c.ChangeOperand(jmpSetPos, 2, vm.ConstOperand(uint32(endPos)))
+			c.PatchJump(jmpSetPos, 2, endPos)
 			return nil
 		}
 
@@ -1146,7 +1146,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 		// Patch JMPZ to jump to alternative
 		altPos := c.CurrentPosition()
-		c.ChangeOperand(jmpzPos, 2, vm.ConstOperand(uint32(altPos)))
+		c.PatchJump(jmpzPos, 2, altPos)
 
 		// Compile alternative (false branch)
 		if err := c.Compile(node.Alternative); err != nil {
@@ -1160,7 +1160,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 		// Patch JMP to jump to end
 		endPos := c.CurrentPosition()
-		c.ChangeOperand(jmpEndPos, 1, vm.ConstOperand(uint32(endPos)))
+		c.PatchJump(jmpEndPos, 1, endPos)
 		return nil
 
 	// Type Cast
@@ -1274,7 +1274,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 		// Patch JMPZ to point here
 		altStart := c.CurrentPosition()
-		c.ChangeOperand(jmpzPos, 2, vm.ConstOperand(uint32(altStart)))
+		c.PatchJump(jmpzPos, 2, altStart)
 
 		// Track positions for elseif jumps
 		elseifJumps := []int{}
@@ -1306,7 +1306,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 			// Patch JMPZ to next clause
 			nextClause := c.CurrentPosition()
-			c.ChangeOperand(elseifJmpz, 2, vm.ConstOperand(uint32(nextClause)))
+			c.PatchJump(elseifJmpz, 2, nextClause)
 		}
 
 		// Compile alternative (else) if present
@@ -1318,9 +1318,9 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 		// Patch all jumps to end
 		endPos := c.CurrentPosition()
-		c.ChangeOperand(jmpEndPos, 1, vm.ConstOperand(uint32(endPos)))
+		c.PatchJump(jmpEndPos, 1, endPos)
 		for _, jmp := range elseifJumps {
-			c.ChangeOperand(jmp, 1, vm.ConstOperand(uint32(endPos)))
+			c.PatchJump(jmp, 1, endPos)
 		}
 		return nil
 
@@ -1355,7 +1355,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 		// Patch JMPZ to jump here (end of loop)
 		endPos := c.CurrentPosition()
-		c.ChangeOperand(jmpzPos, 2, vm.ConstOperand(uint32(endPos)))
+		c.PatchJump(jmpzPos, 2, endPos)
 
 		// Exit loop and patch break/continue
 		c.ExitLoop(endPos)
@@ -1431,7 +1431,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		// Patch condition JMPZ to jump here (end of loop)
 		endPos := c.CurrentPosition()
 		if len(node.Condition) > 0 {
-			c.ChangeOperand(jmpzPos, 2, vm.ConstOperand(uint32(endPos)))
+			c.PatchJump(jmpzPos, 2, endPos)
 		}
 
 		// Update loop context to use increment position for continue
@@ -1518,7 +1518,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		endPos := c.CurrentPosition()
 
 		// Patch FE_FETCH jump
-		c.ChangeOperand(jmpEndPos, 1, vm.ConstOperand(uint32(endPos)))
+		c.PatchJump(jmpEndPos, 1, endPos)
 
 		// FE_FREE: Clean up iterator
 		c.EmitWithLine(vm.OpFeFree, uint32(node.Token.Pos.Line),
@@ -1621,7 +1621,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 			// Patch jump to this case
 			caseBodyPos := c.CurrentPosition()
-			c.ChangeOperand(caseJumps[i], 1, vm.ConstOperand(uint32(caseBodyPos)))
+			c.PatchJump(caseJumps[i], 1, caseBodyPos)
 
 			// Compile case statements
 			for _, stmt := range switchCase.Body {
@@ -1635,7 +1635,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		// Compile default case if present
 		if defaultCase != nil {
 			defaultBodyPos := c.CurrentPosition()
-			c.ChangeOperand(jmpDefault, 1, vm.ConstOperand(uint32(defaultBodyPos)))
+			c.PatchJump(jmpDefault, 1, defaultBodyPos)
 
 			for _, stmt := range defaultCase.Body {
 				if err := c.Compile(stmt); err != nil {
@@ -1645,7 +1645,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		} else {
 			// No default case, patch jump to end
 			endPos := c.CurrentPosition()
-			c.ChangeOperand(jmpDefault, 1, vm.ConstOperand(uint32(endPos)))
+			c.PatchJump(jmpDefault, 1, endPos)
 		}
 
 		// End of switch
@@ -1712,12 +1712,12 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 		// End position
 		endPos := c.CurrentPosition()
-		c.ChangeOperand(jmpEndPos, 1, vm.ConstOperand(uint32(endPos)))
+		c.PatchJump(jmpEndPos, 1, endPos)
 
 		// Compile finally block if present
 		if node.Finally != nil {
 			finallyPos := c.CurrentPosition()
-			c.ChangeOperand(fastCallPos, 1, vm.ConstOperand(uint32(finallyPos)))
+			c.PatchJump(fastCallPos, 1, finallyPos)
 
 			if err := c.Compile(node.Finally); err != nil {
 				return err
@@ -1784,10 +1784,13 @@ func (c *Compiler) Compile(node ast.Node) error {
 			// Define parameter variable in function scope
 			symbol := c.DefineVariable(param.Name.Name)
 
+			// Add parameter index to constants
+			paramIdxConst := c.AddConstant(int64(i))
+
 			if param.Variadic {
 				// RECV_VARIADIC for ...args
 				c.EmitWithLine(vm.OpRecvVariadic, uint32(node.Token.Pos.Line),
-					vm.ConstOperand(uint32(i)), // Parameter index
+					vm.ConstOperand(uint32(paramIdxConst)), // Parameter index from constants
 					vm.UnusedOperand(),
 					vm.CVOperand(uint32(symbol.Index))) // Store in compiled variable
 			} else if param.DefaultValue != nil {
@@ -1798,7 +1801,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 				}
 
 				c.EmitWithLine(vm.OpRecvInit, uint32(node.Token.Pos.Line),
-					vm.ConstOperand(uint32(i)),    // Parameter index
+					vm.ConstOperand(uint32(paramIdxConst)),    // Parameter index from constants
 					vm.TmpVarOperand(0),           // Default value in temp 0
 					vm.CVOperand(uint32(symbol.Index))) // Store in compiled variable
 			} else {
@@ -1809,7 +1812,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 				}
 
 				c.EmitWithLine(recvOp, uint32(node.Token.Pos.Line),
-					vm.ConstOperand(uint32(i)),    // Parameter index
+					vm.ConstOperand(uint32(paramIdxConst)),    // Parameter index from constants
 					vm.UnusedOperand(),
 					vm.CVOperand(uint32(symbol.Index))) // Store in compiled variable
 			}
@@ -1835,19 +1838,14 @@ func (c *Compiler) Compile(node ast.Node) error {
 		// Function end position
 		funcEnd := c.CurrentPosition()
 
-		// Add function positions as constants
-		funcStartIdx := c.AddConstant(int64(funcStart))
-		funcEndIdx := c.AddConstant(int64(funcEnd))
-
 		// Patch the DECLARE_FUNCTION with actual function positions
 		// Op2 = funcStart, Result = funcEnd
-		c.ChangeOperand(declareFuncPos, 2, vm.ConstOperand(uint32(funcStartIdx)))
-		c.ChangeOperand(declareFuncPos, 3, vm.ConstOperand(uint32(funcEndIdx)))
+		c.PatchJump(declareFuncPos, 2, funcStart)
+		c.PatchJump(declareFuncPos, 3, funcEnd)
 
 		// Patch the JMP to skip over the function body
 		afterFunc := c.CurrentPosition()
-		afterFuncIdx := c.AddConstant(int64(afterFunc))
-		c.ChangeOperand(jmpPos, 1, vm.ConstOperand(uint32(afterFuncIdx)))
+		c.PatchJump(jmpPos, 1, afterFunc)
 
 		return nil
 
