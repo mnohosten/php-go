@@ -2378,13 +2378,23 @@ All property and parameter reflection functionality is already implemented and t
 **Tests**: 18 tests, all passing, ~100% coverage of attribute.go
 **Commit**: d6056e6
 
-### 9.9 Weak References (6h)
-- [ ] WeakReference class (2h)
-- [ ] WeakMap class (2h)
-- [ ] Reference tracking (1h)
-- [ ] GC integration (1h)
+### 9.9 Weak References (6h) ✅ COMPLETE
+- [x] WeakReference class (2h)
+- [x] WeakMap class (2h)
+- [x] Reference tracking (1h)
+- [x] GC integration (1h)
 
-**Files**: `pkg/runtime/weakref.go`
+**Files**: `pkg/runtime/weakref.go` (440 lines), `pkg/runtime/weakref_test.go` (585 lines, 25 tests)
+**Tests**: All 25 tests passing, 90%+ coverage
+**Commit**: 7e880a9
+
+**Note**: Complete PHP 7.4+ weak reference system:
+- WeakReference: Thread-safe weak object references with Get(), IsValid(), Invalidate()
+- WeakMap: Map with weak object keys (PHP 8.0+) with automatic cleanup
+- WeakReferenceRegistry: Centralized GC tracking with OnObjectDestroyed() integration
+- Helper functions: CreateWeakReference(), CreateWeakMap(), extraction from values
+- All operations thread-safe with sync.RWMutex
+- Resource wrapping for PHP interoperability
 
 ### 9.10 Named Arguments (8h)
 - [ ] Named argument parsing (2h)
