@@ -198,7 +198,8 @@ func handleRun(filePath string) {
 	bytecode := comp.Bytecode()
 
 	// Execute
-	machine := vm.NewWithBytecode(bytecode.Instructions, bytecode.Constants)
+	machine := vm.New()
+	machine.LoadConstants(bytecode.Constants)
 	err = machine.Execute(bytecode.Instructions)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Runtime error: %v\n", err)

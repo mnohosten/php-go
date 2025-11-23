@@ -54,6 +54,14 @@ func (vm *VM) opFetch(frame *Frame, instr Instruction) error {
 	return vm.setOperandValue(frame, instr.Result, value)
 }
 
+// opFree handles freeing temporary variables
+// In Go with garbage collection, this is mostly a no-op
+// We just clear the variable to allow GC to clean it up
+func (vm *VM) opFree(frame *Frame, instr Instruction) error {
+	// Free the temporary variable (set to undef/null)
+	return vm.setOperandValue(frame, instr.Op1, types.NewUndef())
+}
+
 // opUnset handles unsetting a variable
 func (vm *VM) opUnset(frame *Frame, instr Instruction) error {
 	// Set variable to null/undef

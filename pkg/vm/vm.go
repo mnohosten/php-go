@@ -217,6 +217,8 @@ func (vm *VM) dispatch(frame *Frame, instr Instruction) error {
 		return vm.opQMAssign(frame, instr)
 	case OpFetchR:
 		return vm.opFetch(frame, instr)
+	case OpFree:
+		return vm.opFree(frame, instr)
 
 	// Control flow
 	case OpJmp:
