@@ -36,6 +36,9 @@ func main() {
 		}
 		handleParse(os.Args[2:])
 
+	case "demo":
+		handleDemo()
+
 	case "--version", "-v":
 		fmt.Printf("PHP-Go v%s\n", version)
 		fmt.Println("PHP 8.4 Interpreter in Go with Automatic Parallelization")
@@ -203,6 +206,11 @@ func escapeString(s string) string {
 	return result
 }
 
+func handleDemo() {
+	fmt.Println("=== PHP-Go Parallelization Demo ===\n")
+	runParallelDemo()
+}
+
 func printUsage() {
 	fmt.Printf("PHP-Go v%s\n", version)
 	fmt.Println("PHP 8.4 Interpreter in Go with Automatic Parallelization")
@@ -217,6 +225,7 @@ func printUsage() {
 	fmt.Println("Development commands:")
 	fmt.Println("  php-go lex [--json] <file>     Tokenize file and show tokens")
 	fmt.Println("  php-go parse [--json] <file>   Parse file and show AST")
+	fmt.Println("  php-go demo                    Show parallelization demo")
 	fmt.Println()
 	fmt.Println("Options:")
 	fmt.Println("  --json                     Output in JSON format")
@@ -224,6 +233,6 @@ func printUsage() {
 	fmt.Println("Examples:")
 	fmt.Println("  php-go lex test.php        Show tokens from test.php")
 	fmt.Println("  php-go parse test.php      Show AST from test.php")
-	fmt.Println("  php-go parse --json test.php   Show AST in JSON format")
+	fmt.Println("  php-go demo                Show parallel features demo")
 	fmt.Println()
 }
