@@ -737,6 +737,27 @@ func (c *Compiler) Compile(node ast.Node) error {
 		// Remember arrow function start position
 		arrowStart := c.CurrentPosition()
 
+		// Find all variables referenced in the arrow function body
+		// We'll need to capture these from the parent scope
+		referencedVars := findReferencedVariables(node.Body)
+
+		// Filter out parameters - they're defined in the arrow function scope
+		paramNames := make(map[string]bool)
+		for _, param := range node.Parameters {
+			paramNames[param.Name.Name] = true
+		}
+
+		// Variables to capture (referenced but not parameters)
+		captureVars := make([]string, 0)
+		for _, varName := range referencedVars {
+			if !paramNames[varName] {
+				// Check if variable exists in parent scope
+				if _, ok := c.symbolTable.Resolve(varName); ok {
+					captureVars = append(captureVars, varName)
+				}
+			}
+		}
+
 		// Enter new scope for arrow function
 		c.EnterScope()
 
@@ -807,8 +828,21 @@ func (c *Compiler) Compile(node ast.Node) error {
 			vm.ConstOperand(uint32(arrowEnd)))       // Arrow function end position
 
 		// Arrow functions auto-capture variables from parent scope
-		// For now, we'll skip auto-capture implementation (would need sophisticated analysis)
-		// In a full implementation, we'd analyze node.Body to find referenced variables
+		// Emit BIND_LEXICAL for each captured variable
+		// Note: Arrow functions capture by value (not by reference)
+		for _, varName := range captureVars {
+			// Add variable name as constant
+			nameIdx := c.AddConstant(varName)
+
+			// Emit BIND_LEXICAL to capture the variable
+			// Op1: variable name (constant)
+			// Op2: by-reference flag (0 for by-value)
+			// Result: closure object (from previous DECLARE_LAMBDA_FUNCTION)
+			c.EmitWithLine(vm.OpBindLexical, uint32(node.Token.Pos.Line),
+				vm.ConstOperand(uint32(nameIdx)), // Variable name
+				vm.ConstOperand(0),                // By-value (0 = false)
+				vm.TmpVarOperand(0))               // Closure in temp var 0
+		}
 
 		return nil
 
@@ -2496,4 +2530,127 @@ func isPowerOfTwo(expr ast.Expr) (bool, int) {
 		}
 	}
 	return false, 0
+}
+
+// findReferencedVariables recursively finds all variable names referenced in an expression
+// This is used for automatic variable capture in arrow functions
+func findReferencedVariables(expr ast.Expr) []string {
+	vars := make(map[string]bool) // Use map to avoid duplicates
+	findVarsRecursive(expr, vars)
+
+	// Convert map to slice
+	result := make([]string, 0, len(vars))
+	for name := range vars {
+		result = append(result, name)
+	}
+	return result
+}
+
+// findVarsRecursive is the recursive helper for findReferencedVariables
+func findVarsRecursive(node ast.Node, vars map[string]bool) {
+	if node == nil {
+		return
+	}
+
+	switch n := node.(type) {
+	case *ast.Variable:
+		// Found a variable reference
+		vars[n.Name] = true
+
+	case *ast.InfixExpression:
+		findVarsRecursive(n.Left, vars)
+		findVarsRecursive(n.Right, vars)
+
+	case *ast.PrefixExpression:
+		findVarsRecursive(n.Right, vars)
+
+	case *ast.GroupedExpression:
+		findVarsRecursive(n.Expr, vars)
+
+	case *ast.TernaryExpression:
+		findVarsRecursive(n.Condition, vars)
+		if n.Consequence != nil {
+			findVarsRecursive(n.Consequence, vars)
+		}
+		findVarsRecursive(n.Alternative, vars)
+
+	case *ast.CallExpression:
+		// Check function name if it's a variable
+		findVarsRecursive(n.Function, vars)
+		// Check arguments
+		for _, arg := range n.Arguments {
+			findVarsRecursive(arg, vars)
+		}
+
+	case *ast.MethodCallExpression:
+		findVarsRecursive(n.Object, vars)
+		for _, arg := range n.Arguments {
+			findVarsRecursive(arg, vars)
+		}
+
+	case *ast.StaticCallExpression:
+		findVarsRecursive(n.Class, vars)
+		for _, arg := range n.Arguments {
+			findVarsRecursive(arg, vars)
+		}
+
+	case *ast.PropertyExpression:
+		findVarsRecursive(n.Object, vars)
+		findVarsRecursive(n.Property, vars)
+
+	case *ast.NullsafePropertyExpression:
+		findVarsRecursive(n.Object, vars)
+		findVarsRecursive(n.Property, vars)
+
+	case *ast.StaticPropertyExpression:
+		findVarsRecursive(n.Class, vars)
+		findVarsRecursive(n.Property, vars)
+
+	case *ast.ArrayExpression:
+		for _, elem := range n.Elements {
+			if elem.Key != nil {
+				findVarsRecursive(elem.Key, vars)
+			}
+			findVarsRecursive(elem.Value, vars)
+		}
+
+	case *ast.IndexExpression:
+		findVarsRecursive(n.Left, vars)
+		findVarsRecursive(n.Index, vars)
+
+	case *ast.AssignmentExpression:
+		findVarsRecursive(n.Left, vars)
+		findVarsRecursive(n.Right, vars)
+
+	case *ast.ClosureExpression:
+		// Don't traverse into closure body - it has its own scope
+		// But do check use clause variables
+		for _, use := range n.Use {
+			vars[use.Variable.Name] = true
+		}
+
+	case *ast.ArrowFunctionExpression:
+		// Don't traverse into arrow function body - it has its own scope
+		// Arrow functions auto-capture, so we don't need to track their references
+
+	case *ast.NewExpression:
+		// Check arguments
+		for _, arg := range n.Arguments {
+			findVarsRecursive(arg, vars)
+		}
+
+	case *ast.CastExpression:
+		findVarsRecursive(n.Expr, vars)
+
+	case *ast.InstanceofExpression:
+		findVarsRecursive(n.Left, vars)
+		findVarsRecursive(n.Right, vars)
+
+	// Literal values don't reference variables
+	case *ast.IntegerLiteral, *ast.FloatLiteral, *ast.StringLiteral,
+	     *ast.BooleanLiteral, *ast.NullLiteral:
+		// No variables in literals
+
+	// Default: ignore unknown node types
+	}
 }
