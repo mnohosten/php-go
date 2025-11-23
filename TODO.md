@@ -1931,7 +1931,7 @@ and integration with the VM.
 
 ## Phase 8: Go Integration 🔄 IN PROGRESS
 
-**Duration**: 5-6 weeks | **Status**: IN PROGRESS (20h / 105h completed - 19%) | **Effort**: 105 hours
+**Duration**: 5-6 weeks | **Status**: IN PROGRESS (30h / 105h completed - 29%) | **Effort**: 105 hours
 
 **Reference**: `docs/phases/08-go-integration/README.md`
 
@@ -1977,14 +1977,26 @@ and integration with the VM.
 - Registry operations: Register, Get, Has, List, Count, Clear
 - Comprehensive signature parsing and validation
 
-### 8.3 FFI Call Implementation (10h)
-- [ ] go_call() function (3h)
-- [ ] Function lookup (2h)
-- [ ] Argument marshaling (2h)
-- [ ] Return value marshaling (2h)
-- [ ] Error propagation (1h)
+### 8.3 FFI Call Implementation (10h) ✅ COMPLETE
+- [x] go_call() function (3h)
+- [x] Function lookup (2h)
+- [x] Argument marshaling (2h)
+- [x] Return value marshaling (2h)
+- [x] Error propagation (1h)
 
-**Files**: `pkg/goext/ffi.go`
+**Files**: `pkg/goext/ffi.go` (201 lines), `pkg/goext/ffi_test.go` (620 lines, 26 tests)
+**Coverage**: 82.1% (overall package)
+**Commit**: [Ready to commit]
+
+**Features**:
+- FFIManager for managing FFI system
+- GoCall() - Main PHP function to call Go functions
+- Helper functions: ListFunctions(), HasFunction(), GetFunctionInfo()
+- CallGoFunction() - Convenience wrapper for direct Go function calls
+- Complete argument and return value marshaling
+- Comprehensive error handling and propagation
+- Support for variadic Go functions
+- Thread-safe operations
 
 ### 8.4 Extension API (12h)
 - [ ] Extension interface (3h)
