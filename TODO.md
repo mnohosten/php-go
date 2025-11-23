@@ -9,7 +9,7 @@ This is the master task tracking file for the entire PHP-Go project. Each task r
 - ⏸️ Blocked
 - ⏭️ Deferred
 
-**Progress**: 97% (Phase 0-6 ✅ Complete + Phase 7 19%, 1022/1050 hours)
+**Progress**: 99% (Phase 0-6 ✅ Complete + Phase 7 31%, 1036/1050 hours)
 
 ---
 
@@ -1416,7 +1416,7 @@ and integration with the VM.
 
 ## Phase 7: Parallelization & Multi-threading 🔄 IN PROGRESS
 
-**Duration**: 6 weeks | **Status**: IN PROGRESS (22h / 115h completed - 19%) | **Effort**: 115 hours
+**Duration**: 6 weeks | **Status**: IN PROGRESS (36h / 115h completed - 31%) | **Effort**: 115 hours
 
 **Reference**: `docs/phases/07-parallelization/README.md`
 
@@ -1490,16 +1490,63 @@ and integration with the VM.
 
 **Files**: `pkg/parallel/array.go`
 
-### 7.5 Explicit Parallelism APIs (14h)
-- [ ] go_routine($callable) (2h)
-- [ ] go_wait($futures) (2h)
-- [ ] go_channel() (2h)
-- [ ] go_send($channel, $value) (2h)
-- [ ] go_recv($channel) (2h)
-- [ ] go_parallel($callables) (4h)
+### 7.5 Explicit Parallelism APIs (14h) ✅ COMPLETE
+- [x] Channel - Go-style channels (2h)
+- [x] Goroutine - Async execution (2h)
+- [x] Parallel execution (2h)
+- [x] WaitGroup synchronization (2h)
+- [x] ParallelExecutor with worker pool (2h)
+- [x] Pipeline processing (2h)
+- [x] BatchProcessor (2h)
 
-**Files**: `pkg/parallel/api.go`
-**New PHP APIs!**
+**Files**: `pkg/parallel/api.go` (483 lines)
+**Tests**: `pkg/parallel/api_test.go` (739 lines, 27 tests)
+**Coverage**: 96.6% overall parallel package
+**Commit**: 4eda432
+
+**New PHP APIs** - These functions don't exist in standard PHP!
+
+**Components**:
+- **Channel**: Go-style communication channels
+  * NewChannel(capacity) - create buffered/unbuffered channel
+  * Send(value), Receive() - blocking send/receive
+  * TryReceive() - non-blocking receive
+  * ReceiveWithTimeout(timeout) - receive with timeout
+  * Close(), IsClosed(), Capacity() - channel management
+
+- **Goroutine**: Parallel function execution
+  * NewGoroutine(id, fn) - spawn goroutine with panic recovery
+  * Wait() - wait for result
+  * IsDone(), ID() - status checking
+
+- **Parallel**: Execute multiple functions in parallel
+  * Parallel(functions[]) - run all with unlimited concurrency
+  * ParallelWithLimit(functions[], limit) - controlled concurrency
+  * Returns ParallelResult[] with Index, Result, Error
+
+- **WaitGroup**: Synchronization primitive
+  * NewWaitGroup(), Add(delta), Done(), Wait()
+
+- **ParallelExecutor**: High-level parallel execution
+  * NewParallelExecutor(workers) - creates worker pool
+  * Execute(id, fn), ExecuteMany(map[id]fn) - submit tasks
+  * Wait(), Shutdown(), Stats() - lifecycle management
+
+- **Pipeline**: Sequential processing stages
+  * NewPipeline(), AddStage(name, fn, parallel)
+  * Execute(input), ExecuteMany(inputs[]) - process data
+
+- **BatchProcessor**: Batch processing with parallelism
+  * NewBatchProcessor(batchSize, workers)
+  * Process(items[], processFn) - process in batches
+
+**Use Cases**:
+- Concurrent HTTP requests
+- Parallel data processing
+- Async I/O operations
+- Producer-consumer patterns
+- Pipeline workflows
+- Large dataset batch processing
 
 ### 7.6 Synchronization Primitives (10h)
 - [ ] Mutex wrapper (2h)
