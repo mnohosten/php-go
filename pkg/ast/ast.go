@@ -629,6 +629,7 @@ type Parameter struct {
 	DefaultValue Expr // Default value (can be nil)
 	ByRef        bool // Pass by reference (&$param)
 	Variadic     bool // Variadic parameter (...$param)
+	Attributes   []*AttributeGroup // PHP 8.0+ attributes
 }
 
 // FunctionDeclaration represents a function declaration
@@ -639,6 +640,7 @@ type FunctionDeclaration struct {
 	ReturnType Expr // Return type hint (can be nil)
 	Body       *BlockStatement
 	ByRef      bool // Returns reference (&function)
+	Attributes []*AttributeGroup // PHP 8.0+ attributes
 }
 
 func (fd *FunctionDeclaration) statementNode()       {}
@@ -655,6 +657,7 @@ type ClassDeclaration struct {
 	Implements []*Identifier
 	Body       []Stmt // Properties, methods, constants, trait uses
 	Modifiers  []string   // abstract, final
+	Attributes []*AttributeGroup // PHP 8.0+ attributes
 }
 
 func (cd *ClassDeclaration) statementNode()       {}
@@ -667,6 +670,7 @@ func (cd *ClassDeclaration) String() string {
 type PropertyDeclaration struct {
 	Token        lexer.Token // The first token (visibility or VAR)
 	Visibility   string      // public, protected, private
+	Attributes   []*AttributeGroup // PHP 8.0+ attributes
 	Static       bool
 	Readonly     bool
 	Type         Expr        // Type hint (can be nil)
@@ -696,6 +700,7 @@ type MethodDeclaration struct {
 	ReturnType Expr // Return type hint (can be nil)
 	Body       *BlockStatement // nil for abstract methods
 	ByRef      bool // Returns reference
+	Attributes []*AttributeGroup // PHP 8.0+ attributes
 }
 
 func (md *MethodDeclaration) statementNode()       {}
@@ -850,6 +855,38 @@ func (it *IntersectionType) String() string {
 		s += t.String()
 	}
 	return s
+}
+
+// ============================================================================
+// Attributes (PHP 8.0+)
+// ============================================================================
+
+// Attribute represents a PHP 8 attribute
+// Example: #[Route("/path", methods: ["GET", "POST"])]
+type Attribute struct {
+	Token     lexer.Token   // The # token
+	Name      Expr          // Attribute name (can be namespaced)
+	Arguments []Expr        // Positional arguments
+	Named     map[string]Expr // Named arguments (PHP 8.0+)
+}
+
+func (a *Attribute) expressionNode()      {}
+func (a *Attribute) TokenLiteral() string { return a.Token.Literal }
+func (a *Attribute) String() string {
+	return "#[" + a.Name.String() + "]"
+}
+
+// AttributeGroup represents a group of attributes
+// PHP allows multiple attributes in one #[] block
+type AttributeGroup struct {
+	Token      lexer.Token  // The # token
+	Attributes []*Attribute // Multiple attributes in one group
+}
+
+func (ag *AttributeGroup) expressionNode()      {}
+func (ag *AttributeGroup) TokenLiteral() string { return ag.Token.Literal }
+func (ag *AttributeGroup) String() string {
+	return "#[...]"
 }
 
 // Additional node types will be added in Task 1.10

@@ -111,6 +111,9 @@ type ClassEntry struct {
 	// Enum specific data
 	EnumBackingType string           // Backing type for backed enums ("int" or "string")
 	EnumCases       map[string]*Value // Enum cases (name => value)
+
+	// Attributes (PHP 8.0+)
+	Attributes []interface{} // Attribute instances (stored as interface{} to avoid circular imports)
 }
 
 // PropertyDef defines a class property with metadata
@@ -124,6 +127,7 @@ type PropertyDef struct {
 	IsReadOnly   bool               // readonly property (PHP 8.1+)
 	Hooks        *PropertyHooks     // Property hooks (PHP 8.4+)
 	DeclaringClass string           // Which class declared this property (for private props)
+	Attributes   []interface{}      // PHP 8.0+ attributes
 }
 
 // MethodDef defines a class method with metadata
@@ -143,6 +147,7 @@ type MethodDef struct {
 	IsDestructor   bool               // Is this __destruct?
 	IsMagic        bool               // Is this a magic method?
 	DeclaringClass string             // Which class declared this method
+	Attributes     []interface{}      // PHP 8.0+ attributes
 }
 
 // ParameterDef defines a method parameter
@@ -155,6 +160,7 @@ type ParameterDef struct {
 	PassedByRef  bool    // Passed by reference
 	IsPromoted   bool    // Constructor promoted property (PHP 8.0+)
 	Visibility   PropertyVisibility // Visibility if promoted
+	Attributes   []interface{} // PHP 8.0+ attributes
 }
 
 // FunctionDef defines a standalone function (not a method)
@@ -173,6 +179,7 @@ type FunctionDef struct {
 	IsGenerator  bool            // Is this a generator function?
 	IsDeprecated bool            // Is this function deprecated?
 	DocComment   string          // Documentation comment
+	Attributes   []interface{}   // PHP 8.0+ attributes
 }
 
 // ClassConstant represents a class constant with visibility
@@ -181,6 +188,7 @@ type ClassConstant struct {
 	Value      *Value             // Constant value
 	Visibility PropertyVisibility // public, protected, private (PHP 7.1+)
 	IsFinal    bool               // final constant (PHP 8.1+) - cannot be overridden
+	Attributes []interface{}      // PHP 8.0+ attributes
 }
 
 // InterfaceEntry represents a PHP interface
