@@ -50,11 +50,16 @@ func (p *Parser) ParseProgram() *ast.Program {
 		p.nextToken()
 	}
 
-	for !p.curTokenIs(lexer.EOF) {
+	for !p.curTokenIs(lexer.EOF) && !p.curTokenIs(lexer.CLOSE_TAG) {
 		stmt := p.parseStatement()
 		if stmt != nil {
 			program.Statements = append(program.Statements, stmt)
 		}
+		p.nextToken()
+	}
+
+	// Skip closing tag if present
+	if p.curTokenIs(lexer.CLOSE_TAG) {
 		p.nextToken()
 	}
 
