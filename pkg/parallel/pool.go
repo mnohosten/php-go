@@ -238,6 +238,15 @@ func (wp *WorkerPool) dispatch() {
 
 // Submit adds a task to the pool and returns a future
 func (wp *WorkerPool) Submit(task *Task) *Future {
+	// Auto-start the pool if not started
+	wp.mu.Lock()
+	if !wp.started {
+		wp.mu.Unlock()
+		wp.Start()
+	} else {
+		wp.mu.Unlock()
+	}
+
 	wp.statsMu.Lock()
 	wp.totalTasks++
 	wp.statsMu.Unlock()
@@ -252,8 +261,16 @@ func (wp *WorkerPool) Submit(task *Task) *Future {
 		return result, err
 	}
 
-	wp.taskQueue <- task
-	return NewFuture(task)
+	// Send task to queue, checking for shutdown
+	select {
+	case wp.taskQueue <- task:
+		return NewFuture(task)
+	case <-wp.ctx.Done():
+		// Pool is shutting down, return a future with error
+		task.Error = fmt.Errorf("pool is shutting down")
+		close(task.Done)
+		return NewFuture(task)
+	}
 }
 
 // SubmitFunc is a convenience method to submit a function directly

@@ -19,16 +19,18 @@ import (
 // COWArray provides copy-on-write semantics for arrays
 type COWArray struct {
 	data     []interface{}
-	refCount atomic.Int32
+	refCount *atomic.Int32  // Shared pointer to refCount
 	mu       sync.RWMutex
 }
 
 // NewCOWArray creates a new COW array from existing data
 func NewCOWArray(data []interface{}) *COWArray {
+	refCount := &atomic.Int32{}
+	refCount.Store(1)
 	arr := &COWArray{
-		data: data,
+		data:     data,
+		refCount: refCount,
 	}
-	arr.refCount.Store(1)
 	return arr
 }
 
@@ -37,11 +39,11 @@ func (ca *COWArray) Clone() *COWArray {
 	ca.mu.RLock()
 	defer ca.mu.RUnlock()
 
+	ca.refCount.Add(1)  // Increment shared refCount
 	clone := &COWArray{
-		data: ca.data, // Share the same slice
+		data:     ca.data,     // Share the same slice
+		refCount: ca.refCount, // Share the same refCount
 	}
-	clone.refCount.Store(1)
-	ca.refCount.Add(1)
 
 	return clone
 }
@@ -122,7 +124,12 @@ func (ca *COWArray) copyData() {
 	newData := make([]interface{}, len(ca.data))
 	copy(newData, ca.data)
 	ca.data = newData
-	ca.refCount.Store(1)
+
+	// Decrement old shared refCount and create new one for this copy
+	ca.refCount.Add(-1)
+	newRefCount := &atomic.Int32{}
+	newRefCount.Store(1)
+	ca.refCount = newRefCount
 }
 
 // ============================================================================

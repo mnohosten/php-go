@@ -73,11 +73,12 @@ func TestCOWArrayClone(t *testing.T) {
 	if arr2.Len() != 3 {
 		t.Errorf("Clone length = %d, expected 3", arr2.Len())
 	}
+	// Both original and clone should share the same refCount
 	if arr1.RefCount() != 2 {
 		t.Errorf("Original RefCount = %d, expected 2", arr1.RefCount())
 	}
-	if arr2.RefCount() != 1 {
-		t.Errorf("Clone RefCount = %d, expected 1", arr2.RefCount())
+	if arr2.RefCount() != 2 {
+		t.Errorf("Clone RefCount = %d, expected 2 (shared)", arr2.RefCount())
 	}
 
 	// Should share data initially
