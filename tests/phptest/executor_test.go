@@ -473,7 +473,7 @@ func getPHPGoPath() string {
 
 // Helper function to check if VM execution is implemented
 func hasVMExecution() bool {
-	// VM execution is not yet integrated into the CLI (coming in Phase 10)
-	// For now, we're building the test infrastructure
-	return false
+	// VM execution is now integrated into the CLI
+	// Note: Some opcodes may still be missing, causing certain tests to fail
+	return true
 }

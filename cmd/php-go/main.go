@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/krizos/php-go/pkg/compiler"
 	"github.com/krizos/php-go/pkg/lexer"
 	"github.com/krizos/php-go/pkg/parser"
+	"github.com/krizos/php-go/pkg/vm"
 )
 
 const version = "0.0.1-dev"
@@ -20,6 +22,14 @@ func main() {
 	command := os.Args[1]
 
 	switch command {
+	case "run", "exec":
+		if len(os.Args) < 3 {
+			fmt.Fprintln(os.Stderr, "Error: run command requires a file argument")
+			fmt.Fprintln(os.Stderr, "Usage: php-go run <file>")
+			os.Exit(1)
+		}
+		handleRun(os.Args[2])
+
 	case "lex":
 		if len(os.Args) < 3 {
 			fmt.Fprintln(os.Stderr, "Error: lex command requires a file argument")
@@ -47,9 +57,14 @@ func main() {
 		printUsage()
 
 	default:
-		fmt.Fprintf(os.Stderr, "Error: unknown command '%s'\n\n", command)
-		printUsage()
-		os.Exit(1)
+		// Check if it looks like a file path (contains / or ends with .php)
+		if len(command) > 0 && (command[0] == '/' || command[0] == '.' || len(command) > 4 && command[len(command)-4:] == ".php") {
+			handleRun(command)
+		} else {
+			fmt.Fprintf(os.Stderr, "Error: unknown command '%s'\n\n", command)
+			printUsage()
+			os.Exit(1)
+		}
 	}
 }
 
@@ -146,6 +161,57 @@ func handleParse(args []string) {
 	}
 }
 
+func handleRun(filePath string) {
+	// Read file
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading file '%s': %v\n", filePath, err)
+		os.Exit(1)
+	}
+
+	// Lex
+	l := lexer.New(string(content), filePath)
+
+	// Parse
+	p := parser.New(l)
+	program := p.ParseProgram()
+
+	// Check for parse errors
+	errors := p.Errors()
+	if len(errors) > 0 {
+		fmt.Fprintf(os.Stderr, "Parse error in '%s':\n", filePath)
+		for i, msg := range errors {
+			fmt.Fprintf(os.Stderr, "  %d. %s\n", i+1, msg)
+		}
+		os.Exit(1)
+	}
+
+	// Compile
+	comp := compiler.New()
+	err = comp.Compile(program)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Compilation error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Get bytecode
+	bytecode := comp.Bytecode()
+
+	// Execute
+	machine := vm.NewWithBytecode(bytecode.Instructions, bytecode.Constants)
+	err = machine.Execute(bytecode.Instructions)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Runtime error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Print output
+	output := machine.GetOutput()
+	if output != "" {
+		fmt.Print(output)
+	}
+}
+
 func outputTokensHuman(tokens []lexer.Token, filePath string) {
 	fmt.Printf("Tokens for: %s\n", filePath)
 	fmt.Printf("Total: %d tokens\n\n", len(tokens))
@@ -216,9 +282,10 @@ func printUsage() {
 	fmt.Println("PHP 8.4 Interpreter in Go with Automatic Parallelization")
 	fmt.Println()
 	fmt.Println("Usage:")
-	fmt.Println("  php-go <file>              Execute PHP file (Phase 2+)")
-	fmt.Println("  php-go -a                  Interactive mode (Phase 2+)")
-	fmt.Println("  php-go -S host:port        Built-in web server (Phase 3+)")
+	fmt.Println("  php-go <file>              Execute PHP file")
+	fmt.Println("  php-go run <file>          Execute PHP file")
+	fmt.Println("  php-go -a                  Interactive mode (coming soon)")
+	fmt.Println("  php-go -S host:port        Built-in web server (coming soon)")
 	fmt.Println("  php-go --version, -v       Show version")
 	fmt.Println("  php-go --help, -h          Show this help")
 	fmt.Println()
@@ -231,6 +298,8 @@ func printUsage() {
 	fmt.Println("  --json                     Output in JSON format")
 	fmt.Println()
 	fmt.Println("Examples:")
+	fmt.Println("  php-go test.php            Execute test.php")
+	fmt.Println("  php-go run test.php        Execute test.php")
 	fmt.Println("  php-go lex test.php        Show tokens from test.php")
 	fmt.Println("  php-go parse test.php      Show AST from test.php")
 	fmt.Println("  php-go demo                Show parallel features demo")

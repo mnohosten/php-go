@@ -213,6 +213,8 @@ func (vm *VM) dispatch(frame *Frame, instr Instruction) error {
 	// Variables
 	case OpAssign:
 		return vm.opAssign(frame, instr)
+	case OpQMAssign:
+		return vm.opQMAssign(frame, instr)
 	case OpFetchR:
 		return vm.opFetch(frame, instr)
 

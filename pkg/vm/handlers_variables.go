@@ -29,6 +29,19 @@ func (vm *VM) opAssign(frame *Frame, instr Instruction) error {
 	return vm.setOperandValue(frame, instr.Result, value)
 }
 
+// opQMAssign handles quick assign (no side effects): result = op1
+// This is used for simple value assignments without modifications
+func (vm *VM) opQMAssign(frame *Frame, instr Instruction) error {
+	// Get the value from Op1
+	value, err := vm.getOperandValue(frame, instr.Op1)
+	if err != nil {
+		return err
+	}
+
+	// Assign to result
+	return vm.setOperandValue(frame, instr.Result, value)
+}
+
 // opFetch handles variable fetch (read)
 func (vm *VM) opFetch(frame *Frame, instr Instruction) error {
 	// Get the variable value
