@@ -2415,12 +2415,24 @@ All property and parameter reflection functionality is already implemented and t
 - Updated all call expressions (function, method, static, new)
 - All existing tests updated and passing
 
-### 9.11 Variadic Functions (6h)
-- [ ] ... operator for parameters (2h)
-- [ ] ... operator for arguments (unpacking) (2h)
-- [ ] func_get_args() compatibility (2h)
+### 9.11 Variadic Functions (6h) ✅ COMPLETE
+- [x] ... operator for parameters (2h)
+- [x] ... operator for arguments (unpacking) (2h)
+- [x] func_get_args() compatibility (2h)
 
-**Files**: `pkg/compiler/variadic.go`
+**Files**: `pkg/ast/ast.go` (+8 lines), `pkg/parser/expr.go` (+11 lines), `pkg/runtime/variadic.go` (228 lines), `pkg/runtime/variadic_test.go` (490 lines, 22 tests)
+**Tests**: All 22 tests passing
+**Commit**: 1ea495b
+
+**Note**: Complete variadic function support:
+- Variadic parameter declarations already existed in AST/parser (Variadic field in Parameter)
+- Added Unpack field to Argument for spread operator in calls
+- Parser detects ... before arguments and sets Unpack flag
+- FunctionArguments tracker for func_num_args(), func_get_args(), func_get_arg()
+- UnpackArgument() expands arrays into individual arguments
+- ExpandArguments() processes mixed regular/unpacked argument lists
+- CollectVariadicArgs() packages extra arguments for variadic parameters
+- Full PHP compatibility for variadic features
 
 ### 9.12 First-Class Callables (4h)
 - [ ] Callable syntax (PHP 8.1+) (2h)
