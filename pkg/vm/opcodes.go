@@ -920,10 +920,19 @@ const (
 
 	// OpDeclareAttributedConst - Declare constant with attributes (PHP 8.4+)
 	OpDeclareAttributedConst Opcode = 210
+
+	// ========================================
+	// Exit Operations (211)
+	// ========================================
+
+	// OpExit - Exit program with optional message: exit(op1) or die(op1)
+	// Op1: optional message to output before exiting
+	// Both exit() and die() map to this opcode
+	OpExit Opcode = 211
 )
 
 // Total number of opcodes
-const OpcodeLast = 210
+const OpcodeLast = 211
 
 // opcodeNames maps opcodes to their string names for debugging
 var opcodeNames = [OpcodeLast + 1]string{
@@ -1136,4 +1145,5 @@ var opcodeNames = [OpcodeLast + 1]string{
 	OpJmpFrameless:                   "JMP_FRAMELESS",
 	OpInitParentPropertyHookCall:     "INIT_PARENT_PROPERTY_HOOK_CALL",
 	OpDeclareAttributedConst:         "DECLARE_ATTRIBUTED_CONST",
+	OpExit:                           "EXIT",
 }

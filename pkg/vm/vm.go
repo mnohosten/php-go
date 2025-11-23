@@ -30,14 +30,19 @@ type VM struct {
 
 	// Maximum stack depth (default 1000)
 	maxStackDepth int
+
+	// Exit flag (set by exit() or die())
+	exited bool
+	exitCode int
 }
 
 // CompiledFunction represents a compiled PHP function
 type CompiledFunction struct {
 	Name         string
 	Instructions Instructions
-	NumLocals    int // Number of local variables
+	NumLocals    int // Number of local variables (CVs + temps)
 	NumParams    int // Number of parameters
+	NumCVs       int // Number of compiled variables (user variables)
 }
 
 // Closure represents a PHP closure/anonymous function with captured variables
@@ -92,12 +97,18 @@ func (vm *VM) LoadConstants(constants []interface{}) {
 
 // Execute executes the bytecode starting from the main program
 func (vm *VM) Execute(instructions Instructions) error {
+	return vm.ExecuteWithCVs(instructions, 0)
+}
+
+// ExecuteWithCVs executes bytecode with a specified number of compiled variables
+func (vm *VM) ExecuteWithCVs(instructions Instructions, numCVs int) error {
 	// Create main function
 	mainFunc := &CompiledFunction{
 		Name:         "main",
 		Instructions: instructions,
 		NumLocals:    100,
 		NumParams:    0,
+		NumCVs:       numCVs,
 	}
 
 	// Push main frame
@@ -111,6 +122,11 @@ func (vm *VM) Execute(instructions Instructions) error {
 // run executes the main VM loop
 func (vm *VM) run() error {
 	for vm.frameIndex >= 0 {
+		// Check if exit() or die() was called
+		if vm.exited {
+			return nil
+		}
+
 		frame := vm.currentFrame()
 
 		// Check if we've finished this frame
@@ -233,6 +249,8 @@ func (vm *VM) dispatch(frame *Frame, instr Instruction) error {
 		return vm.opReturn(frame, instr)
 	case OpInitFcall:
 		return vm.opInitFcall(frame, instr)
+	case OpInitFcallByName:
+		return vm.opInitFcallByName(frame, instr)
 	case OpSendVal:
 		return vm.opSendVal(frame, instr)
 	case OpDoFcall:
@@ -362,6 +380,10 @@ func (vm *VM) dispatch(frame *Frame, instr Instruction) error {
 	case OpCatch:
 		return vm.opCatch(frame, instr)
 
+	// Exit operations
+	case OpExit:
+		return vm.opExit(frame, instr)
+
 	default:
 		return fmt.Errorf("unknown opcode: %s", instr.Opcode)
 	}
@@ -481,6 +503,20 @@ func (vm *VM) writeOutput(data []byte) {
 }
 
 // ============================================================================
+// Exit Status
+// ============================================================================
+
+// GetExitCode returns the exit code set by exit() or die()
+func (vm *VM) GetExitCode() int {
+	return vm.exitCode
+}
+
+// HasExited returns true if exit() or die() was called
+func (vm *VM) HasExited() bool {
+	return vm.exited
+}
+
+// ============================================================================
 // Helper Methods
 // ============================================================================
 
@@ -490,11 +526,19 @@ func (vm *VM) getOperandValue(frame *Frame, op Operand) (*types.Value, error) {
 	case OpConst:
 		return vm.GetConstant(int(op.Value))
 	case OpVar, OpCV:
-		// Compiled variable (parameters are at the start of locals)
+		// Compiled variable (parameters and user variables)
+		// CVs start at index 0 (or after params in functions)
 		return frame.getLocal(int(op.Value)), nil
 	case OpTmpVar:
-		// Temporary variable (starts after parameters to avoid conflicts)
-		return frame.getLocal(int(op.Value) + frame.fn.NumParams), nil
+		// Temporary variable (offset to avoid conflicts with CVs)
+		// TMPVARs start after all compiled variables
+		// If NumCVs is explicitly set and > 0, use it as offset
+		// Otherwise, use NumParams for backward compatibility
+		offset := frame.fn.NumParams
+		if frame.fn.NumCVs > 0 {
+			offset = frame.fn.NumCVs
+		}
+		return frame.getLocal(int(op.Value) + offset), nil
 	case OpUnused:
 		return types.NewNull(), nil
 	default:
@@ -506,12 +550,17 @@ func (vm *VM) getOperandValue(frame *Frame, op Operand) (*types.Value, error) {
 func (vm *VM) setOperandValue(frame *Frame, op Operand, value *types.Value) error {
 	switch op.Type {
 	case OpVar, OpCV:
-		// Compiled variable (parameters)
+		// Compiled variable (parameters and user variables)
 		frame.setLocal(int(op.Value), value)
 		return nil
 	case OpTmpVar:
-		// Temporary variable (starts after parameters)
-		frame.setLocal(int(op.Value)+frame.fn.NumParams, value)
+		// Temporary variable (offset to avoid conflicts with CVs)
+		// Must match getOperandValue offset calculation
+		offset := frame.fn.NumParams
+		if frame.fn.NumCVs > 0 {
+			offset = frame.fn.NumCVs
+		}
+		frame.setLocal(int(op.Value)+offset, value)
 		return nil
 	case OpUnused:
 		// Do nothing

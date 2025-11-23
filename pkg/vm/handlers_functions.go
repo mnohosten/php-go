@@ -27,6 +27,54 @@ func (vm *VM) opReturn(frame *Frame, instr Instruction) error {
 	return nil
 }
 
+// opInitFcallByName initializes a function call by name
+// Op1: function name operand
+// Op2: argument count
+func (vm *VM) opInitFcallByName(frame *Frame, instr Instruction) error {
+	// Get function name
+	funcName, err := vm.getOperandValue(frame, instr.Op1)
+	if err != nil {
+		return err
+	}
+	funcNameStr := funcName.ToString()
+
+	// Get argument count
+	argCount := int64(0)
+	if instr.Op2.Type != OpUnused {
+		argCountVal, err := vm.getOperandValue(frame, instr.Op2)
+		if err != nil {
+			return err
+		}
+		argCount = argCountVal.ToInt()
+	}
+
+	// Check if it's a built-in function
+	if IsBuiltin(funcNameStr) {
+		// Create a placeholder function for built-ins
+		frame.pendingFunction = &CompiledFunction{
+			Name: funcNameStr,
+		}
+		frame.pendingParams = &CallParams{
+			params: make([]*types.Value, 0, int(argCount)),
+		}
+		return nil
+	}
+
+	// Look up the function in VM's function registry
+	fn, exists := vm.GetFunction(funcNameStr)
+	if !exists {
+		return fmt.Errorf("Call to undefined function %s()", funcNameStr)
+	}
+
+	// Store pending function call info in frame
+	frame.pendingFunction = fn
+	frame.pendingParams = &CallParams{
+		params: make([]*types.Value, 0, int(argCount)),
+	}
+
+	return nil
+}
+
 // opInitFcall initializes a regular function call
 // Op2: function name (constant or variable)
 // ExtendedValue: number of arguments
@@ -37,6 +85,19 @@ func (vm *VM) opInitFcall(frame *Frame, instr Instruction) error {
 		return err
 	}
 	funcNameStr := funcName.ToString()
+
+	// Check if it's a built-in function
+	if IsBuiltin(funcNameStr) {
+		// Create a placeholder function for built-ins
+		// We'll handle the actual call in opDoFcall
+		frame.pendingFunction = &CompiledFunction{
+			Name: funcNameStr,
+		}
+		frame.pendingParams = &CallParams{
+			params: make([]*types.Value, 0, int(instr.ExtendedValue)),
+		}
+		return nil
+	}
 
 	// Look up the function in VM's function registry
 	fn, exists := vm.GetFunction(funcNameStr)
@@ -81,6 +142,7 @@ func (vm *VM) opDoFcall(frame *Frame, instr Instruction) error {
 	var thisObj *types.Object
 	var currentClass *types.ClassEntry
 	var calledClass *types.ClassEntry
+	var funcName string
 
 	// Check if this is a method call or regular function call
 	if frame.pendingMethod != nil {
@@ -91,6 +153,7 @@ func (vm *VM) opDoFcall(frame *Frame, instr Instruction) error {
 			NumLocals:    frame.pendingMethod.NumLocals,
 			NumParams:    frame.pendingMethod.NumParams,
 		}
+		funcName = frame.pendingMethod.Name
 
 		thisObj = frame.pendingObject
 		if thisObj != nil && thisObj.ClassEntry != nil {
@@ -104,6 +167,7 @@ func (vm *VM) opDoFcall(frame *Frame, instr Instruction) error {
 	} else if frame.pendingFunction != nil {
 		// Regular function call
 		fn = frame.pendingFunction
+		funcName = fn.Name
 		frame.pendingFunction = nil
 	} else {
 		return fmt.Errorf("DO_FCALL: no pending function or method call")
@@ -114,6 +178,18 @@ func (vm *VM) opDoFcall(frame *Frame, instr Instruction) error {
 	if frame.pendingParams != nil {
 		params = frame.pendingParams.params
 		frame.pendingParams = nil
+	}
+
+	// Check if this is a built-in function
+	if IsBuiltin(funcName) {
+		returnValue, err := CallBuiltin(funcName, params)
+		if err != nil {
+			return err
+		}
+		if instr.Result.Type != OpUnused {
+			return vm.setOperandValue(frame, instr.Result, returnValue)
+		}
+		return nil
 	}
 
 	// Create new frame for the function/method

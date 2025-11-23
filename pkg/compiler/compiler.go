@@ -239,6 +239,7 @@ func (c *Compiler) RemoveLastInstruction() {
 type Bytecode struct {
 	Instructions vm.Instructions
 	Constants    []interface{}
+	NumCVs       int // Number of compiled variables (for proper TMPVAR offset)
 }
 
 // Bytecode assembles and returns the final compiled bytecode
@@ -246,6 +247,7 @@ func (c *Compiler) Bytecode() *Bytecode {
 	return &Bytecode{
 		Instructions: c.instructions,
 		Constants:    c.constants,
+		NumCVs:       c.symbolTable.NumDefinitions(),
 	}
 }
 
@@ -928,16 +930,27 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 	// Function Call
 	case *ast.CallExpression:
+		// Check if this is a special language construct (exit/die)
+		if ident, ok := node.Function.(*ast.Identifier); ok {
+			funcName := ident.Value
+			if funcName == "exit" || funcName == "die" {
+				// Handle exit/die specially
+				if len(node.Arguments) > 0 {
+					// Compile the argument (exit message/code)
+					if err := c.Compile(node.Arguments[0].Value); err != nil {
+						return err
+					}
+					c.EmitWithLine(vm.OpExit, uint32(node.Token.Pos.Line), vm.TmpVarOperand(0))
+				} else {
+					// No argument, just exit
+					c.EmitWithLine(vm.OpExit, uint32(node.Token.Pos.Line), vm.UnusedOperand())
+				}
+				return nil
+			}
+		}
+
 		// For now, we'll handle simple function calls by name
 		// Full implementation with dynamic calls will come later
-
-		// Compile arguments first
-		for _, arg := range node.Arguments {
-			if err := c.Compile(arg.Value); err != nil {
-				return err
-			}
-			// TODO: Push arguments onto stack properly
-		}
 
 		// Compile the function expression
 		if err := c.Compile(node.Function); err != nil {
@@ -951,11 +964,26 @@ func (c *Compiler) Compile(node ast.Node) error {
 			vm.ConstOperand(uint32(len(node.Arguments))), // Argument count
 			vm.UnusedOperand())
 
+		// Compile and send arguments
+		for i, arg := range node.Arguments {
+			if err := c.Compile(arg.Value); err != nil {
+				return err
+			}
+			// The compiled argument is in TmpVar(0), but we need to save it
+			// before compiling the next argument. For now, just send it immediately.
+			// NOTE: We use TmpVar(0) here because Compile() puts results there
+			c.EmitWithLine(vm.OpSendVal, uint32(node.Token.Pos.Line),
+				vm.TmpVarOperand(0), // The argument value (from Compile)
+				vm.UnusedOperand(),
+				vm.UnusedOperand())
+			_ = i // silence unused warning
+		}
+
 		// Execute function call
 		c.EmitWithLine(vm.OpDoFcall, uint32(node.Token.Pos.Line),
 			vm.UnusedOperand(),
 			vm.UnusedOperand(),
-			vm.TmpVarOperand(1)) // Result in temp 1
+			vm.TmpVarOperand(0)) // Result in temp 0 (standard location for expression results)
 		return nil
 
 	// Method Call

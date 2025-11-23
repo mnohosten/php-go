@@ -42,6 +42,7 @@ func (p *Parser) registerExpressionParsers() {
 	p.prefixParseFns[lexer.FUNCTION] = p.parseClosureExpression
 	p.prefixParseFns[lexer.FN] = p.parseArrowFunctionExpression
 	p.prefixParseFns[lexer.STATIC] = p.parseStaticClosureOrProperty
+	p.prefixParseFns[lexer.EXIT] = p.parseExitExpression
 
 	// Infix parsers (operators that appear between expressions)
 	p.infixParseFns = make(map[lexer.TokenType]infixParseFn)
@@ -452,6 +453,39 @@ func (p *Parser) parseNewExpression() ast.Expr {
 	if p.peekTokenIs(lexer.LPAREN) {
 		p.nextToken() // move to (
 		expression.Arguments = p.parseCallArguments()
+	}
+
+	return expression
+}
+
+func (p *Parser) parseExitExpression() ast.Expr {
+	// exit and die can be used as:
+	// 1. exit; or die;  (no parentheses, no argument)
+	// 2. exit() or die() (empty parentheses)
+	// 3. exit("message") or die("message") (with argument)
+	// 4. exit(0) or die(0) (with exit code)
+
+	// We'll parse it as a CallExpression with "exit" as the function name
+	token := p.curToken
+
+	// Create identifier for "exit"
+	funcIdent := &ast.Identifier{
+		Token: token,
+		Value: "exit", // Normalize both exit and die to "exit"
+	}
+
+	expression := &ast.CallExpression{
+		Token:    token,
+		Function: funcIdent,
+	}
+
+	// Check for optional parentheses
+	if p.peekTokenIs(lexer.LPAREN) {
+		p.nextToken() // move to (
+		expression.Arguments = p.parseCallArguments()
+	} else {
+		// No parentheses, no arguments
+		expression.Arguments = []*ast.Argument{}
 	}
 
 	return expression

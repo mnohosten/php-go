@@ -72,10 +72,10 @@ func TestOpcodeStringUnknown(t *testing.T) {
 	}
 }
 
-// TestOpcodeCount verifies we have exactly 211 opcodes (0-210)
+// TestOpcodeCount verifies we have exactly 212 opcodes (0-211)
 func TestOpcodeCount(t *testing.T) {
-	if OpcodeLast != 210 {
-		t.Errorf("Expected OpcodeLast to be 210, got %d", OpcodeLast)
+	if OpcodeLast != 211 {
+		t.Errorf("Expected OpcodeLast to be 211, got %d", OpcodeLast)
 	}
 
 	// Verify opcodeNames array has correct length
