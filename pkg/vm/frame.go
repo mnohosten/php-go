@@ -83,13 +83,14 @@ func (f *Frame) getLocal(index int) *types.Value {
 	}
 
 	// Debug: log local variable access (disabled)
-	// fmt.Printf("DEBUG getLocal [%s]: index=%d, value=%v, type=%v\n", f.fn.Name, index, val, val.Type())
+	// fmt.Printf("DEBUG getLocal [%s]: index=%d, value=%v\n", f.fn.Name, index, val)
 
 	return val
 }
 
 // setLocal sets a local variable by index
 func (f *Frame) setLocal(index int, value *types.Value) {
+	// fmt.Printf("DEBUG setLocal [%s]: index=%d, value=%v\n", f.fn.Name, index, value)
 	// Expand locals if needed
 	if index >= len(f.locals) {
 		newSize := index + 1

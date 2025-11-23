@@ -19,13 +19,13 @@ func (vm *VM) opConst(frame *Frame, instr Instruction) error {
 
 // opAssign handles variable assignment
 func (vm *VM) opAssign(frame *Frame, instr Instruction) error {
-	// Get the value to assign (from Op2)
-	value, err := vm.getOperandValue(frame, instr.Op2)
+	// Get the value to assign (from Op1 - this is where compiler puts it)
+	value, err := vm.getOperandValue(frame, instr.Op1)
 	if err != nil {
 		return err
 	}
 
-	// Assign to result/Op1
+	// Assign to result
 	return vm.setOperandValue(frame, instr.Result, value)
 }
 
@@ -55,11 +55,13 @@ func (vm *VM) opFetch(frame *Frame, instr Instruction) error {
 }
 
 // opFree handles freeing temporary variables
-// In Go with garbage collection, this is mostly a no-op
-// We just clear the variable to allow GC to clean it up
+// In Go with garbage collection, this is a no-op
+// PHP's VM uses this to clean up reference counts, but we don't need it
 func (vm *VM) opFree(frame *Frame, instr Instruction) error {
-	// Free the temporary variable (set to undef/null)
-	return vm.setOperandValue(frame, instr.Op1, types.NewUndef())
+	// No-op: Go's garbage collector handles memory management
+	// Attempting to clear the variable here causes issues with the compiler
+	// which sometimes emits FREE for compiled variables
+	return nil
 }
 
 // opUnset handles unsetting a variable
