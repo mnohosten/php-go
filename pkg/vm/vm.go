@@ -275,6 +275,8 @@ func (vm *VM) dispatch(frame *Frame, instr Instruction) error {
 		return vm.opArrayKeyExists(frame, instr)
 
 	// Closure operations
+	case OpDeclareFunction:
+		return vm.opDeclareFunction(frame, instr)
 	case OpDeclareLambdaFunction:
 		return vm.opDeclareLambdaFunction(frame, instr)
 	case OpBindLexical:
@@ -510,105 +512,4 @@ func (vm *VM) setOperandValue(frame *Frame, op Operand, value *types.Value) erro
 // opDeclareLambdaFunction creates a closure object
 // ExtendedValue: number of parameters
 // Op1: flags (static, byref)
-// Op2: closure start position
-// Result: closure end position, closure object placed in temp var 0
-func (vm *VM) opDeclareLambdaFunction(frame *Frame, instr Instruction) error {
-	numParams := int(instr.ExtendedValue)
-	flags, err := vm.getOperandValue(frame, instr.Op1)
-	if err != nil {
-		return err
-	}
-	startPos, err := vm.getOperandValue(frame, instr.Op2)
-	if err != nil {
-		return err
-	}
-	endPos, err := vm.getOperandValue(frame, instr.Result)
-	if err != nil {
-		return err
-	}
 
-	flagsInt := int64(flags.ToInt())
-	isStatic := (flagsInt & 1) != 0
-	isByRef := (flagsInt & 2) != 0
-
-	// Extract instructions for the closure body
-	start := int(startPos.ToInt())
-	end := int(endPos.ToInt())
-	closureInstructions := frame.fn.Instructions[start:end]
-
-	// Create compiled function for the closure
-	compiledFunc := &CompiledFunction{
-		Name:         "<closure>",
-		Instructions: closureInstructions,
-		NumLocals:    100, // TODO: Calculate actual number of locals
-		NumParams:    numParams,
-	}
-
-	// Create closure object
-	_ = &Closure{
-		Function:     compiledFunc,
-		CapturedVars: make(map[string]*types.Value),
-		Static:       isStatic,
-		ReturnByRef:  isByRef,
-	}
-
-	// TODO: Store closure properly once we have a proper closure value type
-	// For now, we'll store it as a PHP object with the closure embedded
-	obj := &types.Object{
-		ClassName:  "Closure",
-		Properties: map[string]*types.Property{
-			"__closure__": {
-				Value:      types.NewNull(), // Store actual closure here (hack for now)
-				Visibility: types.VisibilityPublic,
-			},
-		},
-		ObjectID:   0, // Will be assigned by nextObjectID()
-		IsDestroyed: false,
-	}
-	closureValue := types.NewObject(obj)
-	frame.setLocal(0, closureValue) // Store in temp var 0
-
-	return nil
-}
-
-// opBindLexical binds a captured variable to a closure
-// Op1: variable name (constant index)
-// Op2: by-reference flag (0 = by value, 1 = by reference)
-// Result: closure object (in temp var)
-func (vm *VM) opBindLexical(frame *Frame, instr Instruction) error {
-	// Get variable name from constants
-	varNameConst, err := vm.getOperandValue(frame, instr.Op1)
-	if err != nil {
-		return err
-	}
-	varName := varNameConst.ToString()
-
-	// Get by-reference flag
-	byRefFlag, err := vm.getOperandValue(frame, instr.Op2)
-	if err != nil {
-		return err
-	}
-	isByRef := byRefFlag.ToInt() != 0
-
-	// Get closure object from Result operand
-	closureValue, err := vm.getOperandValue(frame, instr.Result)
-	if err != nil {
-		return err
-	}
-
-	// For now, we'll just store a placeholder
-	// TODO: Implement proper closure variable binding
-	// This requires accessing the parent frame's variables by name
-	// and storing them in the closure's captured variables map
-
-	// Create a placeholder captured variable
-	varValue := types.NewNull()
-
-	// Log binding for debugging (could be removed in production)
-	_ = varName
-	_ = isByRef
-	_ = closureValue
-	_ = varValue
-
-	return nil
-}
