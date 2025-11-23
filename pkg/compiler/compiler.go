@@ -632,6 +632,30 @@ func (c *Compiler) Compile(node ast.Node) error {
 			return nil
 		}
 
+		// Handle array element assignment: $arr[index] = value
+		if index, ok := node.Left.(*ast.IndexExpression); ok {
+			// Value is already compiled (in temp 0)
+			valueTemp := vm.TmpVarOperand(0)
+
+			// Compile the array variable
+			if err := c.Compile(index.Left); err != nil {
+				return err
+			}
+			arrayTemp := vm.TmpVarOperand(1)
+
+			// Compile the index
+			if err := c.Compile(index.Index); err != nil {
+				return err
+			}
+			indexTemp := vm.TmpVarOperand(2)
+
+			// Emit ASSIGN_DIM instruction
+			c.EmitWithLine(vm.OpAssignDim, uint32(node.Token.Pos.Line),
+				arrayTemp, // Array
+				indexTemp, // Index/key
+				valueTemp) // Value to assign
+			return nil
+		}
 		return fmt.Errorf("assignment to non-variable not yet implemented")
 
 	// Identifier (convert to string constant)

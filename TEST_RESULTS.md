@@ -44,9 +44,12 @@
    - **Impact**: Breaks nested loop functionality
 
 3. **test_functions.php** - `Runtime error: DO_FCALL: no pending function or method call`
-   - **Priority**: HIGH
-   - **Issue**: Function call compilation/execution issue
-   - **Impact**: Breaks complex function calls (likely nested calls)
+   - **Priority**: MEDIUM (Known Limitation)
+   - **Issue**: Nested function calls use same TMPVAR, causing INIT_FCALL overwrite
+   - **Root Cause**: Temp variable allocation doesn't handle expression nesting
+   - **Example**: `add(multiply(2, 3), 4)` - inner call overwrites outer call state
+   - **Fix Required**: Implement proper temp variable stack management
+   - **Impact**: Breaks nested function calls only (simple calls work fine)
 
 ### Missing Features
 
