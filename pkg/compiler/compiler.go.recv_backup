@@ -1784,13 +1784,10 @@ func (c *Compiler) Compile(node ast.Node) error {
 			// Define parameter variable in function scope
 			symbol := c.DefineVariable(param.Name.Name)
 
-			// Add parameter index to constants
-			paramIdxConst := c.AddConstant(int64(i))
-
 			if param.Variadic {
 				// RECV_VARIADIC for ...args
 				c.EmitWithLine(vm.OpRecvVariadic, uint32(node.Token.Pos.Line),
-					vm.ConstOperand(uint32(paramIdxConst)), // Parameter index from constants
+					vm.ConstOperand(uint32(i)), // Parameter index
 					vm.UnusedOperand(),
 					vm.CVOperand(uint32(symbol.Index))) // Store in compiled variable
 			} else if param.DefaultValue != nil {
@@ -1801,7 +1798,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 				}
 
 				c.EmitWithLine(vm.OpRecvInit, uint32(node.Token.Pos.Line),
-					vm.ConstOperand(uint32(paramIdxConst)),    // Parameter index from constants
+					vm.ConstOperand(uint32(i)),    // Parameter index
 					vm.TmpVarOperand(0),           // Default value in temp 0
 					vm.CVOperand(uint32(symbol.Index))) // Store in compiled variable
 			} else {
@@ -1812,7 +1809,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 				}
 
 				c.EmitWithLine(recvOp, uint32(node.Token.Pos.Line),
-					vm.ConstOperand(uint32(paramIdxConst)),    // Parameter index from constants
+					vm.ConstOperand(uint32(i)),    // Parameter index
 					vm.UnusedOperand(),
 					vm.CVOperand(uint32(symbol.Index))) // Store in compiled variable
 			}
