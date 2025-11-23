@@ -9,7 +9,7 @@ This is the master task tracking file for the entire PHP-Go project. Each task r
 - ⏸️ Blocked
 - ⏭️ Deferred
 
-**Progress**: 76% (Phase 0-8 ✅ Complete (except 1h in Phase 7), Phase 9: 26%, 1093/1430 hours) 🎉
+**Progress**: 77% (Phase 0-8 ✅ Complete (except 1h in Phase 7), Phase 9: 37%, 1107/1430 hours) 🎉
 
 ---
 
@@ -2181,7 +2181,7 @@ and integration with the VM.
 
 ## Phase 9: Advanced Features 🔄
 
-**Duration**: 7 weeks | **Status**: IN PROGRESS (34h / 130h completed - 26%) | **Effort**: 130 hours
+**Duration**: 7 weeks | **Status**: IN PROGRESS (48h / 130h completed - 37%) | **Effort**: 130 hours
 
 **Reference**: `docs/phases/09-advanced/README.md`
 
@@ -2255,15 +2255,31 @@ and integration with the VM.
 **Tests**: 13 tests, all passing
 **Commit**: 47bf17f
 
-### 9.4 Exception System (14h)
-- [ ] Exception class hierarchy (3h)
-- [ ] OpThrow implementation (2h)
-- [ ] OpCatch implementation (4h)
-- [ ] OpFinally implementation (2h)
-- [ ] Stack trace generation (2h)
-- [ ] Exception chaining (1h)
+### 9.4 Exception System (14h) ✅ COMPLETE
+- [x] Exception class hierarchy (3h) - Complete hierarchy with 7 exception classes
+- [x] OpThrow implementation (2h) - Stack unwinding and exception propagation
+- [x] OpCatch implementation (4h) - Type-based exception catching
+- [x] OpFinally implementation (2h) - Finally blocks supported via compiler
+- [x] Stack trace generation (2h) - Full stack traces with file:line:function
+- [x] Exception chaining (1h) - Previous exception support
 
-**Files**: `pkg/runtime/exception.go`
+**Implementation**:
+- Complete PHP exception class hierarchy (Exception, ErrorException, LogicException, RuntimeException, InvalidArgumentException, OutOfBoundsException, OutOfRangeException)
+- OpThrow and OpCatch handlers with type matching
+- Automatic stack trace generation from VM frame stack
+- Exception chaining with $previous parameter
+- Frame-level exception tracking
+- Resource wrapping for exception values
+- Conversion to/from PHP objects
+
+**Files**:
+- `pkg/runtime/exception.go` (419 lines)
+- `pkg/vm/handlers_exception.go` (203 lines)
+- `pkg/runtime/exception_test.go` (647 lines, 24 tests)
+- `pkg/vm/exception_test.go` (559 lines, 12 tests)
+
+**Tests**: 36 tests, all passing
+**Commits**: 69237e8, 6e295a6
 
 ### 9.5 Reflection - Classes (12h)
 - [ ] ReflectionClass implementation (4h)
