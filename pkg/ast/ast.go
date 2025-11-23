@@ -288,22 +288,28 @@ func (spe *StaticPropertyExpression) String() string {
 
 // CallExpression represents a function call func($args)
 // Argument represents a function call argument (positional or named)
-// Example: foo(42, name: "value")
-//   - 42 is a positional argument (Name is empty)
-//   - name: "value" is a named argument (Name is "name")
+// Example: foo(42, name: "value", ...$array)
+//   - 42 is a positional argument (Name is empty, Unpack is false)
+//   - name: "value" is a named argument (Name is "name", Unpack is false)
+//   - ...$array is an unpacked argument (Name is empty, Unpack is true)
 type Argument struct {
-	Token lexer.Token // The argument expression token, or colon token for named
-	Name  string      // Parameter name (empty for positional arguments)
-	Value Expr        // Argument value expression
+	Token  lexer.Token // The argument expression token, or colon token for named
+	Name   string      // Parameter name (empty for positional arguments)
+	Value  Expr        // Argument value expression
+	Unpack bool        // Whether this argument should be unpacked (...$arg)
 }
 
 func (a *Argument) expressionNode()      {}
 func (a *Argument) TokenLiteral() string { return a.Token.Literal }
 func (a *Argument) String() string {
-	if a.Name != "" {
-		return a.Name + ": " + a.Value.String()
+	prefix := ""
+	if a.Unpack {
+		prefix = "..."
 	}
-	return a.Value.String()
+	if a.Name != "" {
+		return a.Name + ": " + prefix + a.Value.String()
+	}
+	return prefix + a.Value.String()
 }
 
 type CallExpression struct {

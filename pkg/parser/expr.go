@@ -661,10 +661,19 @@ func (p *Parser) parseCallArguments() []*ast.Argument {
 
 // parseArgument parses a function call argument (positional or named)
 // Named arguments have the syntax: name: value
+// Unpacked arguments have the syntax: ...$expr
 // Positional arguments are just expressions
 func (p *Parser) parseArgument() *ast.Argument {
 	arg := &ast.Argument{
 		Token: p.curToken,
+	}
+
+	// Check for unpacking operator (...)
+	if p.curTokenIs(lexer.ELLIPSIS) {
+		arg.Unpack = true
+		p.nextToken() // consume ...
+		arg.Value = p.parseExpression(LOWEST)
+		return arg
 	}
 
 	// Check if this is a named argument: identifier followed by colon
