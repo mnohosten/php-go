@@ -36,6 +36,9 @@ type Frame struct {
 	// Pending function call information (set by OpInitFcall)
 	pendingFunction *CompiledFunction // Function to be called
 	pendingParams   *CallParams       // Parameters being collected
+
+	// Generator context (if this frame is executing a generator)
+	generator interface{} // *runtime.Generator (using interface{} to avoid import cycle)
 }
 
 // NewFrame creates a new execution frame for a function
@@ -161,6 +164,40 @@ func (f *Frame) getReturnValue() *types.Value {
 		return types.NewNull()
 	}
 	return f.returnValue
+}
+
+// ============================================================================
+// Generator Support
+// ============================================================================
+
+// SetGenerator sets the generator for this frame
+func (f *Frame) SetGenerator(gen interface{}) {
+	f.generator = gen
+}
+
+// GetGenerator gets the generator for this frame
+func (f *Frame) GetGenerator() interface{} {
+	return f.generator
+}
+
+// IsGenerator returns true if this frame is executing a generator
+func (f *Frame) IsGenerator() bool {
+	return f.generator != nil
+}
+
+// GetIP returns the instruction pointer
+func (f *Frame) GetIP() int {
+	return f.ip
+}
+
+// SetIP sets the instruction pointer
+func (f *Frame) SetIP(ip int) {
+	f.ip = ip
+}
+
+// GetFunction returns the compiled function
+func (f *Frame) GetFunction() *CompiledFunction {
+	return f.fn
 }
 
 // ============================================================================

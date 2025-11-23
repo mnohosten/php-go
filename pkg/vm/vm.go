@@ -334,6 +334,16 @@ func (vm *VM) dispatch(frame *Frame, instr Instruction) error {
 	case OpFetchThis:
 		return vm.opFetchThis(frame, instr)
 
+	// Generator operations
+	case OpGeneratorCreate:
+		return vm.opGeneratorCreate(frame, instr)
+	case OpYield:
+		return vm.opYield(frame, instr)
+	case OpGeneratorReturn:
+		return vm.opGeneratorReturn(frame, instr)
+	case OpYieldFrom:
+		return vm.opYieldFrom(frame, instr)
+
 	default:
 		return fmt.Errorf("unknown opcode: %s", instr.Opcode)
 	}
