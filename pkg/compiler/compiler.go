@@ -430,6 +430,8 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 		// Save left operand to TMPVAR(1) before compiling right operand
 		// This prevents the right operand from overwriting the left operand in TMPVAR(0)
+		// Note: This simple approach has issues with deeply nested expressions
+		// TODO: Implement proper temp variable allocation with nesting depth tracking
 		c.EmitWithLine(vm.OpQMAssign, uint32(node.Token.Pos.Line),
 			vm.TmpVarOperand(0),
 			vm.UnusedOperand(),
