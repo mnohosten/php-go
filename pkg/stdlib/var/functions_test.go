@@ -461,3 +461,248 @@ func TestIsReal(t *testing.T) {
 		t.Errorf("IsReal(3.14) should return true")
 	}
 }
+
+// ============================================================================
+// IsCallable Tests
+// ============================================================================
+
+func TestIsCallable_String(t *testing.T) {
+	// String function names are callable
+	result := IsCallable(types.NewString("strlen"))
+	if !result.ToBool() {
+		t.Error("String should be considered callable")
+	}
+}
+
+func TestIsCallable_Array(t *testing.T) {
+	// Array with 2 elements is callable
+	arr := types.NewEmptyArray()
+	arr.Append(types.NewString("ClassName"))
+	arr.Append(types.NewString("methodName"))
+
+	result := IsCallable(types.NewArray(arr))
+	if !result.ToBool() {
+		t.Error("Array with 2 elements should be callable")
+	}
+}
+
+func TestIsCallable_ArrayInvalid(t *testing.T) {
+	// Array with 1 element is not callable
+	arr := types.NewEmptyArray()
+	arr.Append(types.NewString("function"))
+
+	result := IsCallable(types.NewArray(arr))
+	if result.ToBool() {
+		t.Error("Array with 1 element should not be callable")
+	}
+
+	// Array with 3 elements is not callable
+	arr2 := types.NewEmptyArray()
+	arr2.Append(types.NewString("a"))
+	arr2.Append(types.NewString("b"))
+	arr2.Append(types.NewString("c"))
+
+	result2 := IsCallable(types.NewArray(arr2))
+	if result2.ToBool() {
+		t.Error("Array with 3 elements should not be callable")
+	}
+}
+
+func TestIsCallable_Object(t *testing.T) {
+	// Object with __invoke is callable
+	class := types.NewClassEntry("CallableClass")
+	class.Methods["__invoke"] = &types.MethodDef{
+		Name:       "__invoke",
+		Visibility: types.VisibilityPublic,
+	}
+	obj := types.NewObjectFromClass(class)
+
+	result := IsCallable(types.NewObject(obj))
+	if !result.ToBool() {
+		t.Error("Object with __invoke should be callable")
+	}
+}
+
+func TestIsCallable_ObjectNoInvoke(t *testing.T) {
+	// Object without __invoke is not callable
+	class := types.NewClassEntry("NonCallableClass")
+	obj := types.NewObjectFromClass(class)
+
+	result := IsCallable(types.NewObject(obj))
+	if result.ToBool() {
+		t.Error("Object without __invoke should not be callable")
+	}
+}
+
+func TestIsCallable_Other(t *testing.T) {
+	// Other types are not callable
+	tests := []*types.Value{
+		types.NewInt(42),
+		types.NewFloat(3.14),
+		types.NewBool(true),
+		types.NewNull(),
+	}
+
+	for _, val := range tests {
+		result := IsCallable(val)
+		if result.ToBool() {
+			t.Errorf("Type %v should not be callable", val.Type())
+		}
+	}
+}
+
+// ============================================================================
+// IsCountable Tests
+// ============================================================================
+
+func TestIsCountable_Array(t *testing.T) {
+	arr := types.NewEmptyArray()
+	arr.Append(types.NewInt(1))
+
+	result := IsCountable(types.NewArray(arr))
+	if !result.ToBool() {
+		t.Error("Array should be countable")
+	}
+}
+
+func TestIsCountable_Object(t *testing.T) {
+	// Object with count method is countable
+	class := types.NewClassEntry("CountableClass")
+	class.Methods["count"] = &types.MethodDef{
+		Name:       "count",
+		Visibility: types.VisibilityPublic,
+	}
+	obj := types.NewObjectFromClass(class)
+
+	result := IsCountable(types.NewObject(obj))
+	if !result.ToBool() {
+		t.Error("Object with count method should be countable")
+	}
+}
+
+func TestIsCountable_ObjectNoCount(t *testing.T) {
+	// Object without count method is not countable
+	class := types.NewClassEntry("NonCountableClass")
+	obj := types.NewObjectFromClass(class)
+
+	result := IsCountable(types.NewObject(obj))
+	if result.ToBool() {
+		t.Error("Object without count method should not be countable")
+	}
+}
+
+func TestIsCountable_Other(t *testing.T) {
+	// Other types are not countable
+	tests := []*types.Value{
+		types.NewInt(42),
+		types.NewFloat(3.14),
+		types.NewString("hello"),
+		types.NewBool(true),
+		types.NewNull(),
+	}
+
+	for _, val := range tests {
+		result := IsCountable(val)
+		if result.ToBool() {
+			t.Errorf("Type %v should not be countable", val.Type())
+		}
+	}
+}
+
+// ============================================================================
+// Additional var_dump, print_r, var_export Edge Cases
+// ============================================================================
+
+func TestVarDump_NestedArray(t *testing.T) {
+	inner := types.NewEmptyArray()
+	inner.Append(types.NewInt(1))
+	inner.Append(types.NewInt(2))
+
+	outer := types.NewEmptyArray()
+	outer.Append(types.NewArray(inner))
+	outer.Append(types.NewInt(3))
+
+	result := VarDump(types.NewArray(outer))
+	if result.Type() != types.TypeNull {
+		t.Error("VarDump should return NULL")
+	}
+}
+
+func TestVarDump_Object(t *testing.T) {
+	class := types.NewClassEntry("TestClass")
+	class.Properties["name"] = &types.PropertyDef{
+		Name:       "name",
+		Visibility: types.VisibilityPublic,
+	}
+	obj := types.NewObjectFromClass(class)
+	obj.Properties["name"] = &types.Property{
+		Value:      types.NewString("test"),
+		Visibility: types.VisibilityPublic,
+	}
+
+	result := VarDump(types.NewObject(obj))
+	if result.Type() != types.TypeNull {
+		t.Error("VarDump should return NULL")
+	}
+}
+
+func TestPrintR_NestedArray(t *testing.T) {
+	inner := types.NewEmptyArray()
+	inner.Append(types.NewInt(1))
+
+	outer := types.NewEmptyArray()
+	outer.Append(types.NewArray(inner))
+
+	result := PrintR(types.NewArray(outer), types.NewBool(true))
+	if result.Type() != types.TypeString {
+		t.Error("PrintR with return should return string")
+	}
+}
+
+func TestPrintR_Object(t *testing.T) {
+	class := types.NewClassEntry("TestClass")
+	obj := types.NewObjectFromClass(class)
+
+	result := PrintR(types.NewObject(obj), types.NewBool(true))
+	if result.Type() != types.TypeString {
+		t.Error("PrintR with return should return string")
+	}
+}
+
+func TestVarExport_NestedArray(t *testing.T) {
+	inner := types.NewEmptyArray()
+	inner.Append(types.NewInt(1))
+
+	outer := types.NewEmptyArray()
+	outer.Append(types.NewArray(inner))
+
+	result := VarExport(types.NewArray(outer), types.NewBool(true))
+	if result.Type() != types.TypeString {
+		t.Error("VarExport with return should return string")
+	}
+
+	output := result.ToString()
+	if !strings.Contains(output, "array") {
+		t.Error("VarExport should contain 'array' for nested arrays")
+	}
+}
+
+func TestVarExport_Object(t *testing.T) {
+	class := types.NewClassEntry("TestClass")
+	obj := types.NewObjectFromClass(class)
+
+	result := VarExport(types.NewObject(obj), types.NewBool(true))
+	if result.Type() != types.TypeString {
+		t.Error("VarExport with return should return string")
+	}
+}
+
+func TestGetType_UnknownType(t *testing.T) {
+	// Test that GetType handles all types
+	res := types.NewResourceHandle("file", "data")
+	result := GetType(types.NewResource(res))
+
+	if result.ToString() != "resource" {
+		t.Errorf("GetType(resource) = %v, want 'resource'", result.ToString())
+	}
+}

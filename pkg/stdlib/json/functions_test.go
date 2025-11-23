@@ -481,3 +481,134 @@ func TestJsonEncodeEmptyObject(t *testing.T) {
 		t.Errorf("JsonEncode(empty, JSON_FORCE_OBJECT) = %v, want '{}'", result.ToString())
 	}
 }
+
+// ============================================================================
+// Additional JSON Encoding Flag Tests
+// ============================================================================
+
+func TestJsonEncodeHexQuot(t *testing.T) {
+	str := types.NewString(`hello"world`)
+	flags := types.NewInt(JSON_HEX_QUOT)
+	result := JsonEncode(str, flags)
+
+	if !strings.Contains(result.ToString(), "\\u0022") {
+		t.Errorf("JSON_HEX_QUOT should encode quotes as \\u0022, got %v", result.ToString())
+	}
+}
+
+func TestJsonEncodeHexApos(t *testing.T) {
+	str := types.NewString("hello'world")
+	flags := types.NewInt(JSON_HEX_APOS)
+	result := JsonEncode(str, flags)
+
+	if !strings.Contains(result.ToString(), "\\u0027") {
+		t.Errorf("JSON_HEX_APOS should encode apostrophe as \\u0027, got %v", result.ToString())
+	}
+}
+
+func TestJsonEncodeHexAmp(t *testing.T) {
+	str := types.NewString("hello&world")
+	flags := types.NewInt(JSON_HEX_AMP)
+	result := JsonEncode(str, flags)
+
+	if !strings.Contains(result.ToString(), "\\u0026") {
+		t.Errorf("JSON_HEX_AMP should encode & as \\u0026, got %v", result.ToString())
+	}
+}
+
+func TestJsonEncodeHexTag(t *testing.T) {
+	str := types.NewString("hello<>world")
+	flags := types.NewInt(JSON_HEX_TAG)
+	result := JsonEncode(str, flags)
+
+	if !strings.Contains(result.ToString(), "\\u003C") || !strings.Contains(result.ToString(), "\\u003E") {
+		t.Errorf("JSON_HEX_TAG should encode < and > as unicode, got %v", result.ToString())
+	}
+}
+
+func TestJsonEncodeUnescapedUnicode(t *testing.T) {
+	str := types.NewString("hello世界")
+	flags := types.NewInt(JSON_UNESCAPED_UNICODE)
+	result := JsonEncode(str, flags)
+
+	// Should contain the actual unicode characters, not \uXXXX
+	if strings.Contains(result.ToString(), "\\u") {
+		t.Errorf("JSON_UNESCAPED_UNICODE should not escape unicode, got %v", result.ToString())
+	}
+}
+
+func TestJsonEncodeControlCharacters(t *testing.T) {
+	// Test control characters < 0x20
+	str := types.NewString("hello\x01\x02world")
+	result := JsonEncode(str)
+
+	// Should be escaped as \uXXXX
+	if !strings.Contains(result.ToString(), "\\u00") {
+		t.Errorf("Control characters should be escaped, got %v", result.ToString())
+	}
+}
+
+func TestJsonEncodeBackslash(t *testing.T) {
+	str := types.NewString("hello\\world")
+	result := JsonEncode(str)
+
+	if !strings.Contains(result.ToString(), "\\\\") {
+		t.Errorf("Backslash should be escaped, got %v", result.ToString())
+	}
+}
+
+func TestJsonEncodeSpecialEscapes(t *testing.T) {
+	tests := []struct {
+		input    string
+		contains string
+		desc     string
+	}{
+		{"\b", "\\b", "backspace"},
+		{"\f", "\\f", "form feed"},
+		{"\r", "\\r", "carriage return"},
+	}
+
+	for _, tt := range tests {
+		result := JsonEncode(types.NewString(tt.input))
+		if !strings.Contains(result.ToString(), tt.contains) {
+			t.Errorf("JsonEncode(%s) should contain %s, got %v", tt.desc, tt.contains, result.ToString())
+		}
+	}
+}
+
+// ============================================================================
+// JSON Error Handling Tests
+// ============================================================================
+
+func TestJsonLastErrorAfterSuccess(t *testing.T) {
+	// Perform successful encode
+	JsonEncode(types.NewInt(42))
+
+	errCode := JsonLastError()
+	if errCode.ToInt() != JSON_ERROR_NONE {
+		t.Errorf("After successful encode, error should be JSON_ERROR_NONE, got %d", errCode.ToInt())
+	}
+
+	errMsg := JsonLastErrorMsg()
+	if errMsg.ToString() != "No error" {
+		t.Errorf("Error message should be 'No error', got %v", errMsg.ToString())
+	}
+}
+
+func TestJsonLastErrorMessages(t *testing.T) {
+	// We can't directly set the error code, but we can test the messages
+	// by testing JsonLastErrorMsg after decoding invalid JSON
+	JsonDecode(types.NewString("{invalid}"))
+
+	// At least verify we get an error
+	errCode := JsonLastError()
+	if errCode.ToInt() == JSON_ERROR_NONE {
+		t.Error("Should have error after invalid JSON")
+	}
+
+	// Test that error message is not empty
+	errMsg := JsonLastErrorMsg()
+	if errMsg.ToString() == "" || errMsg.ToString() == "No error" {
+		t.Error("Should have error message after invalid JSON")
+	}
+}
