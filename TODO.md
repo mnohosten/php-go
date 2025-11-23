@@ -1931,7 +1931,7 @@ and integration with the VM.
 
 ## Phase 8: Go Integration 🔄 IN PROGRESS
 
-**Duration**: 5-6 weeks | **Status**: IN PROGRESS (74h / 105h completed - 70%) | **Effort**: 105 hours
+**Duration**: 5-6 weeks | **Status**: IN PROGRESS (86h / 105h completed - 82%) | **Effort**: 105 hours
 
 **Reference**: `docs/phases/08-go-integration/README.md`
 
@@ -2078,14 +2078,30 @@ and integration with the VM.
 
 **Files**: `pkg/goext/plugins.go`
 
-### 8.7 Advanced Marshaling (12h)
-- [ ] Custom type marshaling (3h)
-- [ ] Struct ↔ Object conversion (3h)
-- [ ] Interface{} handling (2h)
-- [ ] Circular reference handling (2h)
-- [ ] Performance optimization (2h)
+### 8.7 Advanced Marshaling (12h) ✅ COMPLETE
+- [x] Custom type marshaling (3h)
+- [x] Struct ↔ Object conversion (3h)
+- [x] Interface{} handling (2h)
+- [x] Circular reference detection (2h)
+- [x] Performance optimization (2h)
 
-**Files**: `pkg/goext/marshal_advanced.go`
+**Files**: `pkg/goext/marshal_advanced.go` (424 lines), `pkg/goext/marshal_advanced_test.go` (572 lines, 33 tests)
+**Coverage**: 82.8% (overall pkg/goext package)
+**Commit**: [Ready to commit]
+
+**Features**:
+- CustomMarshaler/CustomUnmarshaler interfaces for custom types
+- TypeConverter registration system for specific Go types
+- Advanced ToPHPAdvanced() with custom converter support
+- Advanced ToGoAdvanced() with target type specification
+- StructToObject() with json tag support and field mapping
+- ObjectToStruct() and phpToStruct() for reverse conversion
+- Smart convertToType() for automatic type conversion
+- Circular reference detection framework (visited map tracking)
+- DeepEquals() for comparing PHP values
+- Clone() for deep copying values
+- Nested struct conversion support
+- Type-safe conversions (int, float, string, bool, slice, map, struct)
 
 ### 8.8 Documentation & Examples (10h)
 - [ ] Extension development guide (3h)
