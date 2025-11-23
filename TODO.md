@@ -2396,13 +2396,24 @@ All property and parameter reflection functionality is already implemented and t
 - All operations thread-safe with sync.RWMutex
 - Resource wrapping for PHP interoperability
 
-### 9.10 Named Arguments (8h)
-- [ ] Named argument parsing (2h)
-- [ ] Named argument calling (3h)
-- [ ] Argument order independence (2h)
-- [ ] Mixed positional/named (1h)
+### 9.10 Named Arguments (8h) ✅ COMPLETE
+- [x] Named argument parsing (2h)
+- [x] Named argument calling (3h)
+- [x] Argument order independence (2h)
+- [x] Mixed positional/named (1h)
 
-**Files**: `pkg/compiler/named_args.go`
+**Files**: `pkg/ast/ast.go` (+30 lines), `pkg/parser/expr.go` (+54 lines), `pkg/compiler/named_args.go` (210 lines), `pkg/compiler/named_args_test.go` (492 lines, 19 tests)
+**Tests**: All 19 tests passing
+**Commit**: 3728035
+
+**Note**: Complete PHP 8.0+ named arguments implementation:
+- Argument type with Name and Value fields for AST representation
+- Parser detects name: value syntax and validates positional before named
+- NamedArgumentResolver reorders arguments to match parameter positions
+- Handles default parameters, skipping, and validation
+- Prevents duplicate binding and detects missing required parameters
+- Updated all call expressions (function, method, static, new)
+- All existing tests updated and passing
 
 ### 9.11 Variadic Functions (6h)
 - [ ] ... operator for parameters (2h)
