@@ -364,12 +364,14 @@ func TestExecute_Comparison(t *testing.T) {
 
 func TestExecute_Jump(t *testing.T) {
 	vm := New()
+	// Add jump target to constants pool
+	vm.constants = []interface{}{int64(3)} // Jump target at index 3
 
 	// Unconditional jump over echo
 	instructions := Instructions{
-		// JMP to instruction 3
+		// JMP to instruction 3 (stored in constants[0])
 		*NewInstruction(OpJmp, 1).
-			WithOp1(OpConst, 3),
+			WithOp1(OpConst, 0),
 		// This should be skipped
 		*NewInstruction(OpEcho, 2).
 			WithOp1(OpConst, 0),
