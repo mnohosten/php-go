@@ -933,7 +933,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 		// Compile arguments first
 		for _, arg := range node.Arguments {
-			if err := c.Compile(arg); err != nil {
+			if err := c.Compile(arg.Value); err != nil {
 				return err
 			}
 			// TODO: Push arguments onto stack properly
@@ -974,7 +974,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 		// Compile arguments
 		for _, arg := range node.Arguments {
-			if err := c.Compile(arg); err != nil {
+			if err := c.Compile(arg.Value); err != nil {
 				return err
 			}
 			// TODO: Push arguments onto stack properly
@@ -1031,7 +1031,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 		// Compile arguments
 		for _, arg := range node.Arguments {
-			if err := c.Compile(arg); err != nil {
+			if err := c.Compile(arg.Value); err != nil {
 				return err
 			}
 			// TODO: Push arguments onto stack properly
@@ -1192,7 +1192,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 		// Compile constructor arguments
 		for _, arg := range node.Arguments {
-			if err := c.Compile(arg); err != nil {
+			if err := c.Compile(arg.Value); err != nil {
 				return err
 			}
 			// TODO: Push arguments onto stack properly
@@ -2579,19 +2579,19 @@ func findVarsRecursive(node ast.Node, vars map[string]bool) {
 		findVarsRecursive(n.Function, vars)
 		// Check arguments
 		for _, arg := range n.Arguments {
-			findVarsRecursive(arg, vars)
+			findVarsRecursive(arg.Value, vars)
 		}
 
 	case *ast.MethodCallExpression:
 		findVarsRecursive(n.Object, vars)
 		for _, arg := range n.Arguments {
-			findVarsRecursive(arg, vars)
+			findVarsRecursive(arg.Value, vars)
 		}
 
 	case *ast.StaticCallExpression:
 		findVarsRecursive(n.Class, vars)
 		for _, arg := range n.Arguments {
-			findVarsRecursive(arg, vars)
+			findVarsRecursive(arg.Value, vars)
 		}
 
 	case *ast.PropertyExpression:
@@ -2636,7 +2636,7 @@ func findVarsRecursive(node ast.Node, vars map[string]bool) {
 	case *ast.NewExpression:
 		// Check arguments
 		for _, arg := range n.Arguments {
-			findVarsRecursive(arg, vars)
+			findVarsRecursive(arg.Value, vars)
 		}
 
 	case *ast.CastExpression:

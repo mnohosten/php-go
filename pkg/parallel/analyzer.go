@@ -317,7 +317,7 @@ func (sa *SafetyAnalyzer) analyzeFunctionCall(call *ast.CallExpression, report *
 	if funcName == "global" {
 		// global keyword marks variables as global
 		for _, arg := range call.Arguments {
-			if v, ok := arg.(*ast.Variable); ok {
+			if v, ok := arg.Value.(*ast.Variable); ok {
 				if !contains(report.GlobalWrites, v.Name) {
 					report.GlobalWrites = append(report.GlobalWrites, v.Name)
 				}

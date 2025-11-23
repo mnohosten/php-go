@@ -627,8 +627,8 @@ func (p *Parser) parseCallExpression(left ast.Expr) ast.Expr {
 	}
 }
 
-func (p *Parser) parseCallArguments() []ast.Expr {
-	args := []ast.Expr{}
+func (p *Parser) parseCallArguments() []*ast.Argument {
+	args := []*ast.Argument{}
 
 	if p.peekTokenIs(lexer.RPAREN) {
 		p.nextToken()
@@ -636,12 +636,20 @@ func (p *Parser) parseCallArguments() []ast.Expr {
 	}
 
 	p.nextToken()
-	args = append(args, p.parseExpression(LOWEST))
+
+	// Parse first argument (may be named or positional)
+	arg := p.parseArgument()
+	if arg != nil {
+		args = append(args, arg)
+	}
 
 	for p.peekTokenIs(lexer.COMMA) {
 		p.nextToken() // consume comma
 		p.nextToken() // move to next argument
-		args = append(args, p.parseExpression(LOWEST))
+		arg := p.parseArgument()
+		if arg != nil {
+			args = append(args, arg)
+		}
 	}
 
 	if !p.expectPeek(lexer.RPAREN) {
@@ -649,6 +657,30 @@ func (p *Parser) parseCallArguments() []ast.Expr {
 	}
 
 	return args
+}
+
+// parseArgument parses a function call argument (positional or named)
+// Named arguments have the syntax: name: value
+// Positional arguments are just expressions
+func (p *Parser) parseArgument() *ast.Argument {
+	arg := &ast.Argument{
+		Token: p.curToken,
+	}
+
+	// Check if this is a named argument: identifier followed by colon
+	if p.curTokenIs(lexer.IDENT) && p.peekTokenIs(lexer.COLON) {
+		// Named argument
+		arg.Name = p.curToken.Literal
+		p.nextToken() // consume identifier
+		arg.Token = p.curToken // update token to colon
+		p.nextToken() // consume colon, move to value expression
+		arg.Value = p.parseExpression(LOWEST)
+	} else {
+		// Positional argument
+		arg.Value = p.parseExpression(LOWEST)
+	}
+
+	return arg
 }
 
 func (p *Parser) parseInstanceofExpression(left ast.Expr) ast.Expr {

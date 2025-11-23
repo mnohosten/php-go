@@ -322,9 +322,9 @@ func TestParseClosureInCall(t *testing.T) {
 	}
 
 	// First argument should be the closure
-	closure, ok := call.Arguments[0].(*ast.ClosureExpression)
+	closure, ok := call.Arguments[0].Value.(*ast.ClosureExpression)
 	if !ok {
-		t.Fatalf("Expected ClosureExpression, got %T", call.Arguments[0])
+		t.Fatalf("Expected ClosureExpression, got %T", call.Arguments[0].Value)
 	}
 
 	if len(closure.Parameters) != 1 {
@@ -353,9 +353,9 @@ func TestParseArrowFunctionInCall(t *testing.T) {
 	}
 
 	// First argument should be the arrow function
-	arrow, ok := call.Arguments[0].(*ast.ArrowFunctionExpression)
+	arrow, ok := call.Arguments[0].Value.(*ast.ArrowFunctionExpression)
 	if !ok {
-		t.Fatalf("Expected ArrowFunctionExpression, got %T", call.Arguments[0])
+		t.Fatalf("Expected ArrowFunctionExpression, got %T", call.Arguments[0].Value)
 	}
 
 	if len(arrow.Parameters) != 1 {

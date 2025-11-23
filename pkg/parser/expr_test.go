@@ -518,9 +518,9 @@ func TestCallExpression(t *testing.T) {
 		t.Fatalf("wrong length of arguments. got=%d", len(exp.Arguments))
 	}
 
-	testIntegerLiteral(t, exp.Arguments[0], 1)
-	testInfixExpression(t, exp.Arguments[1], 2, "*", 3)
-	testInfixExpression(t, exp.Arguments[2], 4, "+", 5)
+	testIntegerLiteral(t, exp.Arguments[0].Value, 1)
+	testInfixExpression(t, exp.Arguments[1].Value, 2, "*", 3)
+	testInfixExpression(t, exp.Arguments[2].Value, 4, "+", 5)
 }
 
 func TestStaticCallExpression(t *testing.T) {

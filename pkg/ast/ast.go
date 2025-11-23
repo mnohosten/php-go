@@ -287,10 +287,29 @@ func (spe *StaticPropertyExpression) String() string {
 }
 
 // CallExpression represents a function call func($args)
+// Argument represents a function call argument (positional or named)
+// Example: foo(42, name: "value")
+//   - 42 is a positional argument (Name is empty)
+//   - name: "value" is a named argument (Name is "name")
+type Argument struct {
+	Token lexer.Token // The argument expression token, or colon token for named
+	Name  string      // Parameter name (empty for positional arguments)
+	Value Expr        // Argument value expression
+}
+
+func (a *Argument) expressionNode()      {}
+func (a *Argument) TokenLiteral() string { return a.Token.Literal }
+func (a *Argument) String() string {
+	if a.Name != "" {
+		return a.Name + ": " + a.Value.String()
+	}
+	return a.Value.String()
+}
+
 type CallExpression struct {
 	Token     lexer.Token // The ( token
 	Function  Expr        // Identifier, method call, or closure
-	Arguments []Expr
+	Arguments []*Argument // Changed from []Expr to []*Argument for named argument support
 }
 
 func (ce *CallExpression) expressionNode()      {}
@@ -303,8 +322,8 @@ func (ce *CallExpression) String() string {
 type MethodCallExpression struct {
 	Token     lexer.Token // The -> token
 	Object    Expr
-	Method    Expr // Can be Identifier or dynamic expression
-	Arguments []Expr
+	Method    Expr        // Can be Identifier or dynamic expression
+	Arguments []*Argument // Changed from []Expr to []*Argument for named argument support
 }
 
 func (mce *MethodCallExpression) expressionNode()      {}
@@ -318,7 +337,7 @@ type StaticCallExpression struct {
 	Token     lexer.Token // The :: token
 	Class     Expr        // Class name or expression (self, parent, static)
 	Method    Expr
-	Arguments []Expr
+	Arguments []*Argument // Changed from []Expr to []*Argument for named argument support
 }
 
 func (sce *StaticCallExpression) expressionNode()      {}
@@ -331,7 +350,7 @@ func (sce *StaticCallExpression) String() string {
 type NewExpression struct {
 	Token     lexer.Token // The NEW token
 	Class     Expr        // Class name or expression
-	Arguments []Expr
+	Arguments []*Argument // Changed from []Expr to []*Argument for named argument support
 }
 
 func (ne *NewExpression) expressionNode()      {}
