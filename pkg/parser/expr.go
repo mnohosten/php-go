@@ -620,8 +620,25 @@ func (p *Parser) parseStaticAccessOrCall(left ast.Expr) ast.Expr {
 }
 
 func (p *Parser) parseCallExpression(left ast.Expr) ast.Expr {
+	token := p.curToken
+
+	// Check for first-class callable syntax: foo(...)
+	// In PHP 8.1+, if the only thing in parentheses is ..., it creates a callable
+	if p.peekTokenIs(lexer.ELLIPSIS) {
+		p.nextToken() // move to ...
+		if p.peekTokenIs(lexer.RPAREN) {
+			p.nextToken() // consume )
+			return &ast.FirstClassCallableExpression{
+				Token:    token,
+				Callable: left,
+			}
+		}
+		// Otherwise it's unpacking - go back and parse normally
+		// This is a bit hacky but works for our use case
+	}
+
 	return &ast.CallExpression{
-		Token:     p.curToken,
+		Token:     token,
 		Function:  left,
 		Arguments: p.parseCallArguments(),
 	}

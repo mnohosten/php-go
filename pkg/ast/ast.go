@@ -378,6 +378,19 @@ func (ie *InstanceofExpression) String() string {
 	return "(" + ie.Left.String() + " instanceof " + ie.Right.String() + ")"
 }
 
+// FirstClassCallableExpression represents PHP 8.1+ first-class callable syntax
+// Examples: strlen(...), $obj->method(...), Class::staticMethod(...)
+type FirstClassCallableExpression struct {
+	Token    lexer.Token // The ( token
+	Callable Expr        // The callable: Identifier, MethodCall, StaticCall
+}
+
+func (fcce *FirstClassCallableExpression) expressionNode()      {}
+func (fcce *FirstClassCallableExpression) TokenLiteral() string { return fcce.Token.Literal }
+func (fcce *FirstClassCallableExpression) String() string {
+	return fcce.Callable.String() + "(...)"
+}
+
 // CastExpression represents type casting (int)$var
 type CastExpression struct {
 	Token lexer.Token // The opening ( token
