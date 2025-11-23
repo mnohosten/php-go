@@ -27,6 +27,65 @@ func (vm *VM) opReturn(frame *Frame, instr Instruction) error {
 	return nil
 }
 
+// opRecv receives a function parameter
+// Op1: parameter index (constant)
+// Result: CV where to store the parameter
+func (vm *VM) opRecv(frame *Frame, instr Instruction) error {
+	// Get parameter index
+	paramIndexVal, err := vm.getOperandValue(frame, instr.Op1)
+	if err != nil {
+		return err
+	}
+	paramIndex := int(paramIndexVal.ToInt())
+
+	// Get parameter value from frame's locals
+	// Parameters were already placed in locals by opDoFcall via setParam
+	paramValue := frame.getLocal(paramIndex)
+	if paramValue == nil {
+		return fmt.Errorf("Missing required parameter at position %d", paramIndex)
+	}
+
+	// Store in result CV
+	if instr.Result.Type != OpUnused {
+		return vm.setOperandValue(frame, instr.Result, paramValue)
+	}
+
+	return nil
+}
+
+// opRecvInit receives a function parameter with a default value
+// Op1: parameter index (constant)
+// Op2: default value (from temp variable)
+// Result: CV where to store the parameter
+func (vm *VM) opRecvInit(frame *Frame, instr Instruction) error {
+	// Get parameter index
+	paramIndexVal, err := vm.getOperandValue(frame, instr.Op1)
+	if err != nil {
+		return err
+	}
+	paramIndex := int(paramIndexVal.ToInt())
+
+	// Try to get parameter value from frame's locals
+	paramValue := frame.getLocal(paramIndex)
+
+	// If parameter was not provided, use default value
+	if paramValue == nil || paramValue.IsUndef() {
+		// Get default value from Op2
+		defaultValue, err := vm.getOperandValue(frame, instr.Op2)
+		if err != nil {
+			return err
+		}
+		paramValue = defaultValue
+	}
+
+	// Store in result CV
+	if instr.Result.Type != OpUnused {
+		return vm.setOperandValue(frame, instr.Result, paramValue)
+	}
+
+	return nil
+}
+
 // opInitFcallByName initializes a function call by name
 // Op1: function name operand
 // Op2: argument count

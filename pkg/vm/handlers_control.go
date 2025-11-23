@@ -8,8 +8,19 @@ import "github.com/krizos/php-go/pkg/types"
 
 // opJmp handles unconditional jump
 func (vm *VM) opJmp(frame *Frame, instr Instruction) error {
-	// Op1 contains the jump target
-	target := int(instr.Op1.Value)
+	// Op1 contains the jump target (may be CONST or direct value)
+	var target int
+	if instr.Op1.Type == OpConst {
+		// Resolve constant
+		targetVal, err := vm.getOperandValue(frame, instr.Op1)
+		if err != nil {
+			return err
+		}
+		target = int(targetVal.ToInt())
+	} else {
+		// Direct value
+		target = int(instr.Op1.Value)
+	}
 	frame.ip = target
 	return nil
 }
@@ -25,7 +36,23 @@ func (vm *VM) opJmpZ(frame *Frame, instr Instruction) error {
 	// If condition is false, jump
 	if !condition.ToBool() {
 		// Op2 contains the jump target
-		target := int(instr.Op2.Value)
+		// Due to historical reasons, this may be a CONST operand where the value is actually
+		// a direct instruction index, not a constant pool index
+		// We try to resolve it as a constant first, and if that fails, use it directly
+		var target int
+		if instr.Op2.Type == OpConst {
+			targetVal, err := vm.getOperandValue(frame, instr.Op2)
+			if err == nil {
+				// Successfully resolved as constant
+				target = int(targetVal.ToInt())
+			} else {
+				// Not in constant pool - use as direct value
+				target = int(instr.Op2.Value)
+			}
+		} else {
+			// Direct value
+			target = int(instr.Op2.Value)
+		}
 		frame.ip = target
 	}
 
@@ -43,7 +70,23 @@ func (vm *VM) opJmpNZ(frame *Frame, instr Instruction) error {
 	// If condition is true, jump
 	if condition.ToBool() {
 		// Op2 contains the jump target
-		target := int(instr.Op2.Value)
+		// Due to historical reasons, this may be a CONST operand where the value is actually
+		// a direct instruction index, not a constant pool index
+		// We try to resolve it as a constant first, and if that fails, use it directly
+		var target int
+		if instr.Op2.Type == OpConst {
+			targetVal, err := vm.getOperandValue(frame, instr.Op2)
+			if err == nil {
+				// Successfully resolved as constant
+				target = int(targetVal.ToInt())
+			} else {
+				// Not in constant pool - use as direct value
+				target = int(instr.Op2.Value)
+			}
+		} else {
+			// Direct value
+			target = int(instr.Op2.Value)
+		}
 		frame.ip = target
 	}
 

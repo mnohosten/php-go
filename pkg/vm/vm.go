@@ -247,6 +247,10 @@ func (vm *VM) dispatch(frame *Frame, instr Instruction) error {
 	// Functions
 	case OpReturn:
 		return vm.opReturn(frame, instr)
+	case OpRecv:
+		return vm.opRecv(frame, instr)
+	case OpRecvInit:
+		return vm.opRecvInit(frame, instr)
 	case OpInitFcall:
 		return vm.opInitFcall(frame, instr)
 	case OpInitFcallByName:

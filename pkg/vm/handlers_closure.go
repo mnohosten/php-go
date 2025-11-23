@@ -118,9 +118,11 @@ func (vm *VM) opBindLexical(frame *Frame, instr Instruction) error {
 }
 
 // opDeclareFunction handles OpDeclareFunction
-// Declares a named function (not a closure, but similar handling)
-// Op1: function name
-// Result: (optional) function value
+// Declares a named function
+// ExtendedValue: number of parameters
+// Op1: function name (constant index)
+// Op2: function start position (constant index)
+// Result: function end position (constant index)
 func (vm *VM) opDeclareFunction(frame *Frame, instr Instruction) error {
 	// Get function name
 	funcNameVal, err := vm.getOperandValue(frame, instr.Op1)
@@ -137,9 +139,38 @@ func (vm *VM) opDeclareFunction(frame *Frame, instr Instruction) error {
 		return nil
 	}
 
-	// The function should have been added to vm.functions during compilation
-	// This opcode is mainly for runtime declaration in certain contexts
-	// For now, this is a no-op
+	// Get function start and end positions
+	funcStartVal, err := vm.getOperandValue(frame, instr.Op2)
+	if err != nil {
+		return err
+	}
+	funcStart := int(funcStartVal.ToInt())
+
+	funcEndVal, err := vm.getOperandValue(frame, instr.Result)
+	if err != nil {
+		return err
+	}
+	funcEnd := int(funcEndVal.ToInt())
+
+	// Extract function instructions from the main instruction stream
+	if funcStart < 0 || funcEnd > len(frame.fn.Instructions) || funcStart >= funcEnd {
+		return fmt.Errorf("Invalid function bounds: start=%d, end=%d", funcStart, funcEnd)
+	}
+
+	funcInstructions := make(Instructions, funcEnd-funcStart)
+	copy(funcInstructions, frame.fn.Instructions[funcStart:funcEnd])
+
+	// Create CompiledFunction
+	numParams := int(instr.ExtendedValue)
+	compiledFunc := &CompiledFunction{
+		Name:         funcName,
+		Instructions: funcInstructions,
+		NumParams:    numParams,
+		NumLocals:    numParams + 10, // Parameters + space for local vars and temps
+	}
+
+	// Register the function
+	vm.RegisterFunction(funcName, compiledFunc)
 
 	return nil
 }

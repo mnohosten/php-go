@@ -1754,7 +1754,26 @@ func (c *Compiler) Compile(node ast.Node) error {
 		// Store function name as constant
 		funcNameIdx := c.AddConstant(node.Name.Value)
 
-		// Remember function start position
+		// DECLARE_FUNCTION will be emitted here with placeholders
+		// We need to know funcStart and funcEnd first, so we'll do a two-pass approach:
+		// 1. Mark where DECLARE_FUNCTION will go
+		// 2. Compile function body
+		// 3. Patch DECLARE_FUNCTION with actual positions
+
+		// Emit placeholder DECLARE_FUNCTION (will be patched)
+		declareFuncPos := c.EmitWithExtended(vm.OpDeclareFunction, uint32(node.Token.Pos.Line),
+			uint32(len(node.Parameters)), // Number of parameters
+			vm.ConstOperand(uint32(funcNameIdx)), // Function name
+			vm.UnusedOperand(), // Function start position (will be patched)
+			vm.UnusedOperand()) // Function end position (will be patched)
+
+		// Emit JMP to skip over function body (will be patched later)
+		jmpPos := c.EmitWithLine(vm.OpJmp, uint32(node.Token.Pos.Line),
+			vm.UnusedOperand(), // Will be patched with jump target (Op1)
+			vm.UnusedOperand(),
+			vm.UnusedOperand())
+
+		// Remember function start position (after the DECLARE_FUNCTION and JMP)
 		funcStart := c.CurrentPosition()
 
 		// Enter new scope for function
@@ -1816,13 +1835,19 @@ func (c *Compiler) Compile(node ast.Node) error {
 		// Function end position
 		funcEnd := c.CurrentPosition()
 
-		// DECLARE_FUNCTION to register the function
-		// Store function metadata: name index, start pos, end pos, num params
-		c.EmitWithExtended(vm.OpDeclareFunction, uint32(node.Token.Pos.Line),
-			uint32(len(node.Parameters)), // Number of parameters
-			vm.ConstOperand(uint32(funcNameIdx)), // Function name
-			vm.ConstOperand(uint32(funcStart)),   // Function start position
-			vm.ConstOperand(uint32(funcEnd)))     // Function end position
+		// Add function positions as constants
+		funcStartIdx := c.AddConstant(int64(funcStart))
+		funcEndIdx := c.AddConstant(int64(funcEnd))
+
+		// Patch the DECLARE_FUNCTION with actual function positions
+		// Op2 = funcStart, Result = funcEnd
+		c.ChangeOperand(declareFuncPos, 2, vm.ConstOperand(uint32(funcStartIdx)))
+		c.ChangeOperand(declareFuncPos, 3, vm.ConstOperand(uint32(funcEndIdx)))
+
+		// Patch the JMP to skip over the function body
+		afterFunc := c.CurrentPosition()
+		afterFuncIdx := c.AddConstant(int64(afterFunc))
+		c.ChangeOperand(jmpPos, 1, vm.ConstOperand(uint32(afterFuncIdx)))
 
 		return nil
 
