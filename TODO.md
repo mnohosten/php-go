@@ -1408,7 +1408,7 @@ and integration with the VM.
 - string: 84.4%
 - var: 82.5% (improved from 61.1%)
 
-**Commit**: TBD
+**Commit**: a2149a4
 
 **Milestone**: Can run real PHP applications ✓
 
