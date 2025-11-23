@@ -9,7 +9,7 @@ This is the master task tracking file for the entire PHP-Go project. Each task r
 - ⏸️ Blocked
 - ⏭️ Deferred
 
-**Progress**: 75% (Phase 0-8 ✅ Complete (except 1h in Phase 7), Phase 9: 12%, 1075/1430 hours) 🎉
+**Progress**: 76% (Phase 0-8 ✅ Complete (except 1h in Phase 7), Phase 9: 22%, 1087/1430 hours) 🎉
 
 ---
 
@@ -2181,7 +2181,7 @@ and integration with the VM.
 
 ## Phase 9: Advanced Features 🔄
 
-**Duration**: 7 weeks | **Status**: IN PROGRESS (16h / 130h completed - 12%) | **Effort**: 130 hours
+**Duration**: 7 weeks | **Status**: IN PROGRESS (28h / 130h completed - 22%) | **Effort**: 130 hours
 
 **Reference**: `docs/phases/09-advanced/README.md`
 
@@ -2211,15 +2211,28 @@ and integration with the VM.
 - Opcode handlers: OpGeneratorCreate, OpYield, OpGeneratorReturn, OpYieldFrom
 - Comprehensive test coverage
 
-### 9.2 Closure Implementation (12h)
-- [ ] Closure struct (2h)
-- [ ] Variable capture (by value) (2h)
-- [ ] Variable capture (by reference) (2h)
-- [ ] Closure call mechanism (2h)
-- [ ] $this binding (2h)
-- [ ] Closure rebinding (bindTo) (2h)
+### 9.2 Closure Implementation (12h) ✅ COMPLETE
+- [x] Closure struct (2h)
+- [x] Variable capture (by value) (2h)
+- [x] Variable capture (by reference) (2h)
+- [x] Closure call mechanism (2h)
+- [x] $this binding (2h)
+- [x] Closure rebinding (bindTo) (2h)
 
-**Files**: `pkg/runtime/closure.go`
+**Files**: `pkg/vm/closure.go` (190 lines), `pkg/vm/handlers_closure.go` (180 lines), `pkg/vm/closure_test.go` (380 lines)
+**Tests**: 15 tests, all passing
+**Commit**: f7eb03a
+
+**Features**:
+- Complete Closure struct with captured variables
+- Variable capture by value and by reference
+- Static closures (no $this access)
+- Normal closures with $this inheritance
+- Closure::bindTo() and bindStatic() methods
+- Multiple variable capture
+- Closure cloning
+- Opcode handlers: OpDeclareLambdaFunction, OpBindLexical, OpDeclareFunction
+- Resource wrapping for closure storage
 
 ### 9.3 Arrow Functions (6h)
 - [ ] Arrow function parsing (2h)
