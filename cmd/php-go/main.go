@@ -274,7 +274,7 @@ func escapeString(s string) string {
 }
 
 func handleDemo() {
-	fmt.Println("=== PHP-Go Parallelization Demo ===\n")
+	fmt.Println("=== PHP-Go Parallelization Demo ===")
 	runParallelDemo()
 }
 

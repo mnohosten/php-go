@@ -423,17 +423,24 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 		// Normal compilation if not foldable or reducible
-		// Compile left operand
+		// Compile left operand (result goes to TMPVAR(0))
 		if err := c.Compile(node.Left); err != nil {
 			return err
 		}
-		leftTemp := vm.TmpVarOperand(0) // TODO: proper temp tracking
 
-		// Compile right operand
+		// Save left operand to TMPVAR(1) before compiling right operand
+		// This prevents the right operand from overwriting the left operand in TMPVAR(0)
+		c.EmitWithLine(vm.OpQMAssign, uint32(node.Token.Pos.Line),
+			vm.TmpVarOperand(0),
+			vm.UnusedOperand(),
+			vm.TmpVarOperand(1))
+		leftTemp := vm.TmpVarOperand(1)
+
+		// Compile right operand (result goes to TMPVAR(0))
 		if err := c.Compile(node.Right); err != nil {
 			return err
 		}
-		rightTemp := vm.TmpVarOperand(1) // TODO: proper temp tracking
+		rightTemp := vm.TmpVarOperand(0)
 
 		// Emit the appropriate opcode based on operator
 		var opcode vm.Opcode
@@ -488,10 +495,11 @@ func (c *Compiler) Compile(node ast.Node) error {
 			return fmt.Errorf("unknown infix operator: %s", node.Operator)
 		}
 
+		// Result goes to TMPVAR(0) to match the convention that expressions output to TMPVAR(0)
 		c.EmitWithLine(opcode, uint32(node.Token.Pos.Line),
 			leftTemp,
 			rightTemp,
-			vm.TmpVarOperand(2)) // Result in temp 2
+			vm.TmpVarOperand(0))
 		return nil
 
 	// Prefix Expressions (unary operators)
@@ -1136,7 +1144,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 		// Patch JMPZ to jump to alternative
 		altPos := c.CurrentPosition()
-		c.ChangeOperand(jmpzPos, 1, vm.ConstOperand(uint32(altPos)))
+		c.ChangeOperand(jmpzPos, 2, vm.ConstOperand(uint32(altPos)))
 
 		// Compile alternative (false branch)
 		if err := c.Compile(node.Alternative); err != nil {
@@ -1264,7 +1272,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 		// Patch JMPZ to point here
 		altStart := c.CurrentPosition()
-		c.ChangeOperand(jmpzPos, 1, vm.ConstOperand(uint32(altStart)))
+		c.ChangeOperand(jmpzPos, 2, vm.ConstOperand(uint32(altStart)))
 
 		// Track positions for elseif jumps
 		elseifJumps := []int{}
@@ -1296,7 +1304,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 			// Patch JMPZ to next clause
 			nextClause := c.CurrentPosition()
-			c.ChangeOperand(elseifJmpz, 1, vm.ConstOperand(uint32(nextClause)))
+			c.ChangeOperand(elseifJmpz, 2, vm.ConstOperand(uint32(nextClause)))
 		}
 
 		// Compile alternative (else) if present
@@ -1326,6 +1334,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 		// JMPZ to end if condition is false
+		// Condition result is in TMPVAR(0) (expression result convention)
 		jmpzPos := c.EmitWithLine(vm.OpJmpZ, uint32(node.Token.Pos.Line),
 			vm.TmpVarOperand(0),
 			vm.UnusedOperand(),
@@ -1344,7 +1353,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 		// Patch JMPZ to jump here (end of loop)
 		endPos := c.CurrentPosition()
-		c.ChangeOperand(jmpzPos, 1, vm.ConstOperand(uint32(endPos)))
+		c.ChangeOperand(jmpzPos, 2, vm.ConstOperand(uint32(endPos)))
 
 		// Exit loop and patch break/continue
 		c.ExitLoop(endPos)
@@ -1420,7 +1429,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		// Patch condition JMPZ to jump here (end of loop)
 		endPos := c.CurrentPosition()
 		if len(node.Condition) > 0 {
-			c.ChangeOperand(jmpzPos, 1, vm.ConstOperand(uint32(endPos)))
+			c.ChangeOperand(jmpzPos, 2, vm.ConstOperand(uint32(endPos)))
 		}
 
 		// Update loop context to use increment position for continue

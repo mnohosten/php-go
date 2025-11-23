@@ -8,7 +8,7 @@ import (
 )
 
 func runParallelDemo() {
-	fmt.Println("Demonstrating PHP-Go's parallelization features\n")
+	fmt.Println("Demonstrating PHP-Go's parallelization features")
 
 	// Demo 1: Worker Pool
 	demo1WorkerPool()
