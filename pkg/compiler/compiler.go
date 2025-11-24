@@ -29,6 +29,13 @@ type Compiler struct {
 
 	// loopStack tracks nested loops for break/continue
 	loopStack []*LoopContext
+
+	// tempVarStack tracks which temp variables are currently in use
+	// The stack grows as we enter nested expressions
+	tempVarStack []int
+
+	// nextTempVar is the next available temp var number
+	nextTempVar int
 }
 
 // LoopContext tracks information about a loop for break/continue
@@ -57,6 +64,8 @@ func New() *Compiler {
 		constantMap:         make(map[interface{}]int),
 		lastInstruction:     EmittedInstruction{},
 		previousInstruction: EmittedInstruction{},
+		tempVarStack:        []int{},
+		nextTempVar:         0,
 	}
 	c.InitSymbolTable()
 	return c
@@ -94,6 +103,41 @@ func (c *Compiler) Constants() []interface{} {
 	result := make([]interface{}, len(c.constants))
 	copy(result, c.constants)
 	return result
+}
+
+// ========================================
+// Temp Variable Management
+// ========================================
+
+// AllocTemp allocates a new temp variable and returns its operand
+// The temp variable is pushed onto the stack for proper nesting
+func (c *Compiler) AllocTemp() vm.Operand {
+	tempNum := c.nextTempVar
+	c.tempVarStack = append(c.tempVarStack, tempNum)
+	c.nextTempVar++
+	return vm.TmpVarOperand(uint32(tempNum))
+}
+
+// FreeTemp deallocates the most recently allocated temp variable
+// This pops the temp variable from the stack
+func (c *Compiler) FreeTemp() {
+	if len(c.tempVarStack) > 0 {
+		// Pop from stack
+		c.tempVarStack = c.tempVarStack[:len(c.tempVarStack)-1]
+		// Reset nextTempVar when stack is empty to reuse temp vars
+		if len(c.tempVarStack) == 0 {
+			c.nextTempVar = 0
+		}
+	}
+}
+
+// CurrentTemp returns the currently active temp variable operand
+// Returns TMPVAR(0) as fallback if no temp variables are allocated
+func (c *Compiler) CurrentTemp() vm.Operand {
+	if len(c.tempVarStack) > 0 {
+		return vm.TmpVarOperand(uint32(c.tempVarStack[len(c.tempVarStack)-1]))
+	}
+	return vm.TmpVarOperand(0) // Fallback for backward compatibility
 }
 
 // ========================================
@@ -271,8 +315,15 @@ func (c *Compiler) Compile(node ast.Node) error {
 		if err := c.Compile(node.Expression); err != nil {
 			return err
 		}
-		// Pop the result since expression statements don't use their value
-		c.Emit(vm.OpFree, vm.TmpVarOperand(0)) // TODO: track temp var numbers properly
+		// Free all temp variables allocated by this expression
+		// Expression result is in CurrentTemp(), free it
+		if len(c.tempVarStack) > 0 {
+			c.Emit(vm.OpFree, c.CurrentTemp())
+			// Free all temps used by the expression
+			for len(c.tempVarStack) > 0 {
+				c.FreeTemp()
+			}
+		}
 		return nil
 
 	case *ast.BlockStatement:
@@ -299,8 +350,8 @@ func (c *Compiler) Compile(node ast.Node) error {
 			if err := c.Compile(expr); err != nil {
 				return err
 			}
-			// Emit ECHO instruction for each expression
-			c.EmitWithLine(vm.OpEcho, uint32(node.Token.Pos.Line), vm.TmpVarOperand(0))
+			// Emit ECHO instruction for each expression - value is in CurrentTemp()
+			c.EmitWithLine(vm.OpEcho, uint32(node.Token.Pos.Line), c.CurrentTemp())
 		}
 		return nil
 
@@ -309,7 +360,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 			if err := c.Compile(node.ReturnValue); err != nil {
 				return err
 			}
-			c.EmitWithLine(vm.OpReturn, uint32(node.Token.Pos.Line), vm.TmpVarOperand(0))
+			c.EmitWithLine(vm.OpReturn, uint32(node.Token.Pos.Line), c.CurrentTemp())
 		} else {
 			// Return null
 			c.EmitWithLine(vm.OpReturn, uint32(node.Token.Pos.Line))
@@ -319,26 +370,29 @@ func (c *Compiler) Compile(node ast.Node) error {
 	// Literals
 	case *ast.IntegerLiteral:
 		constIdx := c.AddConstant(node.Value)
+		temp := c.AllocTemp()
 		c.EmitWithLine(vm.OpQMAssign, uint32(node.Token.Pos.Line),
 			vm.ConstOperand(uint32(constIdx)),
 			vm.UnusedOperand(),
-			vm.TmpVarOperand(0))
+			temp)
 		return nil
 
 	case *ast.FloatLiteral:
 		constIdx := c.AddConstant(node.Value)
+		temp := c.AllocTemp()
 		c.EmitWithLine(vm.OpQMAssign, uint32(node.Token.Pos.Line),
 			vm.ConstOperand(uint32(constIdx)),
 			vm.UnusedOperand(),
-			vm.TmpVarOperand(0))
+			temp)
 		return nil
 
 	case *ast.StringLiteral:
 		constIdx := c.AddConstant(node.Value)
+		temp := c.AllocTemp()
 		c.EmitWithLine(vm.OpQMAssign, uint32(node.Token.Pos.Line),
 			vm.ConstOperand(uint32(constIdx)),
 			vm.UnusedOperand(),
-			vm.TmpVarOperand(0))
+			temp)
 		return nil
 
 	// Interpolated String - compile as series of concatenations
@@ -346,10 +400,11 @@ func (c *Compiler) Compile(node ast.Node) error {
 		if len(node.Parts) == 0 {
 			// Empty interpolated string - just return empty string
 			constIdx := c.AddConstant("")
+			temp := c.AllocTemp()
 			c.EmitWithLine(vm.OpQMAssign, uint32(node.Token.Pos.Line),
 				vm.ConstOperand(uint32(constIdx)),
 				vm.UnusedOperand(),
-				vm.TmpVarOperand(0))
+				temp)
 			return nil
 		}
 
@@ -357,44 +412,44 @@ func (c *Compiler) Compile(node ast.Node) error {
 		if err := c.Compile(node.Parts[0]); err != nil {
 			return err
 		}
-		// Result in temp var 0
+		// Result is in CurrentTemp()
+		previousTemp := c.CurrentTemp()
 
 		// Concatenate remaining parts
 		for i := 1; i < len(node.Parts); i++ {
-			// Move previous result from temp 0 to temp 1
-			c.EmitWithLine(vm.OpQMAssign, uint32(node.Token.Pos.Line),
-				vm.TmpVarOperand(0),
-				vm.UnusedOperand(),
-				vm.TmpVarOperand(1))
-
-			// Compile next part into temp var 0
+			// Compile next part
 			if err := c.Compile(node.Parts[i]); err != nil {
 				return err
 			}
+			currentTemp := c.CurrentTemp()
 
-			// Concatenate: temp var 1 . temp var 0 -> temp var 0
+			// Concatenate: previous . current -> result
+			resultTemp := c.AllocTemp()
 			c.EmitWithLine(vm.OpConcat, uint32(node.Token.Pos.Line),
-				vm.TmpVarOperand(1), // Previous result
-				vm.TmpVarOperand(0), // Current part
-				vm.TmpVarOperand(0)) // Result back in temp var 0
+				previousTemp,
+				currentTemp,
+				resultTemp)
+			previousTemp = resultTemp
 		}
 
 		return nil
 
 	case *ast.BooleanLiteral:
 		constIdx := c.AddConstant(node.Value)
+		temp := c.AllocTemp()
 		c.EmitWithLine(vm.OpQMAssign, uint32(node.Token.Pos.Line),
 			vm.ConstOperand(uint32(constIdx)),
 			vm.UnusedOperand(),
-			vm.TmpVarOperand(0))
+			temp)
 		return nil
 
 	case *ast.NullLiteral:
 		constIdx := c.AddConstant(nil)
+		temp := c.AllocTemp()
 		c.EmitWithLine(vm.OpQMAssign, uint32(node.Token.Pos.Line),
 			vm.ConstOperand(uint32(constIdx)),
 			vm.UnusedOperand(),
-			vm.TmpVarOperand(0))
+			temp)
 		return nil
 
 	// Infix Expressions (binary operators)
@@ -408,10 +463,11 @@ func (c *Compiler) Compile(node ast.Node) error {
 			if result, ok := foldConstantBinaryOp(leftVal, rightVal, node.Operator); ok {
 				// Emit a single constant instead of the operation
 				constIdx := c.AddConstant(result)
+				temp := c.AllocTemp()
 				c.EmitWithLine(vm.OpQMAssign, uint32(node.Token.Pos.Line),
 					vm.ConstOperand(uint32(constIdx)),
 					vm.UnusedOperand(),
-					vm.TmpVarOperand(0))
+					temp)
 				return nil
 			}
 		}
@@ -423,26 +479,21 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 		// Normal compilation if not foldable or reducible
-		// Compile left operand (result goes to TMPVAR(0))
+		// Use temp variable stack to handle nested expressions properly
+
+		// Compile left operand - it will allocate temps and leave result in CurrentTemp()
 		if err := c.Compile(node.Left); err != nil {
 			return err
 		}
+		// Capture left result immediately before Right compilation can overwrite CurrentTemp
+		leftTemp := c.CurrentTemp()
 
-		// Save left operand to TMPVAR(1) before compiling right operand
-		// This prevents the right operand from overwriting the left operand in TMPVAR(0)
-		// Note: This simple approach has issues with deeply nested expressions
-		// TODO: Implement proper temp variable allocation with nesting depth tracking
-		c.EmitWithLine(vm.OpQMAssign, uint32(node.Token.Pos.Line),
-			vm.TmpVarOperand(0),
-			vm.UnusedOperand(),
-			vm.TmpVarOperand(1))
-		leftTemp := vm.TmpVarOperand(1)
-
-		// Compile right operand (result goes to TMPVAR(0))
+		// Compile right operand - it will allocate more temps and leave result in CurrentTemp()
 		if err := c.Compile(node.Right); err != nil {
 			return err
 		}
-		rightTemp := vm.TmpVarOperand(0)
+		// Right result is in CurrentTemp()
+		rightTemp := c.CurrentTemp()
 
 		// Emit the appropriate opcode based on operator
 		var opcode vm.Opcode
@@ -497,11 +548,13 @@ func (c *Compiler) Compile(node ast.Node) error {
 			return fmt.Errorf("unknown infix operator: %s", node.Operator)
 		}
 
-		// Result goes to TMPVAR(0) to match the convention that expressions output to TMPVAR(0)
+		// Emit operation with result going to a new temp
+		resultTemp := c.AllocTemp()
 		c.EmitWithLine(opcode, uint32(node.Token.Pos.Line),
 			leftTemp,
 			rightTemp,
-			vm.TmpVarOperand(0))
+			resultTemp)
+
 		return nil
 
 	// Prefix Expressions (unary operators)
@@ -513,10 +566,11 @@ func (c *Compiler) Compile(node ast.Node) error {
 			if result, ok := foldConstantUnaryOp(operandVal, node.Operator); ok {
 				// Emit a single constant instead of the operation
 				constIdx := c.AddConstant(result)
+				temp := c.AllocTemp()
 				c.EmitWithLine(vm.OpQMAssign, uint32(node.Token.Pos.Line),
 					vm.ConstOperand(uint32(constIdx)),
 					vm.UnusedOperand(),
-					vm.TmpVarOperand(0))
+					temp)
 				return nil
 			}
 		}
@@ -526,8 +580,10 @@ func (c *Compiler) Compile(node ast.Node) error {
 		if err := c.Compile(node.Right); err != nil {
 			return err
 		}
+		operandTemp := c.CurrentTemp()
 
-		// Emit the appropriate opcode
+		// Emit the appropriate opcode with result temp
+		resultTemp := c.AllocTemp()
 		var opcode vm.Opcode
 		switch node.Operator {
 		case "!":
@@ -537,8 +593,8 @@ func (c *Compiler) Compile(node ast.Node) error {
 			constIdx := c.AddConstant(int64(0))
 			c.EmitWithLine(vm.OpSub, uint32(node.Token.Pos.Line),
 				vm.ConstOperand(uint32(constIdx)),
-				vm.TmpVarOperand(0),
-				vm.TmpVarOperand(1))
+				operandTemp,
+				resultTemp)
 			return nil
 		case "~":
 			opcode = vm.OpBWNot
@@ -547,9 +603,9 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 		c.EmitWithLine(opcode, uint32(node.Token.Pos.Line),
-			vm.TmpVarOperand(0),
+			operandTemp,
 			vm.UnusedOperand(),
-			vm.TmpVarOperand(1))
+			resultTemp)
 		return nil
 
 	case *ast.Variable:
@@ -561,19 +617,20 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 		// Emit FETCH instruction based on scope
+		temp := c.AllocTemp()
 		switch symbol.Scope {
 		case GlobalScope:
 			// Fetch global variable
 			c.EmitWithLine(vm.OpFetchR, uint32(node.Token.Pos.Line),
 				vm.CVOperand(uint32(symbol.Index)),
 				vm.UnusedOperand(),
-				vm.TmpVarOperand(0))
+				temp)
 		case LocalScope:
 			// Fetch local variable (compiled variable for direct access)
 			c.EmitWithLine(vm.OpQMAssign, uint32(node.Token.Pos.Line),
 				vm.CVOperand(uint32(symbol.Index)),
 				vm.UnusedOperand(),
-				vm.TmpVarOperand(0))
+				temp)
 		case BuiltinScope:
 			return fmt.Errorf("cannot use builtin '%s' as variable", node.Name)
 		case FreeScope:
@@ -581,7 +638,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 			c.EmitWithLine(vm.OpFetchR, uint32(node.Token.Pos.Line),
 				vm.CVOperand(uint32(symbol.Index)),
 				vm.UnusedOperand(),
-				vm.TmpVarOperand(0))
+				temp)
 		}
 		return nil
 
@@ -599,9 +656,9 @@ func (c *Compiler) Compile(node ast.Node) error {
 				symbol = c.DefineVariable(variable.Name)
 			}
 
-			// Emit ASSIGN instruction
+			// Emit ASSIGN instruction - value is in CurrentTemp() after compiling Right
 			c.EmitWithLine(vm.OpAssign, uint32(node.Token.Pos.Line),
-				vm.TmpVarOperand(0), // Value is in temp var 0
+				c.CurrentTemp(), // Value from right-hand side
 				vm.UnusedOperand(),
 				vm.CVOperand(uint32(symbol.Index))) // Store in compiled variable
 			return nil
@@ -609,20 +666,20 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 		// Handle property assignment: $obj->prop = value
 		if property, ok := node.Left.(*ast.PropertyExpression); ok {
-			// Value is already compiled (in temp 0)
-			valueTemp := vm.TmpVarOperand(0)
+			// Value is already compiled - capture it now before compiling object/property
+			valueTemp := c.CurrentTemp()
 
 			// Compile the object
 			if err := c.Compile(property.Object); err != nil {
 				return err
 			}
-			objTemp := vm.TmpVarOperand(1)
+			objTemp := c.CurrentTemp()
 
 			// Compile the property (could be identifier or dynamic expression)
 			if err := c.Compile(property.Property); err != nil {
 				return err
 			}
-			propTemp := vm.TmpVarOperand(2)
+			propTemp := c.CurrentTemp()
 
 			// Emit ASSIGN_OBJ instruction
 			c.EmitWithLine(vm.OpAssignObj, uint32(node.Token.Pos.Line),
@@ -634,20 +691,20 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 		// Handle array element assignment: $arr[index] = value
 		if index, ok := node.Left.(*ast.IndexExpression); ok {
-			// Value is already compiled (in temp 0)
-			valueTemp := vm.TmpVarOperand(0)
+			// Value is already compiled - capture it now before compiling array/index
+			valueTemp := c.CurrentTemp()
 
 			// Compile the array variable
 			if err := c.Compile(index.Left); err != nil {
 				return err
 			}
-			arrayTemp := vm.TmpVarOperand(1)
+			arrayTemp := c.CurrentTemp()
 
 			// Compile the index
 			if err := c.Compile(index.Index); err != nil {
 				return err
 			}
-			indexTemp := vm.TmpVarOperand(2)
+			indexTemp := c.CurrentTemp()
 
 			// Emit ASSIGN_DIM instruction
 			c.EmitWithLine(vm.OpAssignDim, uint32(node.Token.Pos.Line),
@@ -661,10 +718,11 @@ func (c *Compiler) Compile(node ast.Node) error {
 	// Identifier (convert to string constant)
 	case *ast.Identifier:
 		constIdx := c.AddConstant(node.Value)
+		temp := c.AllocTemp()
 		c.EmitWithLine(vm.OpQMAssign, uint32(node.Token.Pos.Line),
 			vm.ConstOperand(uint32(constIdx)),
 			vm.UnusedOperand(),
-			vm.TmpVarOperand(0))
+			temp)
 		return nil
 
 	// Grouped Expression (just compile the inner expression)
@@ -890,11 +948,12 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 	// Array Literal
 	case *ast.ArrayExpression:
-		// Initialize empty array
+		// Allocate temp for the array and initialize it
+		arrayTemp := c.AllocTemp()
 		c.EmitWithLine(vm.OpInitArray, uint32(node.Token.Pos.Line),
 			vm.UnusedOperand(),
 			vm.UnusedOperand(),
-			vm.TmpVarOperand(0)) // Array in temp var 0
+			arrayTemp)
 
 		// Add elements to array
 		for _, elem := range node.Elements {
@@ -902,26 +961,26 @@ func (c *Compiler) Compile(node ast.Node) error {
 			if err := c.Compile(elem.Value); err != nil {
 				return err
 			}
-			valueTemp := vm.TmpVarOperand(1) // Value in temp 1
+			valueTemp := c.CurrentTemp()
 
 			// If there's a key, compile it
 			if elem.Key != nil {
 				if err := c.Compile(elem.Key); err != nil {
 					return err
 				}
-				keyTemp := vm.TmpVarOperand(2) // Key in temp 2
+				keyTemp := c.CurrentTemp()
 
 				// ADD_ARRAY_ELEMENT with key: array[key] = value
 				c.EmitWithLine(vm.OpAddArrayElement, uint32(node.Token.Pos.Line),
 					valueTemp,
 					keyTemp,
-					vm.TmpVarOperand(0)) // Result array in temp 0
+					arrayTemp)
 			} else {
 				// ADD_ARRAY_ELEMENT without key: array[] = value
 				c.EmitWithLine(vm.OpAddArrayElement, uint32(node.Token.Pos.Line),
 					valueTemp,
 					vm.UnusedOperand(),
-					vm.TmpVarOperand(0)) // Result array in temp 0
+					arrayTemp)
 			}
 		}
 		return nil
@@ -932,19 +991,20 @@ func (c *Compiler) Compile(node ast.Node) error {
 		if err := c.Compile(node.Left); err != nil {
 			return err
 		}
-		arrayTemp := vm.TmpVarOperand(0)
+		arrayTemp := c.CurrentTemp()
 
 		// Compile the index
 		if err := c.Compile(node.Index); err != nil {
 			return err
 		}
-		indexTemp := vm.TmpVarOperand(1)
+		indexTemp := c.CurrentTemp()
 
-		// Emit FETCH_DIM_R: result = array[index]
+		// Allocate result temp and emit FETCH_DIM_R: result = array[index]
+		resultTemp := c.AllocTemp()
 		c.EmitWithLine(vm.OpFetchDimR, uint32(node.Token.Pos.Line),
 			arrayTemp,
 			indexTemp,
-			vm.TmpVarOperand(2)) // Result in temp 2
+			resultTemp)
 		return nil
 
 	// Property Access
@@ -953,19 +1013,20 @@ func (c *Compiler) Compile(node ast.Node) error {
 		if err := c.Compile(node.Object); err != nil {
 			return err
 		}
-		objTemp := vm.TmpVarOperand(0)
+		objTemp := c.CurrentTemp()
 
 		// Compile the property (could be identifier or dynamic expression)
 		if err := c.Compile(node.Property); err != nil {
 			return err
 		}
-		propTemp := vm.TmpVarOperand(1)
+		propTemp := c.CurrentTemp()
 
-		// Emit FETCH_OBJ_R: result = obj->prop
+		// Allocate result temp and emit FETCH_OBJ_R: result = obj->prop
+		resultTemp := c.AllocTemp()
 		c.EmitWithLine(vm.OpFetchObjR, uint32(node.Token.Pos.Line),
 			objTemp,
 			propTemp,
-			vm.TmpVarOperand(2)) // Result in temp 2
+			resultTemp)
 		return nil
 
 	// Function Call
@@ -980,7 +1041,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 					if err := c.Compile(node.Arguments[0].Value); err != nil {
 						return err
 					}
-					c.EmitWithLine(vm.OpExit, uint32(node.Token.Pos.Line), vm.TmpVarOperand(0))
+					c.EmitWithLine(vm.OpExit, uint32(node.Token.Pos.Line), c.CurrentTemp())
 				} else {
 					// No argument, just exit
 					c.EmitWithLine(vm.OpExit, uint32(node.Token.Pos.Line), vm.UnusedOperand())
@@ -989,41 +1050,43 @@ func (c *Compiler) Compile(node ast.Node) error {
 			}
 		}
 
-		// For now, we'll handle simple function calls by name
-		// Full implementation with dynamic calls will come later
-
-		// Compile the function expression
+		// Compile the function expression - it will allocate a temp
 		if err := c.Compile(node.Function); err != nil {
 			return err
 		}
-		funcTemp := vm.TmpVarOperand(0)
+		funcTemp := c.CurrentTemp()
 
-		// Initialize function call
+		// KEY INSIGHT: Compile ALL arguments BEFORE initializing the call
+		// This allows nested calls in arguments to complete fully before we init this call
+		var argTemps []vm.Operand
+		for _, arg := range node.Arguments {
+			if err := c.Compile(arg.Value); err != nil {
+				return err
+			}
+			// Save the argument's temp - it's in CurrentTemp() after compilation
+			argTemps = append(argTemps, c.CurrentTemp())
+		}
+
+		// NOW initialize the function call (after all arguments are ready)
 		c.EmitWithLine(vm.OpInitFcallByName, uint32(node.Token.Pos.Line),
 			funcTemp,
 			vm.ConstOperand(uint32(len(node.Arguments))), // Argument count
 			vm.UnusedOperand())
 
-		// Compile and send arguments
-		for i, arg := range node.Arguments {
-			if err := c.Compile(arg.Value); err != nil {
-				return err
-			}
-			// The compiled argument is in TmpVar(0), but we need to save it
-			// before compiling the next argument. For now, just send it immediately.
-			// NOTE: We use TmpVar(0) here because Compile() puts results there
+		// Send all the pre-compiled arguments
+		for _, argTemp := range argTemps {
 			c.EmitWithLine(vm.OpSendVal, uint32(node.Token.Pos.Line),
-				vm.TmpVarOperand(0), // The argument value (from Compile)
+				argTemp,
 				vm.UnusedOperand(),
 				vm.UnusedOperand())
-			_ = i // silence unused warning
 		}
 
-		// Execute function call
+		// Execute function call - result goes to a new temp
+		resultTemp := c.AllocTemp()
 		c.EmitWithLine(vm.OpDoFcall, uint32(node.Token.Pos.Line),
 			vm.UnusedOperand(),
 			vm.UnusedOperand(),
-			vm.TmpVarOperand(0)) // Result in temp 0 (standard location for expression results)
+			resultTemp)
 		return nil
 
 	// Method Call
@@ -1032,13 +1095,13 @@ func (c *Compiler) Compile(node ast.Node) error {
 		if err := c.Compile(node.Object); err != nil {
 			return err
 		}
-		objTemp := vm.TmpVarOperand(0)
+		objTemp := c.CurrentTemp()
 
 		// Compile the method name (could be identifier or dynamic)
 		if err := c.Compile(node.Method); err != nil {
 			return err
 		}
-		methodTemp := vm.TmpVarOperand(1)
+		methodTemp := c.CurrentTemp()
 
 		// Compile arguments
 		for _, arg := range node.Arguments {
@@ -1054,12 +1117,13 @@ func (c *Compiler) Compile(node ast.Node) error {
 			methodTemp,
 			vm.UnusedOperand())
 
-		// Execute method call with argument count in extended value
+		// Allocate result temp and execute method call with argument count in extended value
+		resultTemp := c.AllocTemp()
 		c.EmitWithExtended(vm.OpDoFcall, uint32(node.Token.Pos.Line),
 			uint32(len(node.Arguments)),
 			vm.UnusedOperand(),
 			vm.UnusedOperand(),
-			vm.TmpVarOperand(2)) // Result in temp 2
+			resultTemp)
 		return nil
 
 	// Static Property Access (Class::$property)
@@ -1068,19 +1132,20 @@ func (c *Compiler) Compile(node ast.Node) error {
 		if err := c.Compile(node.Class); err != nil {
 			return err
 		}
-		classTemp := vm.TmpVarOperand(0)
+		classTemp := c.CurrentTemp()
 
 		// Compile the property (usually a variable)
 		if err := c.Compile(node.Property); err != nil {
 			return err
 		}
-		propTemp := vm.TmpVarOperand(1)
+		propTemp := c.CurrentTemp()
 
-		// Fetch static property
+		// Allocate result temp and fetch static property
+		resultTemp := c.AllocTemp()
 		c.EmitWithLine(vm.OpFetchStaticPropR, uint32(node.Token.Pos.Line),
 			classTemp,
 			propTemp,
-			vm.TmpVarOperand(2)) // Result in temp 2
+			resultTemp)
 		return nil
 
 	// Static Method Call (Class::method())
@@ -1089,13 +1154,13 @@ func (c *Compiler) Compile(node ast.Node) error {
 		if err := c.Compile(node.Class); err != nil {
 			return err
 		}
-		classTemp := vm.TmpVarOperand(0)
+		classTemp := c.CurrentTemp()
 
 		// Compile the method name (could be identifier or dynamic)
 		if err := c.Compile(node.Method); err != nil {
 			return err
 		}
-		methodTemp := vm.TmpVarOperand(1)
+		methodTemp := c.CurrentTemp()
 
 		// Compile arguments
 		for _, arg := range node.Arguments {
@@ -1111,12 +1176,13 @@ func (c *Compiler) Compile(node ast.Node) error {
 			methodTemp,
 			vm.UnusedOperand())
 
-		// Execute method call with argument count in extended value
+		// Allocate result temp and execute method call with argument count in extended value
+		resultTemp := c.AllocTemp()
 		c.EmitWithExtended(vm.OpDoFcall, uint32(node.Token.Pos.Line),
 			uint32(len(node.Arguments)),
 			vm.UnusedOperand(),
 			vm.UnusedOperand(),
-			vm.TmpVarOperand(2)) // Result in temp 2
+			resultTemp)
 		return nil
 
 	// Ternary Operator
@@ -1366,9 +1432,9 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 		// JMPZ to end if condition is false
-		// Condition result is in TMPVAR(0) (expression result convention)
+		// Condition result is in CurrentTemp() after compilation
 		jmpzPos := c.EmitWithLine(vm.OpJmpZ, uint32(node.Token.Pos.Line),
-			vm.TmpVarOperand(0),
+			c.CurrentTemp(),
 			vm.UnusedOperand(),
 			vm.UnusedOperand())
 
@@ -1400,8 +1466,10 @@ func (c *Compiler) Compile(node ast.Node) error {
 			if err := c.Compile(init); err != nil {
 				return err
 			}
-			// Free the result
-			c.Emit(vm.OpFree, vm.TmpVarOperand(0))
+			// Free the result if there is one
+			if len(c.tempVarStack) > 0 {
+				c.Emit(vm.OpFree, c.CurrentTemp())
+			}
 		}
 
 		// Remember condition start position
@@ -1419,7 +1487,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 				if i < len(node.Condition)-1 {
 					// Not the last condition, short-circuit if false
 					jmpz := c.EmitWithLine(vm.OpJmpZ, uint32(node.Token.Pos.Line),
-						vm.TmpVarOperand(0),
+						c.CurrentTemp(),
 						vm.UnusedOperand(),
 						vm.UnusedOperand())
 					if i == 0 {
@@ -1429,7 +1497,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 			}
 			// Final JMPZ to exit loop
 			finalJmpz := c.EmitWithLine(vm.OpJmpZ, uint32(node.Token.Pos.Line),
-				vm.TmpVarOperand(0),
+				c.CurrentTemp(),
 				vm.UnusedOperand(),
 				vm.UnusedOperand())
 			if len(node.Condition) == 1 {
@@ -1450,8 +1518,10 @@ func (c *Compiler) Compile(node ast.Node) error {
 			if err := c.Compile(inc); err != nil {
 				return err
 			}
-			// Free the result
-			c.Emit(vm.OpFree, vm.TmpVarOperand(0))
+			// Free the result if there is one
+			if len(c.tempVarStack) > 0 {
+				c.Emit(vm.OpFree, c.CurrentTemp())
+			}
 		}
 
 		// JMP back to condition

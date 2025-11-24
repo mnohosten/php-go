@@ -3409,3 +3409,180 @@ func TestGetConstantMethod(t *testing.T) {
 		t.Error("Expected GetConstant to return error for invalid index")
 	}
 }
+
+// ========================================
+// Temp Variable Stack Tests
+// ========================================
+
+func TestTempVarAllocation(t *testing.T) {
+	c := New()
+
+	// Initial state - should have empty stack
+	if len(c.tempVarStack) != 0 {
+		t.Errorf("Expected empty temp var stack, got length %d", len(c.tempVarStack))
+	}
+	if c.nextTempVar != 0 {
+		t.Errorf("Expected nextTempVar = 0, got %d", c.nextTempVar)
+	}
+
+	// Allocate first temp var
+	temp0 := c.AllocTemp()
+	if temp0.Type != vm.OpTmpVar {
+		t.Errorf("Expected OpTmpVar, got %v", temp0.Type)
+	}
+	if temp0.Value != 0 {
+		t.Errorf("Expected TMPVAR(0), got TMPVAR(%d)", temp0.Value)
+	}
+	if len(c.tempVarStack) != 1 {
+		t.Errorf("Expected stack length 1, got %d", len(c.tempVarStack))
+	}
+
+	// Allocate second temp var
+	temp1 := c.AllocTemp()
+	if temp1.Value != 1 {
+		t.Errorf("Expected TMPVAR(1), got TMPVAR(%d)", temp1.Value)
+	}
+	if len(c.tempVarStack) != 2 {
+		t.Errorf("Expected stack length 2, got %d", len(c.tempVarStack))
+	}
+
+	// Allocate third temp var
+	temp2 := c.AllocTemp()
+	if temp2.Value != 2 {
+		t.Errorf("Expected TMPVAR(2), got TMPVAR(%d)", temp2.Value)
+	}
+	if len(c.tempVarStack) != 3 {
+		t.Errorf("Expected stack length 3, got %d", len(c.tempVarStack))
+	}
+}
+
+func TestTempVarDeallocation(t *testing.T) {
+	c := New()
+
+	// Allocate 3 temp vars
+	c.AllocTemp()
+	c.AllocTemp()
+	c.AllocTemp()
+
+	if len(c.tempVarStack) != 3 {
+		t.Fatalf("Setup failed: expected 3 temp vars, got %d", len(c.tempVarStack))
+	}
+
+	// Free one
+	c.FreeTemp()
+	if len(c.tempVarStack) != 2 {
+		t.Errorf("After first FreeTemp, expected stack length 2, got %d", len(c.tempVarStack))
+	}
+
+	// Free another
+	c.FreeTemp()
+	if len(c.tempVarStack) != 1 {
+		t.Errorf("After second FreeTemp, expected stack length 1, got %d", len(c.tempVarStack))
+	}
+
+	// Free last one - should reset nextTempVar
+	c.FreeTemp()
+	if len(c.tempVarStack) != 0 {
+		t.Errorf("After third FreeTemp, expected stack length 0, got %d", len(c.tempVarStack))
+	}
+	if c.nextTempVar != 0 {
+		t.Errorf("After freeing all temps, expected nextTempVar = 0, got %d", c.nextTempVar)
+	}
+}
+
+func TestTempVarReuse(t *testing.T) {
+	c := New()
+
+	// Allocate and free
+	temp0 := c.AllocTemp()
+	c.FreeTemp()
+
+	// Allocate again - should reuse TMPVAR(0)
+	temp1 := c.AllocTemp()
+	if temp1.Value != temp0.Value {
+		t.Errorf("Expected temp var reuse: TMPVAR(%d), got TMPVAR(%d)", temp0.Value, temp1.Value)
+	}
+}
+
+func TestTempVarNesting(t *testing.T) {
+	c := New()
+
+	// Simulate nested expression: (a + b) * (c + d)
+	// Outer multiplication needs temps for left and right operands
+
+	// Left side: a + b
+	leftTemp := c.AllocTemp() // TMPVAR(0) for left operand
+	if leftTemp.Value != 0 {
+		t.Errorf("Expected TMPVAR(0) for left, got TMPVAR(%d)", leftTemp.Value)
+	}
+
+	// Right side: c + d
+	rightTemp := c.AllocTemp() // TMPVAR(1) for right operand
+	if rightTemp.Value != 1 {
+		t.Errorf("Expected TMPVAR(1) for right, got TMPVAR(%d)", rightTemp.Value)
+	}
+
+	// Result of multiplication
+	resultTemp := c.AllocTemp() // TMPVAR(2) for result
+	if resultTemp.Value != 2 {
+		t.Errorf("Expected TMPVAR(2) for result, got TMPVAR(%d)", resultTemp.Value)
+	}
+
+	// Free intermediate temps
+	c.FreeTemp() // Free resultTemp
+	c.FreeTemp() // Free rightTemp
+	c.FreeTemp() // Free leftTemp
+
+	// Stack should be empty and ready to reuse
+	if len(c.tempVarStack) != 0 {
+		t.Errorf("Expected empty stack after freeing all, got length %d", len(c.tempVarStack))
+	}
+	if c.nextTempVar != 0 {
+		t.Errorf("Expected nextTempVar = 0 after freeing all, got %d", c.nextTempVar)
+	}
+}
+
+func TestCurrentTemp(t *testing.T) {
+	c := New()
+
+	// With empty stack, should return TMPVAR(0) as fallback
+	current := c.CurrentTemp()
+	if current.Value != 0 {
+		t.Errorf("Expected CurrentTemp() = TMPVAR(0) for empty stack, got TMPVAR(%d)", current.Value)
+	}
+
+	// Allocate one temp
+	temp0 := c.AllocTemp()
+	current = c.CurrentTemp()
+	if current.Value != temp0.Value {
+		t.Errorf("Expected CurrentTemp() = TMPVAR(%d), got TMPVAR(%d)", temp0.Value, current.Value)
+	}
+
+	// Allocate another
+	temp1 := c.AllocTemp()
+	current = c.CurrentTemp()
+	if current.Value != temp1.Value {
+		t.Errorf("Expected CurrentTemp() = TMPVAR(%d), got TMPVAR(%d)", temp1.Value, current.Value)
+	}
+
+	// Free one - current should be temp0 again
+	c.FreeTemp()
+	current = c.CurrentTemp()
+	if current.Value != temp0.Value {
+		t.Errorf("After FreeTemp, expected CurrentTemp() = TMPVAR(%d), got TMPVAR(%d)", temp0.Value, current.Value)
+	}
+}
+
+func TestTempVarFreeEmpty(t *testing.T) {
+	c := New()
+
+	// Calling FreeTemp on empty stack should not panic
+	c.FreeTemp()
+	c.FreeTemp()
+	c.FreeTemp()
+
+	// Should still be in valid state
+	if len(c.tempVarStack) != 0 {
+		t.Errorf("Expected empty stack, got length %d", len(c.tempVarStack))
+	}
+}
