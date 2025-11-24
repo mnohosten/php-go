@@ -51,6 +51,9 @@ type Visitor interface {
 	VisitStaticCallExpression(node *StaticCallExpression) bool
 	VisitNewExpression(node *NewExpression) bool
 	VisitInstanceofExpression(node *InstanceofExpression) bool
+	VisitIssetExpression(node *IssetExpression) bool
+	VisitEmptyExpression(node *EmptyExpression) bool
+	VisitIncludeExpression(node *IncludeExpression) bool
 	VisitCastExpression(node *CastExpression) bool
 	VisitGroupedExpression(node *GroupedExpression) bool
 	VisitMatchExpression(node *MatchExpression) bool
@@ -338,6 +341,20 @@ func Walk(v Visitor, node Node) {
 			Walk(v, n.Left)
 			Walk(v, n.Right)
 		}
+	case *IssetExpression:
+		if v.VisitIssetExpression(n) {
+			for _, variable := range n.Variables {
+				Walk(v, variable)
+			}
+		}
+	case *EmptyExpression:
+		if v.VisitEmptyExpression(n) {
+			Walk(v, n.Variable)
+		}
+	case *IncludeExpression:
+		if v.VisitIncludeExpression(n) {
+			Walk(v, n.Path)
+		}
 	case *CastExpression:
 		if v.VisitCastExpression(n) {
 			Walk(v, n.Expr)
@@ -429,6 +446,9 @@ func (bv *BaseVisitor) VisitMethodCallExpression(node *MethodCallExpression) boo
 func (bv *BaseVisitor) VisitStaticCallExpression(node *StaticCallExpression) bool { return true }
 func (bv *BaseVisitor) VisitNewExpression(node *NewExpression) bool               { return true }
 func (bv *BaseVisitor) VisitInstanceofExpression(node *InstanceofExpression) bool { return true }
+func (bv *BaseVisitor) VisitIssetExpression(node *IssetExpression) bool           { return true }
+func (bv *BaseVisitor) VisitEmptyExpression(node *EmptyExpression) bool           { return true }
+func (bv *BaseVisitor) VisitIncludeExpression(node *IncludeExpression) bool       { return true }
 func (bv *BaseVisitor) VisitCastExpression(node *CastExpression) bool             { return true }
 func (bv *BaseVisitor) VisitGroupedExpression(node *GroupedExpression) bool       { return true }
 func (bv *BaseVisitor) VisitMatchExpression(node *MatchExpression) bool           { return true }

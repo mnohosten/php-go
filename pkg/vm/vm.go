@@ -235,6 +235,10 @@ func (vm *VM) dispatch(frame *Frame, instr Instruction) error {
 		return vm.opFetch(frame, instr)
 	case OpFree:
 		return vm.opFree(frame, instr)
+	case OpIssetIsemptyVar:
+		return vm.opIssetIsemptyVar(frame, instr)
+	case OpIncludeOrEval:
+		return vm.opIncludeOrEval(frame, instr)
 
 	// Control flow
 	case OpJmp:

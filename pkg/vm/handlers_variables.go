@@ -95,3 +95,67 @@ func (vm *VM) opEmpty(frame *Frame, instr Instruction) error {
 
 	return vm.setOperandValue(frame, instr.Result, types.NewBool(result))
 }
+
+// opIssetIsemptyVar handles isset/empty check on a variable
+// Op1 = variable to check (CV or temp)
+// Op2 = mode: 0 for isset, 1 for empty
+// Result = boolean result
+func (vm *VM) opIssetIsemptyVar(frame *Frame, instr Instruction) error {
+	// For isset/empty, we need to directly check the local variable
+	// because getOperandValue converts nil to NewNull(), which hides
+	// the difference between uninitialized and null variables
+
+	var value *types.Value
+	var index int
+
+	// Calculate the actual index in the locals array
+	switch instr.Op1.Type {
+	case OpCV, OpVar:
+		index = int(instr.Op1.Value)
+	case OpTmpVar:
+		offset := frame.fn.NumParams
+		if frame.fn.NumCVs > 0 {
+			offset = frame.fn.NumCVs
+		}
+		index = int(instr.Op1.Value) + offset
+	default:
+		// For other operand types, use normal value retrieval
+		var err error
+		value, err = vm.getOperandValue(frame, instr.Op1)
+		if err != nil {
+			return err
+		}
+		index = -1
+	}
+
+	// If we have a valid index, check the raw local value
+	if index >= 0 {
+		if index < len(frame.locals) {
+			value = frame.locals[index]
+		} else {
+			value = nil
+		}
+	}
+
+	// Get the mode from Op2 (0 = isset, 1 = empty)
+	mode := instr.Op2.Value
+	var result bool
+
+	if mode == 0 {
+		// isset mode: returns false for nil (uninitialized), null, and undef
+		if value == nil {
+			result = false
+		} else {
+			result = !value.IsNull() && !value.IsUndef()
+		}
+	} else {
+		// empty mode: returns true for nil (uninitialized), falsy values, null, or undef
+		if value == nil {
+			result = true
+		} else {
+			result = value.IsFalse() || value.IsNull() || value.IsUndef()
+		}
+	}
+
+	return vm.setOperandValue(frame, instr.Result, types.NewBool(result))
+}

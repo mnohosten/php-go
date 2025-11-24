@@ -637,6 +637,111 @@ func (c *Compiler) Compile(node ast.Node) error {
 			return nil
 		case "~":
 			opcode = vm.OpBWNot
+		case "++(postfix)", "--(postfix)":
+			// Postfix increment/decrement: evaluate to current value, then modify variable
+			// Result is the OLD value (operandTemp), but we must modify the variable
+			// operandTemp already contains the current value from compiling node.Right
+
+			// Get variable from Right (should be a Variable node)
+			varNode, ok := node.Right.(*ast.Variable)
+			if !ok {
+				return fmt.Errorf("postfix %s requires a variable", node.Operator)
+			}
+
+			// Look up the variable
+			symbol, ok := c.ResolveVariable(varNode.Name)
+			if !ok {
+				symbol = c.DefineVariable(varNode.Name)
+			}
+
+			// Allocate temp for modified value first
+			modTemp := c.AllocTemp()
+
+			// Create constant 1
+			oneIdx := c.AddConstant(int64(1))
+
+			// Increment/decrement into modTemp
+			if node.Operator == "++(postfix)" {
+				c.EmitWithLine(vm.OpAdd, uint32(node.Token.Pos.Line),
+					operandTemp,
+					vm.ConstOperand(uint32(oneIdx)),
+					modTemp)
+			} else {
+				c.EmitWithLine(vm.OpSub, uint32(node.Token.Pos.Line),
+					operandTemp,
+					vm.ConstOperand(uint32(oneIdx)),
+					modTemp)
+			}
+
+			// Assign modified value back to variable
+			switch symbol.Scope {
+			case GlobalScope:
+				c.EmitWithLine(vm.OpAssign, uint32(node.Token.Pos.Line),
+					modTemp,
+					vm.UnusedOperand(),
+					vm.CVOperand(uint32(symbol.Index)))
+			case LocalScope:
+				c.EmitWithLine(vm.OpQMAssign, uint32(node.Token.Pos.Line),
+					modTemp,
+					vm.UnusedOperand(),
+					vm.CVOperand(uint32(symbol.Index)))
+			}
+
+			// Now allocate resultTemp and save old value (this becomes CurrentTemp)
+			resultTemp := c.AllocTemp()
+			c.EmitWithLine(vm.OpQMAssign, uint32(node.Token.Pos.Line),
+				operandTemp,
+				vm.UnusedOperand(),
+				resultTemp)
+
+			// resultTemp has the old value (correct for postfix) and is CurrentTemp
+			return nil
+		case "++", "--":
+			// Prefix increment/decrement: modify variable and return new value
+			// Get variable from Right (should be a Variable node)
+			varNode, ok := node.Right.(*ast.Variable)
+			if !ok {
+				return fmt.Errorf("prefix %s requires a variable", node.Operator)
+			}
+
+			// Look up the variable
+			symbol, ok := c.ResolveVariable(varNode.Name)
+			if !ok {
+				symbol = c.DefineVariable(varNode.Name)
+			}
+
+			// Create constant 1
+			oneIdx := c.AddConstant(int64(1))
+
+			// Increment/decrement the variable
+			if node.Operator == "++" {
+				c.EmitWithLine(vm.OpAdd, uint32(node.Token.Pos.Line),
+					operandTemp,
+					vm.ConstOperand(uint32(oneIdx)),
+					resultTemp)
+			} else {
+				c.EmitWithLine(vm.OpSub, uint32(node.Token.Pos.Line),
+					operandTemp,
+					vm.ConstOperand(uint32(oneIdx)),
+					resultTemp)
+			}
+
+			// Assign back to variable
+			switch symbol.Scope {
+			case GlobalScope:
+				c.EmitWithLine(vm.OpAssign, uint32(node.Token.Pos.Line),
+					resultTemp,
+					vm.UnusedOperand(),
+					vm.CVOperand(uint32(symbol.Index)))
+			case LocalScope:
+				c.EmitWithLine(vm.OpQMAssign, uint32(node.Token.Pos.Line),
+					resultTemp,
+					vm.UnusedOperand(),
+					vm.CVOperand(uint32(symbol.Index)))
+			}
+
+			// resultTemp has the new value
+			return nil
 		default:
 			return fmt.Errorf("unknown prefix operator: %s", node.Operator)
 		}
@@ -1222,6 +1327,161 @@ func (c *Compiler) Compile(node ast.Node) error {
 			vm.UnusedOperand(),
 			vm.UnusedOperand(),
 			resultTemp)
+		return nil
+
+	// Isset Expression
+	case *ast.IssetExpression:
+		// isset() checks if variables are set and not null
+		// isset($a) returns true if $a is set and not null
+		// isset($a, $b, $c) returns true if ALL variables are set and not null
+		//
+		// IMPORTANT: isset() does NOT fetch the variable value - it checks if it exists
+		// We must pass the CV index directly, not compile the variable
+
+		if len(node.Variables) == 0 {
+			// Empty isset() - shouldn't happen (parser should catch this)
+			return fmt.Errorf("isset() requires at least one argument")
+		}
+
+		// Helper function to get CV operand from variable expression
+		getVarOperand := func(expr ast.Expr) (vm.Operand, error) {
+			if variable, ok := expr.(*ast.Variable); ok {
+				// IMPORTANT: isset() should NOT define variables
+				// If the variable doesn't exist, we still need to check it
+				// So we define it as undefined for the check, but don't initialize it
+				symbol, ok := c.ResolveVariable(variable.Name)
+				if !ok {
+					// Define the variable but DON'T initialize it
+					// This allows isset() to check an undefined variable
+					symbol = c.DefineVariable(variable.Name)
+				}
+				return vm.CVOperand(uint32(symbol.Index)), nil
+			}
+			// For more complex expressions (like $arr['key']), we'd need to compile them
+			// For now, just compile and get the temp
+			if err := c.Compile(expr); err != nil {
+				return vm.UnusedOperand(), err
+			}
+			return c.CurrentTemp(), nil
+		}
+
+		// For single variable, it's simple
+		if len(node.Variables) == 1 {
+			varOperand, err := getVarOperand(node.Variables[0])
+			if err != nil {
+				return err
+			}
+
+			resultTemp := c.AllocTemp()
+			c.EmitWithLine(vm.OpIssetIsemptyVar, uint32(node.Token.Pos.Line),
+				varOperand,
+				vm.ConstOperand(0), // 0 = isset mode (not empty mode)
+				resultTemp)
+			return nil
+		}
+
+		// For multiple variables, use short-circuit evaluation
+		// Track jumps to the end (when a variable is not set)
+		var endJumps []int
+
+		for i, variable := range node.Variables {
+			varOperand, err := getVarOperand(variable)
+			if err != nil {
+				return err
+			}
+
+			// Emit isset check
+			resultTemp := c.AllocTemp()
+			c.EmitWithLine(vm.OpIssetIsemptyVar, uint32(node.Token.Pos.Line),
+				varOperand,
+				vm.ConstOperand(0), // 0 = isset mode
+				resultTemp)
+
+			// If this is not the last variable, check if it's false
+			// If false, jump to end
+			if i < len(node.Variables)-1 {
+				jmpPos := c.EmitWithLine(vm.OpJmpZ, uint32(node.Token.Pos.Line),
+					resultTemp,
+					vm.TmpVarOperand(0), // placeholder address
+					vm.UnusedOperand())
+				endJumps = append(endJumps, jmpPos)
+			}
+			// If we reach here and it's the last variable, result is in resultTemp
+		}
+
+		// Patch all jumps to point here (end of isset() evaluation)
+		endPos := c.CurrentPosition()
+		for _, jmpPos := range endJumps {
+			c.PatchJump(jmpPos, 1, endPos)
+		}
+
+		return nil
+
+	// Empty Expression
+	case *ast.EmptyExpression:
+		// empty() checks if a variable is empty (falsy or not set)
+		// Returns true if the variable is not set or is falsy
+		// Falsy values: false, 0, 0.0, "", "0", null, empty array
+		//
+		// IMPORTANT: empty() does NOT fetch the variable value - it checks if it exists and is falsy
+		// We must pass the CV index directly for simple variables
+
+		// Get the variable operand
+		var varOperand vm.Operand
+		if variable, ok := node.Variable.(*ast.Variable); ok {
+			// Look up or define the variable
+			symbol, ok := c.ResolveVariable(variable.Name)
+			if !ok {
+				symbol = c.DefineVariable(variable.Name)
+			}
+			varOperand = vm.CVOperand(uint32(symbol.Index))
+		} else {
+			// For more complex expressions (like $arr['key']), compile them
+			if err := c.Compile(node.Variable); err != nil {
+				return err
+			}
+			varOperand = c.CurrentTemp()
+		}
+
+		// Emit empty check
+		resultTemp := c.AllocTemp()
+		c.EmitWithLine(vm.OpIssetIsemptyVar, uint32(node.Token.Pos.Line),
+			varOperand,
+			vm.ConstOperand(1), // 1 = empty mode (not isset mode)
+			resultTemp)
+
+		return nil
+
+	case *ast.IncludeExpression:
+		// include, include_once, require, require_once
+		// These load and execute PHP files
+		//
+		// Compile the path expression
+		if err := c.Compile(node.Path); err != nil {
+			return err
+		}
+
+		// Determine include type
+		// 0 = include, 1 = include_once, 2 = require, 3 = require_once
+		includeType := uint32(0)
+		switch node.Type {
+		case "include":
+			includeType = 0
+		case "include_once":
+			includeType = 1
+		case "require":
+			includeType = 2
+		case "require_once":
+			includeType = 3
+		}
+
+		// Emit INCLUDE_OR_EVAL opcode
+		resultTemp := c.AllocTemp()
+		c.EmitWithLine(vm.OpIncludeOrEval, uint32(node.Token.Pos.Line),
+			vm.TmpVarOperand(0),              // Path from previous compilation
+			vm.ConstOperand(includeType),     // Include type
+			resultTemp)                        // Result goes to temp
+
 		return nil
 
 	// Ternary Operator

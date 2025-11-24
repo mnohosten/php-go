@@ -44,6 +44,12 @@ func (p *Parser) registerExpressionParsers() {
 	p.prefixParseFns[lexer.FN] = p.parseArrowFunctionExpression
 	p.prefixParseFns[lexer.STATIC] = p.parseStaticClosureOrProperty
 	p.prefixParseFns[lexer.EXIT] = p.parseExitExpression
+	p.prefixParseFns[lexer.ISSET] = p.parseIssetExpression
+	p.prefixParseFns[lexer.EMPTY] = p.parseEmptyExpression
+	p.prefixParseFns[lexer.INCLUDE] = p.parseIncludeExpression
+	p.prefixParseFns[lexer.INCLUDE_ONCE] = p.parseIncludeExpression
+	p.prefixParseFns[lexer.REQUIRE] = p.parseIncludeExpression
+	p.prefixParseFns[lexer.REQUIRE_ONCE] = p.parseIncludeExpression
 
 	// Magic constants
 	p.prefixParseFns[lexer.LINE_CONST] = p.parseMagicConstant
@@ -552,6 +558,141 @@ func (p *Parser) parseExitExpression() ast.Expr {
 	}
 
 	return expression
+}
+
+func (p *Parser) parseIssetExpression() ast.Expr {
+	// isset() checks if one or more variables are set and not null
+	// Examples:
+	// isset($var)
+	// isset($a, $b, $c)
+	// isset($arr['key'])
+
+	token := p.curToken // The ISSET token
+
+	// Expect opening parenthesis
+	if !p.expectPeek(lexer.LPAREN) {
+		return nil
+	}
+
+	expression := &ast.IssetExpression{
+		Token:     token,
+		Variables: []ast.Expr{},
+	}
+
+	// Check for empty isset()
+	if p.peekTokenIs(lexer.RPAREN) {
+		p.nextToken() // move to )
+		p.error("isset() expects at least one argument")
+		return expression
+	}
+
+	p.nextToken() // move past (
+
+	// Parse first variable
+	variable := p.parseExpression(LOWEST)
+	if variable == nil {
+		return nil
+	}
+	expression.Variables = append(expression.Variables, variable)
+
+	// Parse additional variables (comma-separated)
+	for p.peekTokenIs(lexer.COMMA) {
+		p.nextToken() // move to ,
+		p.nextToken() // move past ,
+
+		variable := p.parseExpression(LOWEST)
+		if variable == nil {
+			return nil
+		}
+		expression.Variables = append(expression.Variables, variable)
+	}
+
+	// Expect closing parenthesis
+	if !p.expectPeek(lexer.RPAREN) {
+		return nil
+	}
+
+	return expression
+}
+
+func (p *Parser) parseEmptyExpression() ast.Expr {
+	// empty() checks if a variable is empty (falsy or not set)
+	// Examples:
+	// empty($var)
+	// empty($arr['key'])
+
+	token := p.curToken // The EMPTY token
+
+	// Expect opening parenthesis
+	if !p.expectPeek(lexer.LPAREN) {
+		return nil
+	}
+
+	// Check for empty empty()
+	if p.peekTokenIs(lexer.RPAREN) {
+		p.nextToken() // move to )
+		p.error("empty() expects exactly one argument")
+		return nil
+	}
+
+	p.nextToken() // move past (
+
+	// Parse the variable
+	variable := p.parseExpression(LOWEST)
+	if variable == nil {
+		return nil
+	}
+
+	expression := &ast.EmptyExpression{
+		Token:    token,
+		Variable: variable,
+	}
+
+	// Expect closing parenthesis
+	if !p.expectPeek(lexer.RPAREN) {
+		return nil
+	}
+
+	return expression
+}
+
+func (p *Parser) parseIncludeExpression() ast.Expr {
+	// include, include_once, require, require_once
+	// These can be used with or without parentheses:
+	// require 'file.php'
+	// require('file.php')
+	// $result = include 'file.php'
+
+	token := p.curToken // The INCLUDE/INCLUDE_ONCE/REQUIRE/REQUIRE_ONCE token
+
+	// Determine the type
+	includeType := ""
+	switch token.Type {
+	case lexer.INCLUDE:
+		includeType = "include"
+	case lexer.INCLUDE_ONCE:
+		includeType = "include_once"
+	case lexer.REQUIRE:
+		includeType = "require"
+	case lexer.REQUIRE_ONCE:
+		includeType = "require_once"
+	}
+
+	p.nextToken() // move to the path expression
+
+	// Parse the path expression
+	// Note: We parse with LOWEST precedence to handle expressions like:
+	// require DIR . '/file.php'
+	path := p.parseExpression(LOWEST)
+	if path == nil {
+		return nil
+	}
+
+	return &ast.IncludeExpression{
+		Token: token,
+		Path:  path,
+		Type:  includeType,
+	}
 }
 
 // Infix parsing functions

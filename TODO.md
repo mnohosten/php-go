@@ -2600,10 +2600,10 @@ All property and parameter reflection functionality is already implemented and t
 
 **Critical Parser Bugs Identified** (Blocking 80% of files):
 1. ✅ `array()` constructor - 15,785 errors - **CRITICAL P0** - FIXED (Nov 24, 2025)
-2. ❌ `isset()` - 5,565 errors - **CRITICAL P0**
-3. ❌ `empty()` - 5,149 errors - **CRITICAL P0**
-4. ❌ `public`/`protected`/`private` modifiers - 1,825 errors - **CRITICAL P0**
-5. ❌ `require_once`/`require` - 1,178 errors - **CRITICAL P0**
+2. ✅ `isset()` - 5,565 errors - **CRITICAL P0** - FIXED (Nov 24, 2025)
+3. ✅ `empty()` - 5,149 errors - **CRITICAL P0** - FIXED (Nov 24, 2025)
+4. ✅ `require_once`/`require`/`include_once`/`include` - 1,178 errors - **CRITICAL P0** - FIXED (Nov 24, 2025)
+5. ❌ `public`/`protected`/`private` modifiers - 1,825 errors - **CRITICAL P0**
 6. ❌ `global` statement - 1,061 errors - **CRITICAL P0**
 7. ❌ `unset()` - 1,042 errors - **CRITICAL P0**
 8. ❌ `else`/`elseif` - 1,222 errors - **CRITICAL P0**
@@ -2651,6 +2651,9 @@ All property and parameter reflection functionality is already implemented and t
 - ✅ Trailing comma support in arrays - Fixed in `pkg/parser/expr.go:400-410`
 - ✅ Magic constants support (`__DIR__`, `__FILE__`, etc.) - Added `MagicConstant` AST node, parser/compiler/visitor support
 - ✅ `array()` constructor syntax - Added `parseArrayConstructor()` in `pkg/parser/expr.go:460-503` (Nov 24, 2025)
+- ✅ `isset()` language construct - Added `IssetExpression` AST node, parser (`pkg/parser/expr.go:559-612`), compiler (`pkg/compiler/compiler.go:1227-1309`), and VM handler (`pkg/vm/handlers_variables.go:99-161`) (Nov 24, 2025)
+- ✅ `empty()` language construct - Added `EmptyExpression` AST node, parser (`pkg/parser/expr.go:614-653`), compiler (`pkg/compiler/compiler.go:1311-1344`), and VM handler (uses same handler as isset) (Nov 24, 2025)
+- ✅ `require`, `require_once`, `include`, `include_once` - Added `IncludeExpression` AST node, parser (`pkg/parser/expr.go:659-696`), compiler (`pkg/compiler/compiler.go:1350-1380`), VM handler (`pkg/vm/handlers_io.go:35-83`), and visitor support (`pkg/ast/visitor.go:56,354-357,451`) (Nov 24, 2025)
 
 ### 10.4 Laravel Testing (16h)
 - [ ] Install Laravel (2h)

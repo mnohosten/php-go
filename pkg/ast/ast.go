@@ -388,6 +388,34 @@ func (ie *InstanceofExpression) String() string {
 	return "(" + ie.Left.String() + " instanceof " + ie.Right.String() + ")"
 }
 
+// IssetExpression represents isset() language construct
+// isset() checks if variables are set and not null
+// Examples: isset($var), isset($a, $b, $c)
+type IssetExpression struct {
+	Token     lexer.Token // The ISSET token
+	Variables []Expr      // One or more variables to check
+}
+
+func (ie *IssetExpression) expressionNode()      {}
+func (ie *IssetExpression) TokenLiteral() string { return ie.Token.Literal }
+func (ie *IssetExpression) String() string {
+	return "isset(...)"
+}
+
+// EmptyExpression represents empty() language construct
+// empty() checks if a variable is empty (falsy or not set)
+// Examples: empty($var), empty($arr['key'])
+type EmptyExpression struct {
+	Token    lexer.Token // The EMPTY token
+	Variable Expr        // The variable to check (only one allowed)
+}
+
+func (ee *EmptyExpression) expressionNode()      {}
+func (ee *EmptyExpression) TokenLiteral() string { return ee.Token.Literal }
+func (ee *EmptyExpression) String() string {
+	return "empty(" + ee.Variable.String() + ")"
+}
+
 // FirstClassCallableExpression represents PHP 8.1+ first-class callable syntax
 // Examples: strlen(...), $obj->method(...), Class::staticMethod(...)
 type FirstClassCallableExpression struct {
@@ -478,6 +506,20 @@ func (es *EchoStatement) statementNode()       {}
 func (es *EchoStatement) TokenLiteral() string { return es.Token.Literal }
 func (es *EchoStatement) String() string {
 	return "echo ..."
+}
+
+// IncludeExpression represents include, include_once, require, require_once
+// These are expressions in PHP, not statements
+type IncludeExpression struct {
+	Token lexer.Token // INCLUDE, INCLUDE_ONCE, REQUIRE, or REQUIRE_ONCE
+	Path  Expr        // The file path to include
+	Type  string      // "include", "include_once", "require", "require_once"
+}
+
+func (ie *IncludeExpression) expressionNode()      {}
+func (ie *IncludeExpression) TokenLiteral() string { return ie.Token.Literal }
+func (ie *IncludeExpression) String() string {
+	return ie.Type + " " + ie.Path.String()
 }
 
 // ReturnStatement represents return statement
