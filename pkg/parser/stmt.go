@@ -190,15 +190,30 @@ func (p *Parser) parseIfStatement() *ast.IfStatement {
 		return nil
 	}
 
-	if !p.expectPeek(lexer.LBRACE) {
+	// Check for alternative syntax (colon) or regular syntax (brace)
+	p.nextToken()
+	useAlternativeSyntax := false
+
+	if p.curTokenIs(lexer.COLON) {
+		// Alternative syntax: if (...): ... endif;
+		useAlternativeSyntax = true
+		stmt.Consequence = p.parseAlternativeBlockStatement(lexer.ENDIF, lexer.ELSEIF, lexer.ELSE)
+		// After parseAlternativeBlockStatement, curToken is at the terminator (endif/elseif/else)
+	} else if p.curTokenIs(lexer.LBRACE) {
+		// Regular syntax: if (...) { ... }
+		stmt.Consequence = p.parseBlockStatement()
+	} else {
+		p.peekError(lexer.LBRACE)
 		return nil
 	}
 
-	stmt.Consequence = p.parseBlockStatement()
-
 	// Parse elseif clauses
-	for p.peekTokenIs(lexer.ELSEIF) {
-		p.nextToken() // move to elseif
+	// In alternative syntax, curToken is already at elseif/else/endif after parseAlternativeBlockStatement
+	// In regular syntax, we need to peek for the next token
+	for (useAlternativeSyntax && p.curTokenIs(lexer.ELSEIF)) || (!useAlternativeSyntax && p.peekTokenIs(lexer.ELSEIF)) {
+		if !useAlternativeSyntax {
+			p.nextToken() // move to elseif in regular syntax
+		}
 
 		elseIfClause := &ast.ElseIfClause{
 			Token: p.curToken,
@@ -215,29 +230,61 @@ func (p *Parser) parseIfStatement() *ast.IfStatement {
 			return nil
 		}
 
-		if !p.expectPeek(lexer.LBRACE) {
-			return nil
+		p.nextToken()
+		if useAlternativeSyntax {
+			if !p.curTokenIs(lexer.COLON) {
+				p.peekError(lexer.COLON)
+				return nil
+			}
+			elseIfClause.Consequence = p.parseAlternativeBlockStatement(lexer.ENDIF, lexer.ELSEIF, lexer.ELSE)
+			// After parseAlternativeBlockStatement, curToken is at the terminator
+		} else {
+			if !p.curTokenIs(lexer.LBRACE) {
+				p.peekError(lexer.LBRACE)
+				return nil
+			}
+			elseIfClause.Consequence = p.parseBlockStatement()
 		}
 
-		elseIfClause.Consequence = p.parseBlockStatement()
 		stmt.ElseIfs = append(stmt.ElseIfs, elseIfClause)
 	}
 
 	// Parse else clause
-	if p.peekTokenIs(lexer.ELSE) {
-		p.nextToken() // move to else
-
-		if !p.expectPeek(lexer.LBRACE) {
-			return nil
+	if (useAlternativeSyntax && p.curTokenIs(lexer.ELSE)) || (!useAlternativeSyntax && p.peekTokenIs(lexer.ELSE)) {
+		if !useAlternativeSyntax {
+			p.nextToken() // move to else in regular syntax
 		}
 
-		stmt.Alternative = p.parseBlockStatement()
+		if useAlternativeSyntax {
+			if !p.expectPeek(lexer.COLON) {
+				return nil
+			}
+			stmt.Alternative = p.parseAlternativeBlockStatement(lexer.ENDIF)
+			// After parseAlternativeBlockStatement, curToken is at endif
+		} else {
+			if !p.expectPeek(lexer.LBRACE) {
+				return nil
+			}
+			stmt.Alternative = p.parseBlockStatement()
+		}
+	}
+
+	// Consume endif token for alternative syntax
+	if useAlternativeSyntax {
+		if !p.curTokenIs(lexer.ENDIF) {
+			p.peekError(lexer.ENDIF)
+			return nil
+		}
+		// Optional semicolon after endif
+		if p.peekTokenIs(lexer.SEMICOLON) {
+			p.nextToken()
+		}
 	}
 
 	return stmt
 }
 
-// parseWhileStatement parses while loop
+// parseWhileStatement parses while loop (both regular and alternative syntax)
 func (p *Parser) parseWhileStatement() *ast.WhileStatement {
 	stmt := &ast.WhileStatement{
 		Token: p.curToken,
@@ -254,11 +301,27 @@ func (p *Parser) parseWhileStatement() *ast.WhileStatement {
 		return nil
 	}
 
-	if !p.expectPeek(lexer.LBRACE) {
+	// Check for alternative syntax (colon) or regular syntax (brace)
+	p.nextToken()
+
+	if p.curTokenIs(lexer.COLON) {
+		// Alternative syntax: while (...): ... endwhile;
+		stmt.Body = p.parseAlternativeBlockStatement(lexer.ENDWHILE)
+		if !p.curTokenIs(lexer.ENDWHILE) {
+			p.peekError(lexer.ENDWHILE)
+			return nil
+		}
+		// Optional semicolon after endwhile
+		if p.peekTokenIs(lexer.SEMICOLON) {
+			p.nextToken()
+		}
+	} else if p.curTokenIs(lexer.LBRACE) {
+		// Regular syntax: while (...) { ... }
+		stmt.Body = p.parseBlockStatement()
+	} else {
+		p.peekError(lexer.LBRACE)
 		return nil
 	}
-
-	stmt.Body = p.parseBlockStatement()
 
 	return stmt
 }
@@ -359,11 +422,27 @@ func (p *Parser) parseForStatement() *ast.ForStatement {
 		return nil
 	}
 
-	if !p.expectPeek(lexer.LBRACE) {
+	// Check for alternative syntax (colon) or regular syntax (brace)
+	p.nextToken()
+
+	if p.curTokenIs(lexer.COLON) {
+		// Alternative syntax: for (...): ... endfor;
+		stmt.Body = p.parseAlternativeBlockStatement(lexer.ENDFOR)
+		if !p.curTokenIs(lexer.ENDFOR) {
+			p.peekError(lexer.ENDFOR)
+			return nil
+		}
+		// Optional semicolon after endfor
+		if p.peekTokenIs(lexer.SEMICOLON) {
+			p.nextToken()
+		}
+	} else if p.curTokenIs(lexer.LBRACE) {
+		// Regular syntax: for (...) { ... }
+		stmt.Body = p.parseBlockStatement()
+	} else {
+		p.peekError(lexer.LBRACE)
 		return nil
 	}
-
-	stmt.Body = p.parseBlockStatement()
 
 	return stmt
 }
@@ -413,16 +492,32 @@ func (p *Parser) parseForeachStatement() *ast.ForeachStatement {
 		return nil
 	}
 
-	if !p.expectPeek(lexer.LBRACE) {
+	// Check for alternative syntax (colon) or regular syntax (brace)
+	p.nextToken()
+
+	if p.curTokenIs(lexer.COLON) {
+		// Alternative syntax: foreach (...): ... endforeach;
+		stmt.Body = p.parseAlternativeBlockStatement(lexer.ENDFOREACH)
+		if !p.curTokenIs(lexer.ENDFOREACH) {
+			p.peekError(lexer.ENDFOREACH)
+			return nil
+		}
+		// Optional semicolon after endforeach
+		if p.peekTokenIs(lexer.SEMICOLON) {
+			p.nextToken()
+		}
+	} else if p.curTokenIs(lexer.LBRACE) {
+		// Regular syntax: foreach (...) { ... }
+		stmt.Body = p.parseBlockStatement()
+	} else {
+		p.peekError(lexer.LBRACE)
 		return nil
 	}
-
-	stmt.Body = p.parseBlockStatement()
 
 	return stmt
 }
 
-// parseSwitchStatement parses switch statement
+// parseSwitchStatement parses switch statement (both regular and alternative syntax)
 func (p *Parser) parseSwitchStatement() *ast.SwitchStatement {
 	stmt := &ast.SwitchStatement{
 		Token: p.curToken,
@@ -440,14 +535,29 @@ func (p *Parser) parseSwitchStatement() *ast.SwitchStatement {
 		return nil
 	}
 
-	if !p.expectPeek(lexer.LBRACE) {
+	// Check for alternative syntax (colon) or regular syntax (brace)
+	p.nextToken()
+	useAlternativeSyntax := false
+
+	if p.curTokenIs(lexer.COLON) {
+		// Alternative syntax: switch (...): ... endswitch;
+		useAlternativeSyntax = true
+		p.nextToken()
+	} else if p.curTokenIs(lexer.LBRACE) {
+		// Regular syntax: switch (...) { ... }
+		p.nextToken()
+	} else {
+		p.peekError(lexer.LBRACE)
 		return nil
 	}
 
-	p.nextToken()
-
 	// Parse cases
-	for !p.curTokenIs(lexer.RBRACE) && !p.curTokenIs(lexer.EOF) {
+	endToken := lexer.RBRACE
+	if useAlternativeSyntax {
+		endToken = lexer.ENDSWITCH
+	}
+
+	for !p.curTokenIs(endToken) && !p.curTokenIs(lexer.EOF) {
 		if p.curTokenIs(lexer.CASE) {
 			caseClause := &ast.SwitchCase{
 				Token: p.curToken,
@@ -463,12 +573,12 @@ func (p *Parser) parseSwitchStatement() *ast.SwitchStatement {
 
 			p.nextToken()
 
-			// Parse case body until next case/default/closing brace
+			// Parse case body until next case/default/closing token
 			for !p.curTokenIs(lexer.CASE) && !p.curTokenIs(lexer.DEFAULT) &&
-				!p.curTokenIs(lexer.RBRACE) && !p.curTokenIs(lexer.EOF) {
-				stmt := p.parseStatement()
-				if stmt != nil {
-					caseClause.Body = append(caseClause.Body, stmt)
+				!p.curTokenIs(endToken) && !p.curTokenIs(lexer.EOF) {
+				caseStmt := p.parseStatement()
+				if caseStmt != nil {
+					caseClause.Body = append(caseClause.Body, caseStmt)
 				}
 				p.nextToken()
 			}
@@ -489,16 +599,28 @@ func (p *Parser) parseSwitchStatement() *ast.SwitchStatement {
 
 			// Parse default body
 			for !p.curTokenIs(lexer.CASE) && !p.curTokenIs(lexer.DEFAULT) &&
-				!p.curTokenIs(lexer.RBRACE) && !p.curTokenIs(lexer.EOF) {
-				stmt := p.parseStatement()
-				if stmt != nil {
-					defaultClause.Body = append(defaultClause.Body, stmt)
+				!p.curTokenIs(endToken) && !p.curTokenIs(lexer.EOF) {
+				defaultStmt := p.parseStatement()
+				if defaultStmt != nil {
+					defaultClause.Body = append(defaultClause.Body, defaultStmt)
 				}
 				p.nextToken()
 			}
 
 			stmt.Cases = append(stmt.Cases, defaultClause)
 		} else {
+			p.nextToken()
+		}
+	}
+
+	// Handle endswitch for alternative syntax
+	if useAlternativeSyntax {
+		if !p.curTokenIs(lexer.ENDSWITCH) {
+			p.peekError(lexer.ENDSWITCH)
+			return nil
+		}
+		// Optional semicolon after endswitch
+		if p.peekTokenIs(lexer.SEMICOLON) {
 			p.nextToken()
 		}
 	}
@@ -685,6 +807,40 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 	p.nextToken()
 
 	for !p.curTokenIs(lexer.RBRACE) && !p.curTokenIs(lexer.EOF) {
+		stmt := p.parseStatement()
+		if stmt != nil {
+			block.Statements = append(block.Statements, stmt)
+		}
+		p.nextToken()
+	}
+
+	return block
+}
+
+// parseAlternativeBlockStatement parses statements in alternative syntax (until terminator tokens)
+// Used for if/endif, while/endwhile, foreach/endforeach, etc.
+func (p *Parser) parseAlternativeBlockStatement(terminators ...lexer.TokenType) *ast.BlockStatement {
+	block := &ast.BlockStatement{
+		Token:      p.curToken,
+		Statements: []ast.Stmt{},
+	}
+
+	p.nextToken()
+
+	// Continue until we hit one of the terminator tokens or EOF
+	for !p.curTokenIs(lexer.EOF) {
+		// Check if current token is one of the terminators
+		isTerminator := false
+		for _, term := range terminators {
+			if p.curTokenIs(term) {
+				isTerminator = true
+				break
+			}
+		}
+		if isTerminator {
+			break
+		}
+
 		stmt := p.parseStatement()
 		if stmt != nil {
 			block.Statements = append(block.Statements, stmt)

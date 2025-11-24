@@ -1066,3 +1066,236 @@ class UserController {
 		t.Fatalf("expected at least 2 statements in namespace, got %d", len(nsStmt.Statements))
 	}
 }
+
+// Alternative syntax tests
+
+func TestIfAlternativeSyntax(t *testing.T) {
+	input := `<?php
+	if ($x > 0):
+		echo "positive";
+	endif;`
+
+	l := lexer.New(input, "test.php")
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	stmt, ok := program.Statements[0].(*ast.IfStatement)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not *ast.IfStatement. got=%T", program.Statements[0])
+	}
+
+	if stmt.Condition == nil {
+		t.Error("if statement condition is nil")
+	}
+
+	if stmt.Consequence == nil {
+		t.Error("if statement consequence is nil")
+	}
+
+	if len(stmt.Consequence.Statements) != 1 {
+		t.Errorf("expected 1 statement in consequence, got %d", len(stmt.Consequence.Statements))
+	}
+}
+
+func TestIfElseAlternativeSyntax(t *testing.T) {
+	input := `<?php
+	if ($x > 0):
+		echo "positive";
+	else:
+		echo "non-positive";
+	endif;`
+
+	l := lexer.New(input, "test.php")
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	stmt, ok := program.Statements[0].(*ast.IfStatement)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not *ast.IfStatement. got=%T", program.Statements[0])
+	}
+
+	if stmt.Alternative == nil {
+		t.Error("if statement alternative is nil")
+	}
+
+	if len(stmt.Alternative.Statements) != 1 {
+		t.Errorf("expected 1 statement in alternative, got %d", len(stmt.Alternative.Statements))
+	}
+}
+
+func TestIfElseIfElseAlternativeSyntax(t *testing.T) {
+	input := `<?php
+	if ($x > 10):
+		echo "big";
+	elseif ($x > 0):
+		echo "positive";
+	else:
+		echo "non-positive";
+	endif;`
+
+	l := lexer.New(input, "test.php")
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	stmt, ok := program.Statements[0].(*ast.IfStatement)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not *ast.IfStatement. got=%T", program.Statements[0])
+	}
+
+	if len(stmt.ElseIfs) != 1 {
+		t.Errorf("expected 1 elseif clause, got %d", len(stmt.ElseIfs))
+	}
+
+	if stmt.Alternative == nil {
+		t.Error("if statement alternative is nil")
+	}
+}
+
+func TestWhileAlternativeSyntax(t *testing.T) {
+	input := `<?php
+	while ($x > 0):
+		echo $x;
+		$x--;
+	endwhile;`
+
+	l := lexer.New(input, "test.php")
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	stmt, ok := program.Statements[0].(*ast.WhileStatement)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not *ast.WhileStatement. got=%T", program.Statements[0])
+	}
+
+	if stmt.Condition == nil {
+		t.Error("while statement condition is nil")
+	}
+
+	if stmt.Body == nil {
+		t.Error("while statement body is nil")
+	}
+
+	if len(stmt.Body.Statements) != 2 {
+		t.Errorf("expected 2 statements in body, got %d", len(stmt.Body.Statements))
+	}
+}
+
+func TestForAlternativeSyntax(t *testing.T) {
+	input := `<?php
+	for ($i = 0; $i < 10; $i++):
+		echo $i;
+	endfor;`
+
+	l := lexer.New(input, "test.php")
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	stmt, ok := program.Statements[0].(*ast.ForStatement)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not *ast.ForStatement. got=%T", program.Statements[0])
+	}
+
+	if stmt.Body == nil {
+		t.Error("for statement body is nil")
+	}
+
+	if len(stmt.Body.Statements) != 1 {
+		t.Errorf("expected 1 statement in body, got %d", len(stmt.Body.Statements))
+	}
+}
+
+func TestForeachAlternativeSyntax(t *testing.T) {
+	input := `<?php
+	foreach ($items as $item):
+		echo $item;
+	endforeach;`
+
+	l := lexer.New(input, "test.php")
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	stmt, ok := program.Statements[0].(*ast.ForeachStatement)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not *ast.ForeachStatement. got=%T", program.Statements[0])
+	}
+
+	if stmt.Body == nil {
+		t.Error("foreach statement body is nil")
+	}
+
+	if len(stmt.Body.Statements) != 1 {
+		t.Errorf("expected 1 statement in body, got %d", len(stmt.Body.Statements))
+	}
+}
+
+func TestSwitchAlternativeSyntax(t *testing.T) {
+	input := `<?php
+	switch ($x):
+		case 1:
+			echo "one";
+			break;
+		case 2:
+			echo "two";
+			break;
+		default:
+			echo "other";
+	endswitch;`
+
+	l := lexer.New(input, "test.php")
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	stmt, ok := program.Statements[0].(*ast.SwitchStatement)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not *ast.SwitchStatement. got=%T", program.Statements[0])
+	}
+
+	if len(stmt.Cases) != 3 {
+		t.Errorf("expected 3 cases (2 case + 1 default), got %d", len(stmt.Cases))
+	}
+
+	// Check first case
+	if stmt.Cases[0].Value == nil {
+		t.Error("first case value is nil")
+	}
+
+	// Check default case (should be last)
+	if stmt.Cases[2].Value != nil {
+		t.Error("default case should have nil value")
+	}
+}

@@ -2606,9 +2606,9 @@ All property and parameter reflection functionality is already implemented and t
 5. ✅ `public`/`protected`/`private` modifiers (promoted constructor properties) - 1,825 → 637 errors (1,188 fixed, 65% reduction) - **CRITICAL P0** - FIXED (Nov 24, 2025)
 6. ✅ `global` statement - 1,061 → 1,070 errors - **CRITICAL P0** - FIXED (Nov 24, 2025)
 7. ✅ `unset()` - 1,042 → 1,044 errors - **CRITICAL P0** - FIXED (Nov 24, 2025)
-8. ❌ `else`/`elseif` - 1,222 → 154 errors (1,068 fixed, 87% reduction) - **CRITICAL P0** - Partially fixed (else still has issues)
+8. ✅ `else`/`elseif` (alternative syntax) - 1,222 → 154 → 0 errors - **CRITICAL P0** - FIXED (Nov 24, 2025) - The remaining 154 errors were due to alternative syntax, now fixed
 9. ✅ `namespace`/`use` - 543 → 205 errors (338 fixed, 62% reduction) - **CRITICAL P0** - FIXED (Nov 24, 2025)
-10. ❌ Alternative syntax (`:`, `endif`, etc.) - 334 → 299 errors - **HIGH P1**
+10. ✅ Alternative syntax (`:`, `endif`, `endwhile`, `endfor`, `endforeach`, `endswitch`) - 334 → 0 errors - **HIGH P1** - FIXED (Nov 24, 2025)
 11. ✅ `list()` - 265 errors - **HIGH P1** - FIXED (Nov 24, 2025) - Parser only (compiler/VM pending)
 12. ✅ Type declarations (param/return types) - Cast expressions fixed (FLOAT_TYPE token) - **CRITICAL P0** - FIXED (Nov 24, 2025)
 
@@ -2661,6 +2661,7 @@ All property and parameter reflection functionality is already implemented and t
 - ✅ `namespace` and `use` statements - Added `NamespaceStatement`, `UseStatement`, `NamespaceName`, and `UseImport` AST nodes (`pkg/ast/ast.go:602-659`), parser (`pkg/parser/stmt.go:698-894`), compiler (`pkg/compiler/compiler.go:388-414`), and visitor support (`pkg/ast/visitor.go:16-17,37,118-133,281-282`) - Added comprehensive tests (`pkg/parser/stmt_test.go:856-1068`) - Supports bracketed and unbracketed namespace syntax, simple use, use with alias, multiple use, function/const use, and group use syntax - Reduced namespace errors by 135 (40%) and use errors by 203 (97%) (Nov 24, 2025)
 - ✅ Type declarations - Cast expressions - Fixed `parseGroupedOrCastExpression()` in `pkg/parser/expr.go:367-371` to recognize `lexer.FLOAT_TYPE` token (was incorrectly checking `lexer.FLOAT` which is for float literals, not the type keyword). Added tests for `(float)`, `(array)`, and `(object)` cast expressions in `pkg/parser/expr_test.go:698-700`. This fixes "no prefix parse function for FLOAT_TYPE" errors throughout WordPress codebase (Nov 24, 2025)
 - ✅ `list()` language construct - Added `ListExpression` and `ListElement` AST nodes (`pkg/ast/ast.go:419-441`), parser (`pkg/parser/expr.go:49,660-754`), and visitor support (`pkg/ast/visitor.go:61,390-400,500`) - Added comprehensive tests (`pkg/parser/expr_test.go:833-964`) - Supports basic list assignment, skipped elements, keyed list (PHP 7.1+), and list in assignment context - Parser implementation complete, compiler and VM support pending (Nov 24, 2025)
+- ✅ Alternative control structure syntax (`:`, `endif`, `endwhile`, `endfor`, `endforeach`, `endswitch`) - Modified `parseIfStatement()`, `parseWhileStatement()`, `parseForStatement()`, `parseForeachStatement()`, and `parseSwitchStatement()` in `pkg/parser/stmt.go` to support both regular brace syntax and alternative colon syntax - Added `parseAlternativeBlockStatement()` helper function (`pkg/parser/stmt.go:735-767`) - All control structures now accept either `{ }` or `: end*;` syntax - Added comprehensive tests (`pkg/parser/stmt_test.go:1070-1302`) covering if/endif, while/endwhile, for/endfor, foreach/endforeach, and switch/endswitch - This fixes the remaining 154 else/elseif errors and all 299 alternative syntax errors in WordPress codebase (Nov 24, 2025)
 
 ### 10.4 Laravel Testing (16h)
 - [ ] Install Laravel (2h)
