@@ -3208,7 +3208,7 @@ See `docs/BOTTLENECK_ANALYSIS.md` for detailed analysis and optimization roadmap
 - [x] User guide (6h) - ✅ COMPLETE (Nov 24, 2025)
 - [x] Installation guide (4h) - ✅ COMPLETE (Nov 24, 2025)
 - [x] Configuration guide (4h) - ✅ COMPLETE (Nov 24, 2025)
-- [ ] Extension development guide (6h)
+- [x] Extension development guide (6h) - ✅ COMPLETE (Nov 24, 2025)
 - [ ] API reference (4h)
 - [ ] Performance tuning guide (3h)
 - [ ] Migration guide (3h)
@@ -3217,6 +3217,7 @@ See `docs/BOTTLENECK_ANALYSIS.md` for detailed analysis and optimization roadmap
 **User Guide**: `docs/user-guide/README.md` (920 lines, comprehensive guide covering all aspects)
 **Installation Guide**: `docs/user-guide/installation.md` (700+ lines, comprehensive installation instructions for all platforms)
 **Configuration Guide**: `docs/user-guide/configuration.md` (850+ lines, comprehensive configuration reference)
+**Extension Development Guide**: `docs/user-guide/extension-development.md` (1,400+ lines, comprehensive extension development guide covering all aspects from basics to advanced topics, including FFI, plugins, marshaling, testing, optimization, deployment, and troubleshooting)
 
 ### 10.10 Migration Tools (12h)
 - [ ] Compatibility analyzer (4h)
