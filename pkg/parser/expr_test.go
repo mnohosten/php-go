@@ -396,6 +396,81 @@ func TestArrayLiteralExpression(t *testing.T) {
 	}
 }
 
+func TestArrayConstructorExpression(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected int
+	}{
+		{`<?php array();`, 0},
+		{`<?php array(1, 2, 3);`, 3},
+		{`<?php array('key' => 'value');`, 1},
+		{`<?php array('a', 'b' => 'c', 'd');`, 3},
+		{`<?php array(1, 2, 3,);`, 3}, // trailing comma
+	}
+
+	for _, tt := range tests {
+		l := lexer.New(tt.input, "test.php")
+		p := New(l)
+		program := p.ParseProgram()
+		checkParserErrors(t, p)
+
+		if len(program.Statements) != 1 {
+			t.Fatalf("program has not enough statements. got=%d", len(program.Statements))
+		}
+
+		stmt, ok := program.Statements[0].(*ast.ExpressionStatement)
+		if !ok {
+			t.Fatalf("program.Statements[0] is not ast.ExpressionStatement. got=%T", program.Statements[0])
+		}
+
+		array, ok := stmt.Expression.(*ast.ArrayExpression)
+		if !ok {
+			t.Fatalf("exp not *ast.ArrayExpression. got=%T", stmt.Expression)
+		}
+
+		if len(array.Elements) != tt.expected {
+			t.Fatalf("array.Elements does not contain %d elements. got=%d", tt.expected, len(array.Elements))
+		}
+	}
+}
+
+func TestArrayConstructorWithNestedArrays(t *testing.T) {
+	input := `<?php array('nested' => array(1, 2, 3));`
+
+	l := lexer.New(input, "test.php")
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program has not enough statements. got=%d", len(program.Statements))
+	}
+
+	stmt, ok := program.Statements[0].(*ast.ExpressionStatement)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.ExpressionStatement. got=%T", program.Statements[0])
+	}
+
+	array, ok := stmt.Expression.(*ast.ArrayExpression)
+	if !ok {
+		t.Fatalf("exp not *ast.ArrayExpression. got=%T", stmt.Expression)
+	}
+
+	if len(array.Elements) != 1 {
+		t.Fatalf("array.Elements does not contain 1 element. got=%d", len(array.Elements))
+	}
+
+	// Check nested array
+	nestedArray, ok := array.Elements[0].Value.(*ast.ArrayExpression)
+	if !ok {
+		t.Fatalf("nested value not *ast.ArrayExpression. got=%T", array.Elements[0].Value)
+	}
+
+	if len(nestedArray.Elements) != 3 {
+		t.Fatalf("nested array.Elements does not contain 3 elements. got=%d", len(nestedArray.Elements))
+	}
+}
+
 func TestIndexExpression(t *testing.T) {
 	input := `<?php $myArray[1 + 1];`
 

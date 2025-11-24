@@ -1,0 +1,11 @@
+# Ignore WordPress installation files
+wordpress/
+wordpress.tar.gz
+
+# But keep our test infrastructure
+!README.md
+!INSTALLATION.md
+!test-parse.php
+!run-tests.sh
+!inventory.sh
+!.gitignore

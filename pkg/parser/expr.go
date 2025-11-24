@@ -37,12 +37,23 @@ func (p *Parser) registerExpressionParsers() {
 	p.prefixParseFns[lexer.AT] = p.parsePrefixExpression
 	p.prefixParseFns[lexer.LPAREN] = p.parseGroupedOrCastExpression
 	p.prefixParseFns[lexer.LBRACKET] = p.parseArrayExpression
+	p.prefixParseFns[lexer.ARRAY] = p.parseArrayConstructor
 	p.prefixParseFns[lexer.NEW] = p.parseNewExpression
 	p.prefixParseFns[lexer.MATCH] = p.parseMatchExpression
 	p.prefixParseFns[lexer.FUNCTION] = p.parseClosureExpression
 	p.prefixParseFns[lexer.FN] = p.parseArrowFunctionExpression
 	p.prefixParseFns[lexer.STATIC] = p.parseStaticClosureOrProperty
 	p.prefixParseFns[lexer.EXIT] = p.parseExitExpression
+
+	// Magic constants
+	p.prefixParseFns[lexer.LINE_CONST] = p.parseMagicConstant
+	p.prefixParseFns[lexer.FILE_CONST] = p.parseMagicConstant
+	p.prefixParseFns[lexer.DIR_CONST] = p.parseMagicConstant
+	p.prefixParseFns[lexer.FUNCTION_CONST] = p.parseMagicConstant
+	p.prefixParseFns[lexer.CLASS_CONST] = p.parseMagicConstant
+	p.prefixParseFns[lexer.TRAIT_CONST] = p.parseMagicConstant
+	p.prefixParseFns[lexer.METHOD_CONST] = p.parseMagicConstant
+	p.prefixParseFns[lexer.NAMESPACE_CONST] = p.parseMagicConstant
 
 	// Infix parsers (operators that appear between expressions)
 	p.infixParseFns = make(map[lexer.TokenType]infixParseFn)
@@ -322,6 +333,13 @@ func (p *Parser) parseNullLiteral() ast.Expr {
 	}
 }
 
+func (p *Parser) parseMagicConstant() ast.Expr {
+	return &ast.MagicConstant{
+		Token: p.curToken,
+		Kind:  p.curToken.Type,
+	}
+}
+
 func (p *Parser) parsePrefixExpression() ast.Expr {
 	expression := &ast.PrefixExpression{
 		Token:    p.curToken,
@@ -399,13 +417,13 @@ func (p *Parser) parseArrayExpression() ast.Expr {
 
 	for p.peekTokenIs(lexer.COMMA) {
 		p.nextToken() // consume comma
-		p.nextToken() // move to next element
 
-		// Allow trailing comma
-		if p.curTokenIs(lexer.RBRACKET) {
+		// Allow trailing comma - check if next token is closing bracket
+		if p.peekTokenIs(lexer.RBRACKET) {
 			break
 		}
 
+		p.nextToken() // move to next element
 		array.Elements = append(array.Elements, p.parseArrayElement())
 	}
 
@@ -437,6 +455,51 @@ func (p *Parser) parseArrayElement() ast.ArrayElement {
 		Key:   nil,
 		Value: expr,
 	}
+}
+
+// parseArrayConstructor parses array() constructor syntax (legacy PHP array syntax)
+// Example: array(1, 2, 3) or array('key' => 'value')
+func (p *Parser) parseArrayConstructor() ast.Expr {
+	array := &ast.ArrayExpression{
+		Token:    p.curToken, // 'array' token
+		Elements: []ast.ArrayElement{},
+	}
+
+	// Expect opening parenthesis
+	if !p.expectPeek(lexer.LPAREN) {
+		return nil
+	}
+
+	// Check for empty array: array()
+	if p.peekTokenIs(lexer.RPAREN) {
+		p.nextToken()
+		return array
+	}
+
+	p.nextToken() // move to first element
+
+	// Parse first element
+	array.Elements = append(array.Elements, p.parseArrayElement())
+
+	// Parse remaining elements
+	for p.peekTokenIs(lexer.COMMA) {
+		p.nextToken() // consume comma
+
+		// Allow trailing comma - check if next token is closing parenthesis
+		if p.peekTokenIs(lexer.RPAREN) {
+			break
+		}
+
+		p.nextToken() // move to next element
+		array.Elements = append(array.Elements, p.parseArrayElement())
+	}
+
+	// Expect closing parenthesis
+	if !p.expectPeek(lexer.RPAREN) {
+		return nil
+	}
+
+	return array
 }
 
 func (p *Parser) parseNewExpression() ast.Expr {

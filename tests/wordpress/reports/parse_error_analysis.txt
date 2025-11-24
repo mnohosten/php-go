@@ -1,0 +1,201 @@
+=== Missing Prefix Parse Functions ===
+15785 no prefix parse function for ARRAY
+5565 no prefix parse function for ISSET
+5149 no prefix parse function for EMPTY
+1406 no prefix parse function for PUBLIC
+1061 no prefix parse function for GLOBAL
+1042 no prefix parse function for UNSET
+ 780 no prefix parse function for REQUIRE_ONCE
+ 771 no prefix parse function for ELSE
+ 451 no prefix parse function for ELSEIF
+ 398 no prefix parse function for REQUIRE
+ 339 no prefix parse function for PROTECTED
+ 333 no prefix parse function for NAMESPACE
+ 299 no prefix parse function for ENDIF
+ 290 no prefix parse function for CLASS
+ 265 no prefix parse function for LIST
+ 210 no prefix parse function for USE
+ 156 no prefix parse function for CONST
+ 138 no prefix parse function for AS
+  83 no prefix parse function for FLOAT_TYPE
+  80 no prefix parse function for PRIVATE
+  80 no prefix parse function for CLONE
+  63 no prefix parse function for VAR
+  63 no prefix parse function for ILLEGAL
+  43 no prefix parse function for OBJECT
+  37 no prefix parse function for ENDFOREACH
+  29 no prefix parse function for DEFAULT
+  23 no prefix parse function for FINAL
+  21 no prefix parse function for GOTO
+  19 no prefix parse function for INCLUDE
+  14 no prefix parse function for INCLUDE_ONCE
+  14 no prefix parse function for CASE
+   9 no prefix parse function for READONLY
+   7 no prefix parse function for STRING_TYPE
+   6 no prefix parse function for IF
+   5 no prefix parse function for YIELD
+   4 no prefix parse function for PRINT
+   3 no prefix parse function for ENDWHILE
+   3 no prefix parse function for CATCH
+   3 no prefix parse function for BOOL
+   2 no prefix parse function for ENDFOR
+   2 no prefix parse function for ECHO
+   2 no prefix parse function for DECLARE
+   2 no prefix parse function for CALLABLE
+   1 no prefix parse function for TRY
+   1 no prefix parse function for OR
+   1 no prefix parse function for BREAK
+
+=== Unexpected Token Errors ===
+18390 expected next token to be VARIABLE, got , instead
+15618 expected next token to be VARIABLE, got INTEGER instead
+10019 expected next token to be ), got ( instead
+8133 expected next token to be ), got => instead
+7083 expected next token to be VARIABLE, got - instead
+3673 expected next token to be ), got , instead
+2925 expected next token to be VARIABLE, got ( instead
+2863 expected next token to be VARIABLE, got ) instead
+2269 expected next token to be ], got = instead
+1934 expected next token to be VARIABLE, got ARRAY instead
+1598 expected next token to be VARIABLE, got STRING instead
+1547 expected next token to be IDENT, got = instead
+ 840 expected next token to be VARIABLE, got => instead
+ 820 expected next token to be ), got INTEGER instead
+ 606 expected next token to be VARIABLE, got ; instead
+ 580 expected next token to be ), got ; instead
+ 499 expected next token to be VARIABLE, got IDENT instead
+ 370 expected next token to be {, got ( instead
+ 357 expected next token to be (, got IDENT instead
+ 334 expected next token to be {, got : instead
+ 311 expected next token to be ), got IDENT instead
+ 251 expected next token to be (, got = instead
+ 232 expected next token to be VARIABLE, got { instead
+ 230 expected next token to be ), got VARIABLE instead
+ 219 expected next token to be VARIABLE, got PUBLIC instead
+ 193 expected next token to be VARIABLE, got ] instead
+ 188 expected next token to be {, got VARIABLE instead
+ 183 expected next token to be {, got IDENT instead
+ 142 expected next token to be {, got RETURN instead
+ 138 expected next token to be VARIABLE, got NULL instead
+ 129 expected next token to be VARIABLE, got = instead
+ 109 expected next token to be VARIABLE, got } instead
+ 108 expected next token to be VARIABLE, got < instead
+ 102 expected next token to be VARIABLE, got [ instead
+  99 expected next token to be {, got ) instead
+  96 expected next token to be VARIABLE, got > instead
+  93 expected next token to be AS, got ( instead
+  79 expected next token to be VARIABLE, got PROTECTED instead
+  75 expected next token to be VARIABLE, got PRIVATE instead
+  66 expected next token to be ), got [ instead
+  60 expected next token to be VARIABLE, got IF instead
+  58 expected next token to be VARIABLE, got / instead
+  57 expected next token to be {, got IF instead
+  41 expected next token to be VARIABLE, got TRUE instead
+  41 expected next token to be VARIABLE, got FALSE instead
+  41 expected next token to be VARIABLE, got :: instead
+  38 expected next token to be ), got { instead
+  36 expected next token to be VARIABLE, got CLASS instead
+  33 expected next token to be :, got ( instead
+  31 expected next token to be VARIABLE, got <?php instead
+  31 expected next token to be VARIABLE, got -> instead
+  30 expected next token to be ], got VARIABLE instead
+  28 expected next token to be VARIABLE, got : instead
+  28 expected next token to be ), got -> instead
+  27 expected next token to be {, got && instead
+  26 expected next token to be VARIABLE, got . instead
+  25 expected next token to be VARIABLE, got VAR instead
+  25 expected next token to be AS, got => instead
+  24 expected next token to be VARIABLE, got ISSET instead
+  22 expected next token to be VARIABLE, got ?> instead
+  21 expected next token to be VARIABLE, got RETURN instead
+  20 expected next token to be IDENT, got ( instead
+  19 expected next token to be VARIABLE, got CONST instead
+  17 expected next token to be VARIABLE, got ? instead
+  16 expected next token to be VARIABLE, got AS instead
+  15 expected next token to be ), got ECHO instead
+  15 expected next token to be ), got AS instead
+  13 expected next token to be VARIABLE, got && instead
+  13 expected next token to be {, got ; instead
+  11 expected next token to be VARIABLE, got NEW instead
+  11 expected next token to be {, got BREAK instead
+  10 expected next token to be {, got ECHO instead
+  10 expected next token to be ;, got VARIABLE instead
+   9 expected next token to be VARIABLE, got GLOBAL instead
+   9 expected next token to be VARIABLE, got EMPTY instead
+   9 expected next token to be VARIABLE, got || instead
+   9 expected next token to be VARIABLE, got === instead
+   9 expected next token to be VARIABLE, got ! instead
+   9 expected next token to be ), got === instead
+   7 expected next token to be VARIABLE, got FOREACH instead
+   7 expected next token to be ), got ISSET instead
+   7 expected next token to be :, got ) instead
+   6 expected next token to be AS, got , instead
+   6 expected next token to be {, got CONTINUE instead
+   6 expected next token to be ), got :: instead
+   6 expected next token to be :, got VARIABLE instead
+   5 expected next token to be VARIABLE, got THROW instead
+   5 expected next token to be VARIABLE, got !== instead
+   5 expected next token to be ], got [ instead
+   5 expected next token to be :, got => instead
+   4 expected next token to be VARIABLE, got FUNCTION instead
+   4 expected next token to be VARIABLE, got ECHO instead
+   4 expected next token to be VARIABLE, got CASE instead
+   4 expected next token to be VARIABLE, got BREAK instead
+   4 expected next token to be ), got EMPTY instead
+   4 expected next token to be ), got . instead
+   4 expected next token to be ), got !== instead
+   4 expected next token to be :, got , instead
+   3 expected next token to be VARIABLE, got ENDIF instead
+   3 expected next token to be AS, got ) instead
+   3 expected next token to be {, got UNSET instead
+   3 expected next token to be {, got ILLEGAL instead
+   3 expected next token to be {, got || instead
+   3 expected next token to be ], got , instead
+   3 expected next token to be ), got STRING instead
+   3 expected next token to be ), got } instead
+   3 expected next token to be ), got : instead
+   2 expected next token to be VARIABLE, got UNSET instead
+   2 expected next token to be VARIABLE, got INSTANCEOF instead
+   2 expected next token to be VARIABLE, got ILLEGAL instead
+   2 expected next token to be VARIABLE, got -- instead
+   2 expected next token to be {, got @ instead
+   2 expected next token to be ], got IDENT instead
+   2 expected next token to be ], got ; instead
+   2 expected next token to be ), got INSTANCEOF instead
+   2 expected next token to be :, got STRING instead
+   2 expected next token to be ;, got { instead
+   1 expected next token to be VARIABLE, got SWITCH instead
+   1 expected next token to be VARIABLE, got STRING_TYPE instead
+   1 expected next token to be VARIABLE, got INT instead
+   1 expected next token to be VARIABLE, got FOR instead
+   1 expected next token to be VARIABLE, got ENDFOREACH instead
+   1 expected next token to be VARIABLE, got DEFAULT instead
+   1 expected next token to be VARIABLE, got CONTINUE instead
+   1 expected next token to be VARIABLE, got >= instead
+   1 expected next token to be VARIABLE, got & instead
+   1 expected next token to be VARIABLE, got * instead
+   1 expected next token to be IDENT, got READONLY instead
+   1 expected next token to be {, got REQUIRE_ONCE instead
+   1 expected next token to be ], got INTEGER instead
+   1 expected next token to be ), got FUNCTION instead
+   1 expected next token to be ), got >= instead
+   1 expected next token to be ), got ^ instead
+   1 expected next token to be ), got && instead
+   1 expected next token to be ), got * instead
+   1 expected next token to be ), got ! instead
+   1 expected next token to be ;, got IDENT instead
+   1 expected next token to be ;, got ( instead
+
+=== Other Parse Errors ===
+51702 expected type name
+ 163 expected variable name or & after type, got IDENT instead
+  42 expected 'class' after modifier
+  17 expected variable name or & after type, got ) instead
+   5 could not parse "1e" as float
+   4 could not parse "2e" as float
+   1 expected variable name or & after type, got , instead
+   1 could not parse "1.5e" as float
+   1 could not parse "1.3e" as float
+   1 could not parse "0.5e" as float
+   1 could not parse "0.1e" as float
+   1 could not parse "0.07e" as float

@@ -35,6 +35,7 @@ type Visitor interface {
 	VisitStringLiteral(node *StringLiteral) bool
 	VisitBooleanLiteral(node *BooleanLiteral) bool
 	VisitNullLiteral(node *NullLiteral) bool
+	VisitMagicConstant(node *MagicConstant) bool
 	VisitVariable(node *Variable) bool
 	VisitArrayExpression(node *ArrayExpression) bool
 	VisitPrefixExpression(node *PrefixExpression) bool
@@ -251,6 +252,8 @@ func Walk(v Visitor, node Node) {
 		v.VisitBooleanLiteral(n)
 	case *NullLiteral:
 		v.VisitNullLiteral(n)
+	case *MagicConstant:
+		v.VisitMagicConstant(n)
 	case *Variable:
 		v.VisitVariable(n)
 	case *ArrayExpression:
@@ -406,6 +409,7 @@ func (bv *BaseVisitor) VisitFloatLiteral(node *FloatLiteral) bool               
 func (bv *BaseVisitor) VisitStringLiteral(node *StringLiteral) bool                   { return true }
 func (bv *BaseVisitor) VisitBooleanLiteral(node *BooleanLiteral) bool                 { return true }
 func (bv *BaseVisitor) VisitNullLiteral(node *NullLiteral) bool                       { return true }
+func (bv *BaseVisitor) VisitMagicConstant(node *MagicConstant) bool                   { return true }
 func (bv *BaseVisitor) VisitVariable(node *Variable) bool                             { return true }
 func (bv *BaseVisitor) VisitArrayExpression(node *ArrayExpression) bool               { return true }
 func (bv *BaseVisitor) VisitPrefixExpression(node *PrefixExpression) bool             { return true }

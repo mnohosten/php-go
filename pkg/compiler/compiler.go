@@ -2,8 +2,10 @@ package compiler
 
 import (
 	"fmt"
+	"path/filepath"
 
 	"github.com/krizos/php-go/pkg/ast"
+	"github.com/krizos/php-go/pkg/lexer"
 	"github.com/krizos/php-go/pkg/vm"
 )
 
@@ -445,6 +447,43 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 	case *ast.NullLiteral:
 		constIdx := c.AddConstant(nil)
+		temp := c.AllocTemp()
+		c.EmitWithLine(vm.OpQMAssign, uint32(node.Token.Pos.Line),
+			vm.ConstOperand(uint32(constIdx)),
+			vm.UnusedOperand(),
+			temp)
+		return nil
+
+	case *ast.MagicConstant:
+		// Magic constants will be resolved at compile time where possible
+		var value interface{}
+		switch node.Kind {
+		case lexer.LINE_CONST:
+			value = int64(node.Token.Pos.Line)
+		case lexer.FILE_CONST:
+			value = node.Token.Pos.Filename
+		case lexer.DIR_CONST:
+			// Get directory of the file
+			if node.Token.Pos.Filename != "" {
+				value = filepath.Dir(node.Token.Pos.Filename)
+			} else {
+				value = ""
+			}
+		case lexer.FUNCTION_CONST:
+			value = "" // Will be set by runtime based on current function
+		case lexer.CLASS_CONST:
+			value = "" // Will be set by runtime based on current class
+		case lexer.TRAIT_CONST:
+			value = "" // Will be set by runtime based on current trait
+		case lexer.METHOD_CONST:
+			value = "" // Will be set by runtime based on current method
+		case lexer.NAMESPACE_CONST:
+			value = "" // Will be set by runtime based on current namespace
+		default:
+			value = node.Token.Literal
+		}
+
+		constIdx := c.AddConstant(value)
 		temp := c.AllocTemp()
 		c.EmitWithLine(vm.OpQMAssign, uint32(node.Token.Pos.Line),
 			vm.ConstOperand(uint32(constIdx)),

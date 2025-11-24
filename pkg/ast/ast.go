@@ -139,6 +139,16 @@ func (nl *NullLiteral) expressionNode()      {}
 func (nl *NullLiteral) TokenLiteral() string { return nl.Token.Literal }
 func (nl *NullLiteral) String() string       { return "null" }
 
+// MagicConstant represents a PHP magic constant (__DIR__, __FILE__, etc.)
+type MagicConstant struct {
+	Token lexer.Token
+	Kind  lexer.TokenType // The type of magic constant (DIR_CONST, FILE_CONST, etc.)
+}
+
+func (mc *MagicConstant) expressionNode()      {}
+func (mc *MagicConstant) TokenLiteral() string { return mc.Token.Literal }
+func (mc *MagicConstant) String() string       { return mc.Token.Literal }
+
 // Variable represents a PHP variable ($var)
 type Variable struct {
 	Token lexer.Token
