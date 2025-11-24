@@ -6,6 +6,7 @@ import (
 
 	"github.com/krizos/php-go/pkg/ast"
 	"github.com/krizos/php-go/pkg/lexer"
+	"github.com/krizos/php-go/pkg/types"
 	"github.com/krizos/php-go/pkg/vm"
 )
 
@@ -366,6 +367,119 @@ func (c *Compiler) Compile(node ast.Node) error {
 		} else {
 			// Return null
 			c.EmitWithLine(vm.OpReturn, uint32(node.Token.Pos.Line))
+		}
+		return nil
+
+	case *ast.GlobalStatement:
+		// Emit BIND_GLOBAL for each variable
+		for _, variable := range node.Variables {
+			// Get or create the variable symbol
+			symbol := c.symbolTable.Define(variable.Value)
+
+			// Emit BIND_GLOBAL opcode
+			// This tells the VM to bind the local variable to the global scope
+			c.EmitWithLine(vm.OpBindGlobal, uint32(node.Token.Pos.Line),
+				vm.CVOperand(uint32(symbol.Index)),
+				vm.UnusedOperand(),
+				vm.UnusedOperand())
+		}
+		return nil
+
+	case *ast.NamespaceStatement:
+		// Namespace declarations are compile-time constructs that affect name resolution
+		// For now, we'll compile the body statements but namespace resolution
+		// is handled by the symbol table and name resolution logic
+		if node.Body != nil {
+			// Bracketed namespace: namespace Name { ... }
+			for _, stmt := range node.Body.Statements {
+				if err := c.Compile(stmt); err != nil {
+					return err
+				}
+			}
+		} else {
+			// Unbracketed namespace: namespace Name; statements...
+			for _, stmt := range node.Statements {
+				if err := c.Compile(stmt); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+
+	case *ast.UseStatement:
+		// Use statements are compile-time constructs that affect name resolution
+		// The imports are registered in the symbol table during compilation
+		// No runtime opcodes need to be emitted
+		// TODO: Register use imports in symbol table for proper name resolution
+		return nil
+
+	case *ast.UnsetStatement:
+		// Emit UNSET_* for each variable
+		for _, variable := range node.Variables {
+			// Determine the type of variable expression
+			switch v := variable.(type) {
+			case *ast.Variable:
+				// Simple variable: unset($var)
+				symbol, ok := c.ResolveVariable(v.Name)
+				if !ok {
+					return fmt.Errorf("undefined variable: %s", v.Name)
+				}
+				c.EmitWithLine(vm.OpUnsetVar, uint32(node.Token.Pos.Line),
+					vm.CVOperand(uint32(symbol.Index)),
+					vm.UnusedOperand(),
+					vm.UnusedOperand())
+
+			case *ast.IndexExpression:
+				// Array element: unset($arr[$key])
+				// First compile the array expression
+				if err := c.Compile(v.Left); err != nil {
+					return err
+				}
+				arrayTemp := c.CurrentTemp()
+
+				// Then compile the index expression
+				if err := c.Compile(v.Index); err != nil {
+					return err
+				}
+				indexTemp := c.CurrentTemp()
+
+				// Emit UNSET_DIM
+				c.EmitWithLine(vm.OpUnsetDim, uint32(node.Token.Pos.Line),
+					arrayTemp,
+					indexTemp,
+					vm.UnusedOperand())
+
+				c.FreeTemp()
+				c.FreeTemp()
+
+			case *ast.PropertyExpression:
+				// Object property: unset($obj->prop)
+				// First compile the object expression
+				if err := c.Compile(v.Object); err != nil {
+					return err
+				}
+				objectTemp := c.CurrentTemp()
+
+				// Get property name (Property is an Identifier)
+				propName := ""
+				if ident, ok := v.Property.(*ast.Identifier); ok {
+					propName = ident.Value
+				} else {
+					return fmt.Errorf("property name must be an identifier")
+				}
+				propIdx := c.AddConstant(types.NewString(propName))
+
+				// Emit UNSET_OBJ
+				c.EmitWithLine(vm.OpUnsetObj, uint32(node.Token.Pos.Line),
+					objectTemp,
+					vm.ConstOperand(uint32(propIdx)),
+					vm.UnusedOperand())
+
+				c.FreeTemp()
+
+			default:
+				return fmt.Errorf("invalid expression in unset(): %T", variable)
+			}
 		}
 		return nil
 

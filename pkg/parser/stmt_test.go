@@ -115,6 +115,129 @@ func TestContinueStatement(t *testing.T) {
 	}
 }
 
+func TestGlobalStatement(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		varCount int
+		varNames []string
+	}{
+		{
+			name:     "single variable",
+			input:    `<?php global $x;`,
+			varCount: 1,
+			varNames: []string{"$x"},
+		},
+		{
+			name:     "multiple variables",
+			input:    `<?php global $x, $y, $z;`,
+			varCount: 3,
+			varNames: []string{"$x", "$y", "$z"},
+		},
+		{
+			name:     "no semicolon",
+			input:    `<?php global $var`,
+			varCount: 1,
+			varNames: []string{"$var"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := lexer.New(tt.input, "test.php")
+			p := New(l)
+			program := p.ParseProgram()
+			checkParserErrors(t, p)
+
+			if len(program.Statements) != 1 {
+				t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+			}
+
+			stmt, ok := program.Statements[0].(*ast.GlobalStatement)
+			if !ok {
+				t.Fatalf("program.Statements[0] is not *ast.GlobalStatement. got=%T", program.Statements[0])
+			}
+
+			if len(stmt.Variables) != tt.varCount {
+				t.Fatalf("expected %d variables, got=%d", tt.varCount, len(stmt.Variables))
+			}
+
+			for i, expectedName := range tt.varNames {
+				if stmt.Variables[i].Value != expectedName {
+					t.Errorf("variable[%d] name wrong. expected=%q, got=%q",
+						i, expectedName, stmt.Variables[i].Value)
+				}
+			}
+		})
+	}
+}
+
+func TestUnsetStatement(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		varCount int
+	}{
+		{
+			name:     "single variable",
+			input:    `<?php unset($x);`,
+			varCount: 1,
+		},
+		{
+			name:     "multiple variables",
+			input:    `<?php unset($x, $y, $z);`,
+			varCount: 3,
+		},
+		{
+			name:     "array element",
+			input:    `<?php unset($arr[0]);`,
+			varCount: 1,
+		},
+		{
+			name:     "object property",
+			input:    `<?php unset($obj->prop);`,
+			varCount: 1,
+		},
+		{
+			name:     "mixed expressions",
+			input:    `<?php unset($x, $arr[0], $obj->prop);`,
+			varCount: 3,
+		},
+		{
+			name:     "nested array",
+			input:    `<?php unset($arr['key']['nested']);`,
+			varCount: 1,
+		},
+		{
+			name:     "no semicolon",
+			input:    `<?php unset($var)`,
+			varCount: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := lexer.New(tt.input, "test.php")
+			p := New(l)
+			program := p.ParseProgram()
+			checkParserErrors(t, p)
+
+			if len(program.Statements) != 1 {
+				t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+			}
+
+			stmt, ok := program.Statements[0].(*ast.UnsetStatement)
+			if !ok {
+				t.Fatalf("program.Statements[0] is not *ast.UnsetStatement. got=%T", program.Statements[0])
+			}
+
+			if len(stmt.Variables) != tt.varCount {
+				t.Fatalf("expected %d variables, got=%d", tt.varCount, len(stmt.Variables))
+			}
+		})
+	}
+}
+
 func TestIfStatement(t *testing.T) {
 	input := `<?php if ($x > 0) { echo "positive"; }`
 
@@ -727,5 +850,219 @@ func TestIfElseStatementWithNoBraces(t *testing.T) {
 		if ifStmt.Consequence == nil {
 			t.Error("if consequence is nil")
 		}
+	}
+}
+
+func TestNamespaceStatement(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+		hasBody  bool
+		numParts int
+	}{
+		{
+			name:     "simple namespace",
+			input:    `<?php namespace Foo;`,
+			expected: "Foo",
+			hasBody:  false,
+			numParts: 1,
+		},
+		{
+			name:     "nested namespace",
+			input:    `<?php namespace Foo\Bar\Baz;`,
+			expected: "Foo\\Bar\\Baz",
+			hasBody:  false,
+			numParts: 3,
+		},
+		{
+			name:     "bracketed namespace",
+			input:    `<?php namespace Foo\Bar { echo "test"; }`,
+			expected: "Foo\\Bar",
+			hasBody:  true,
+			numParts: 2,
+		},
+		{
+			name:     "global namespace",
+			input:    `<?php namespace { echo "test"; }`,
+			expected: "",
+			hasBody:  true,
+			numParts: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := lexer.New(tt.input, "test.php")
+			p := New(l)
+			program := p.ParseProgram()
+			checkParserErrors(t, p)
+
+			if len(program.Statements) != 1 {
+				t.Fatalf("program should have 1 statement, got %d", len(program.Statements))
+			}
+
+			stmt, ok := program.Statements[0].(*ast.NamespaceStatement)
+			if !ok {
+				t.Fatalf("expected NamespaceStatement, got %T", program.Statements[0])
+			}
+
+			if tt.numParts == 0 {
+				// Global namespace
+				if stmt.Name != nil {
+					t.Errorf("expected nil Name for global namespace, got %v", stmt.Name)
+				}
+			} else {
+				if stmt.Name == nil {
+					t.Fatal("expected Name, got nil")
+				}
+				if len(stmt.Name.Parts) != tt.numParts {
+					t.Errorf("expected %d namespace parts, got %d", tt.numParts, len(stmt.Name.Parts))
+				}
+				if stmt.Name.String() != tt.expected {
+					t.Errorf("expected namespace name %q, got %q", tt.expected, stmt.Name.String())
+				}
+			}
+
+			if tt.hasBody && stmt.Body == nil {
+				t.Error("expected Body, got nil")
+			}
+			if !tt.hasBody && stmt.Body != nil {
+				t.Error("expected nil Body, got Body")
+			}
+		})
+	}
+}
+
+func TestUseStatement(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		useType   string
+		numUses   int
+		firstUse  string
+		firstAlia string
+	}{
+		{
+			name:      "simple use",
+			input:     `<?php use Foo\Bar;`,
+			useType:   "",
+			numUses:   1,
+			firstUse:  "Foo\\Bar",
+			firstAlia: "",
+		},
+		{
+			name:      "use with alias",
+			input:     `<?php use Foo\Bar as Baz;`,
+			useType:   "",
+			numUses:   1,
+			firstUse:  "Foo\\Bar",
+			firstAlia: "Baz",
+		},
+		{
+			name:      "multiple use",
+			input:     `<?php use Foo\Bar, Foo\Baz;`,
+			useType:   "",
+			numUses:   2,
+			firstUse:  "Foo\\Bar",
+			firstAlia: "",
+		},
+		{
+			name:      "function use",
+			input:     `<?php use function Foo\Bar;`,
+			useType:   "function",
+			numUses:   1,
+			firstUse:  "Foo\\Bar",
+			firstAlia: "",
+		},
+		{
+			name:      "const use",
+			input:     `<?php use const Foo\BAR;`,
+			useType:   "const",
+			numUses:   1,
+			firstUse:  "Foo\\BAR",
+			firstAlia: "",
+		},
+		{
+			name:      "group use",
+			input:     `<?php use Foo\{Bar, Baz};`,
+			useType:   "",
+			numUses:   2,
+			firstUse:  "Bar",
+			firstAlia: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := lexer.New(tt.input, "test.php")
+			p := New(l)
+			program := p.ParseProgram()
+			checkParserErrors(t, p)
+
+			if len(program.Statements) != 1 {
+				t.Fatalf("program should have 1 statement, got %d", len(program.Statements))
+			}
+
+			stmt, ok := program.Statements[0].(*ast.UseStatement)
+			if !ok {
+				t.Fatalf("expected UseStatement, got %T", program.Statements[0])
+			}
+
+			if stmt.Type != tt.useType {
+				t.Errorf("expected use type %q, got %q", tt.useType, stmt.Type)
+			}
+
+			if len(stmt.Uses) != tt.numUses {
+				t.Fatalf("expected %d use clauses, got %d", tt.numUses, len(stmt.Uses))
+			}
+
+			if tt.numUses > 0 {
+				if stmt.Uses[0].Name.String() != tt.firstUse {
+					t.Errorf("expected first use name %q, got %q", tt.firstUse, stmt.Uses[0].Name.String())
+				}
+				if stmt.Uses[0].Alias != tt.firstAlia {
+					t.Errorf("expected first use alias %q, got %q", tt.firstAlia, stmt.Uses[0].Alias)
+				}
+			}
+		})
+	}
+}
+
+func TestNamespaceAndUseIntegration(t *testing.T) {
+	input := `<?php
+namespace App\Controllers;
+
+use App\Models\User;
+use App\Services\{AuthService, EmailService};
+
+class UserController {
+    public function index() {
+        echo "users";
+    }
+}`
+
+	l := lexer.New(input, "test.php")
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	// Should have namespace statement
+	if len(program.Statements) < 1 {
+		t.Fatal("expected at least 1 statement")
+	}
+
+	nsStmt, ok := program.Statements[0].(*ast.NamespaceStatement)
+	if !ok {
+		t.Fatalf("expected NamespaceStatement, got %T", program.Statements[0])
+	}
+
+	if nsStmt.Name.String() != "App\\Controllers" {
+		t.Errorf("expected namespace App\\Controllers, got %s", nsStmt.Name.String())
+	}
+
+	// The use statements and class should be in nsStmt.Statements
+	if len(nsStmt.Statements) < 2 {
+		t.Fatalf("expected at least 2 statements in namespace, got %d", len(nsStmt.Statements))
 	}
 }

@@ -11,6 +11,10 @@ type Visitor interface {
 	VisitReturnStatement(node *ReturnStatement) bool
 	VisitBreakStatement(node *BreakStatement) bool
 	VisitContinueStatement(node *ContinueStatement) bool
+	VisitGlobalStatement(node *GlobalStatement) bool
+	VisitUnsetStatement(node *UnsetStatement) bool
+	VisitNamespaceStatement(node *NamespaceStatement) bool
+	VisitUseStatement(node *UseStatement) bool
 	VisitIfStatement(node *IfStatement) bool
 	VisitWhileStatement(node *WhileStatement) bool
 	VisitDoWhileStatement(node *DoWhileStatement) bool
@@ -30,6 +34,7 @@ type Visitor interface {
 
 	// Expression visitors
 	VisitIdentifier(node *Identifier) bool
+	VisitNamespaceName(node *NamespaceName) bool
 	VisitIntegerLiteral(node *IntegerLiteral) bool
 	VisitFloatLiteral(node *FloatLiteral) bool
 	VisitStringLiteral(node *StringLiteral) bool
@@ -97,6 +102,34 @@ func Walk(v Visitor, node Node) {
 	case *ContinueStatement:
 		if v.VisitContinueStatement(n) {
 			Walk(v, n.Depth)
+		}
+	case *GlobalStatement:
+		if v.VisitGlobalStatement(n) {
+			for _, variable := range n.Variables {
+				Walk(v, variable)
+			}
+		}
+	case *UnsetStatement:
+		if v.VisitUnsetStatement(n) {
+			for _, variable := range n.Variables {
+				Walk(v, variable)
+			}
+		}
+	case *NamespaceStatement:
+		if v.VisitNamespaceStatement(n) {
+			Walk(v, n.Name)
+			if n.Body != nil {
+				Walk(v, n.Body)
+			}
+			for _, stmt := range n.Statements {
+				Walk(v, stmt)
+			}
+		}
+	case *UseStatement:
+		if v.VisitUseStatement(n) {
+			for _, useImport := range n.Uses {
+				Walk(v, useImport.Name)
+			}
 		}
 	case *IfStatement:
 		if v.VisitIfStatement(n) {
@@ -245,6 +278,8 @@ func Walk(v Visitor, node Node) {
 	// Expressions
 	case *Identifier:
 		v.VisitIdentifier(n)
+	case *NamespaceName:
+		v.VisitNamespaceName(n)
 	case *IntegerLiteral:
 		v.VisitIntegerLiteral(n)
 	case *FloatLiteral:
@@ -402,6 +437,8 @@ func (bv *BaseVisitor) VisitEchoStatement(node *EchoStatement) bool             
 func (bv *BaseVisitor) VisitReturnStatement(node *ReturnStatement) bool               { return true }
 func (bv *BaseVisitor) VisitBreakStatement(node *BreakStatement) bool                 { return true }
 func (bv *BaseVisitor) VisitContinueStatement(node *ContinueStatement) bool           { return true }
+func (bv *BaseVisitor) VisitGlobalStatement(node *GlobalStatement) bool               { return true }
+func (bv *BaseVisitor) VisitUnsetStatement(node *UnsetStatement) bool                 { return true }
 func (bv *BaseVisitor) VisitIfStatement(node *IfStatement) bool                       { return true }
 func (bv *BaseVisitor) VisitWhileStatement(node *WhileStatement) bool                 { return true }
 func (bv *BaseVisitor) VisitDoWhileStatement(node *DoWhileStatement) bool             { return true }

@@ -1,6 +1,10 @@
 package vm
 
-import "github.com/krizos/php-go/pkg/types"
+import (
+	"fmt"
+
+	"github.com/krizos/php-go/pkg/types"
+)
 
 // ============================================================================
 // Variable Opcode Handlers
@@ -158,4 +162,47 @@ func (vm *VM) opIssetIsemptyVar(frame *Frame, instr Instruction) error {
 	}
 
 	return vm.setOperandValue(frame, instr.Result, types.NewBool(result))
+}
+
+// opBindGlobal handles binding a local variable to a global variable
+// Op1 = local variable (CV) to bind
+// After this, the local variable references the global variable
+func (vm *VM) opBindGlobal(frame *Frame, instr Instruction) error {
+	// Get the variable index
+	if instr.Op1.Type != OpCV {
+		return fmt.Errorf("BIND_GLOBAL expects CV operand, got %v", instr.Op1.Type)
+	}
+
+	_ = int(instr.Op1.Value) // index - will be used when we implement proper global binding
+
+	// TODO: Implement proper global variable binding
+	// This requires:
+	// 1. Track variable names in function metadata (compiler enhancement)
+	// 2. Add global binding map to Frame structure
+	// 3. Modify getOperandValue/setOperandValue to check for global-bound variables
+	// 4. When a variable is marked as global, read/write operations should use vm.globals
+	//
+	// For now, this is a no-op placeholder that allows the code to parse and compile
+	// without errors. The global statement will be recognized but won't have runtime effect.
+
+	return nil
+}
+
+// opUnsetVar handles UNSET_VAR opcode - unset($var)
+func (vm *VM) opUnsetVar(frame *Frame, instr Instruction) error {
+	// Get the variable index
+	if instr.Op1.Type != OpCV {
+		return fmt.Errorf("UNSET_VAR expects CV operand, got %v", instr.Op1.Type)
+	}
+
+	varIdx := int(instr.Op1.Value)
+
+	// Set the variable to undefined
+	// In PHP, unset() removes the variable from the symbol table
+	// We simulate this by setting it to Undef
+	if varIdx >= 0 && varIdx < len(frame.locals) {
+		frame.locals[varIdx] = types.NewUndef()
+	}
+
+	return nil
 }

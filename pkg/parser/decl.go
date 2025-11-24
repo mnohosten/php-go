@@ -88,9 +88,29 @@ func (p *Parser) parseFunctionParameters() []*ast.Parameter {
 }
 
 // parseParameter parses a single function parameter
-// [Type] [&][$]name [= default]
+// [visibility] [readonly] [Type] [&][$]name [= default]
+// Supports PHP 8.0+ promoted constructor properties
 func (p *Parser) parseParameter() *ast.Parameter {
 	param := &ast.Parameter{}
+
+	// Check for promoted property visibility modifiers (PHP 8.0+)
+	switch p.curToken.Type {
+	case lexer.PUBLIC:
+		param.Visibility = "public"
+		p.nextToken()
+	case lexer.PROTECTED:
+		param.Visibility = "protected"
+		p.nextToken()
+	case lexer.PRIVATE:
+		param.Visibility = "private"
+		p.nextToken()
+	}
+
+	// Check for readonly modifier (PHP 8.1+) after visibility
+	if p.curTokenIs(lexer.READONLY) {
+		param.Readonly = true
+		p.nextToken()
+	}
 
 	// Check for variadic (...)
 	if p.curTokenIs(lexer.ELLIPSIS) {

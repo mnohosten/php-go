@@ -477,6 +477,43 @@ func TestCompileEmptyReturn(t *testing.T) {
 	}
 }
 
+func TestCompileGlobalStatement(t *testing.T) {
+	tests := []struct {
+		name         string
+		input        string
+		expectedVars int
+	}{
+		{
+			name:         "single variable",
+			input:        "<?php global $x;",
+			expectedVars: 1,
+		},
+		{
+			name:         "multiple variables",
+			input:        "<?php global $x, $y, $z;",
+			expectedVars: 3,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bytecode := parseAndCompile(t, tt.input)
+
+			// Count BIND_GLOBAL instructions
+			count := 0
+			for _, instr := range bytecode.Instructions {
+				if instr.Opcode == vm.OpBindGlobal {
+					count++
+				}
+			}
+
+			if count != tt.expectedVars {
+				t.Errorf("Expected %d BIND_GLOBAL instructions, got %d", tt.expectedVars, count)
+			}
+		})
+	}
+}
+
 // ========================================
 // Program Assembly Tests
 // ========================================
@@ -3584,5 +3621,81 @@ func TestTempVarFreeEmpty(t *testing.T) {
 	// Should still be in valid state
 	if len(c.tempVarStack) != 0 {
 		t.Errorf("Expected empty stack, got length %d", len(c.tempVarStack))
+	}
+}
+
+func TestUnsetStatement(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected []vm.Opcode
+	}{
+		{
+			name:  "unset simple variable",
+			input: `<?php $x = 10; unset($x);`,
+			expected: []vm.Opcode{
+				vm.OpQMAssign,   // $x = 10
+				vm.OpUnsetVar,   // unset($x)
+			},
+		},
+		{
+			name:  "unset multiple variables",
+			input: `<?php $x = 1; $y = 2; unset($x, $y);`,
+			expected: []vm.Opcode{
+				vm.OpQMAssign,   // $x = 1
+				vm.OpQMAssign,   // $y = 2
+				vm.OpUnsetVar,   // unset($x)
+				vm.OpUnsetVar,   // unset($y)
+			},
+		},
+		{
+			name:  "unset array element",
+			input: `<?php $arr = [1, 2, 3]; unset($arr[0]);`,
+			expected: []vm.Opcode{
+				vm.OpInitArray,  // [1, 2, 3]
+				vm.OpQMAssign,   // $arr = ...
+				vm.OpUnsetDim,   // unset dimension
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := lexer.New(tt.input, "test.php")
+			p := parser.New(l)
+			program := p.ParseProgram()
+
+			if len(p.Errors()) > 0 {
+				t.Fatalf("Parser errors: %v", p.Errors())
+			}
+
+			c := New()
+			err := c.Compile(program)
+			if err != nil {
+				t.Fatalf("Compilation error: %v", err)
+			}
+
+			bytecode := c.Bytecode()
+
+			// Extract opcodes from instructions
+			var opcodes []vm.Opcode
+			for _, instr := range bytecode.Instructions {
+				opcodes = append(opcodes, instr.Opcode)
+			}
+
+			// Verify expected opcodes are present
+			for _, expectedOp := range tt.expected {
+				found := false
+				for _, op := range opcodes {
+					if op == expectedOp {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("Expected opcode %s not found in: %v", expectedOp, opcodes)
+				}
+			}
+		})
 	}
 }

@@ -79,6 +79,14 @@ func (p *Parser) parseStatement() ast.Stmt {
 		return p.parseBreakStatement()
 	case lexer.CONTINUE:
 		return p.parseContinueStatement()
+	case lexer.GLOBAL:
+		return p.parseGlobalStatement()
+	case lexer.UNSET:
+		return p.parseUnsetStatement()
+	case lexer.NAMESPACE:
+		return p.parseNamespaceStatement()
+	case lexer.USE:
+		return p.parseUseStatement()
 	case lexer.IF:
 		return p.parseIfStatement()
 	case lexer.WHILE:

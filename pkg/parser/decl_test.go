@@ -653,3 +653,180 @@ class Config {
 		t.Errorf("visibility not 'private'. got=%s", constDecl.Visibility)
 	}
 }
+
+// Test promoted constructor properties (PHP 8.0+)
+
+func TestPromotedConstructorProperties(t *testing.T) {
+	input := `<?php
+class User {
+	public function __construct(
+		public string $name,
+		private int $age,
+		protected string $email
+	) {
+	}
+}`
+
+	l := lexer.New(input, "test.php")
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	classDecl, ok := program.Statements[0].(*ast.ClassDeclaration)
+	if !ok {
+		t.Fatalf("statement is not *ast.ClassDeclaration. got=%T", program.Statements[0])
+	}
+
+	if len(classDecl.Body) != 1 {
+		t.Fatalf("class body should have 1 method. got=%d", len(classDecl.Body))
+	}
+
+	method, ok := classDecl.Body[0].(*ast.MethodDeclaration)
+	if !ok {
+		t.Fatalf("class member is not *ast.MethodDeclaration. got=%T", classDecl.Body[0])
+	}
+
+	if method.Name.Value != "__construct" {
+		t.Errorf("method name not '__construct'. got=%s", method.Name.Value)
+	}
+
+	if len(method.Parameters) != 3 {
+		t.Fatalf("expected 3 parameters. got=%d", len(method.Parameters))
+	}
+
+	// Test first parameter: public string $name
+	param1 := method.Parameters[0]
+	if param1.Visibility != "public" {
+		t.Errorf("param1 visibility not 'public'. got=%s", param1.Visibility)
+	}
+	if param1.Name.Name != "name" {
+		t.Errorf("param1 name not 'name'. got=%s", param1.Name.Name)
+	}
+	if param1.Type == nil {
+		t.Error("param1 type is nil")
+	} else {
+		typeIdent, ok := param1.Type.(*ast.Identifier)
+		if !ok {
+			t.Errorf("param1 type is not *ast.Identifier. got=%T", param1.Type)
+		} else if typeIdent.Value != "string" {
+			t.Errorf("param1 type not 'string'. got=%s", typeIdent.Value)
+		}
+	}
+
+	// Test second parameter: private int $age
+	param2 := method.Parameters[1]
+	if param2.Visibility != "private" {
+		t.Errorf("param2 visibility not 'private'. got=%s", param2.Visibility)
+	}
+	if param2.Name.Name != "age" {
+		t.Errorf("param2 name not 'age'. got=%s", param2.Name.Name)
+	}
+
+	// Test third parameter: protected string $email
+	param3 := method.Parameters[2]
+	if param3.Visibility != "protected" {
+		t.Errorf("param3 visibility not 'protected'. got=%s", param3.Visibility)
+	}
+	if param3.Name.Name != "email" {
+		t.Errorf("param3 name not 'email'. got=%s", param3.Name.Name)
+	}
+}
+
+func TestPromotedPropertiesWithReadonly(t *testing.T) {
+	input := `<?php
+class Point {
+	public function __construct(
+		public readonly float $x,
+		public readonly float $y
+	) {
+	}
+}`
+
+	l := lexer.New(input, "test.php")
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	classDecl := program.Statements[0].(*ast.ClassDeclaration)
+	method := classDecl.Body[0].(*ast.MethodDeclaration)
+
+	if len(method.Parameters) != 2 {
+		t.Fatalf("expected 2 parameters. got=%d", len(method.Parameters))
+	}
+
+	// Test first parameter: public readonly float $x
+	param1 := method.Parameters[0]
+	if param1.Visibility != "public" {
+		t.Errorf("param1 visibility not 'public'. got=%s", param1.Visibility)
+	}
+	if !param1.Readonly {
+		t.Error("param1 should be readonly")
+	}
+	if param1.Name.Name != "x" {
+		t.Errorf("param1 name not 'x'. got=%s", param1.Name.Name)
+	}
+
+	// Test second parameter
+	param2 := method.Parameters[1]
+	if param2.Visibility != "public" {
+		t.Errorf("param2 visibility not 'public'. got=%s", param2.Visibility)
+	}
+	if !param2.Readonly {
+		t.Error("param2 should be readonly")
+	}
+	if param2.Name.Name != "y" {
+		t.Errorf("param2 name not 'y'. got=%s", param2.Name.Name)
+	}
+}
+
+func TestPromotedPropertiesMixedWithRegular(t *testing.T) {
+	input := `<?php
+class Product {
+	public function __construct(
+		public string $name,
+		int $tempValue,
+		private float $price = 0.0
+	) {
+	}
+}`
+
+	l := lexer.New(input, "test.php")
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	classDecl := program.Statements[0].(*ast.ClassDeclaration)
+	method := classDecl.Body[0].(*ast.MethodDeclaration)
+
+	if len(method.Parameters) != 3 {
+		t.Fatalf("expected 3 parameters. got=%d", len(method.Parameters))
+	}
+
+	// First parameter is promoted
+	param1 := method.Parameters[0]
+	if param1.Visibility != "public" {
+		t.Errorf("param1 visibility not 'public'. got=%s", param1.Visibility)
+	}
+
+	// Second parameter is NOT promoted (no visibility)
+	param2 := method.Parameters[1]
+	if param2.Visibility != "" {
+		t.Errorf("param2 should not have visibility. got=%s", param2.Visibility)
+	}
+	if param2.Name.Name != "tempValue" {
+		t.Errorf("param2 name not 'tempValue'. got=%s", param2.Name.Name)
+	}
+
+	// Third parameter is promoted with default value
+	param3 := method.Parameters[2]
+	if param3.Visibility != "private" {
+		t.Errorf("param3 visibility not 'private'. got=%s", param3.Visibility)
+	}
+	if param3.DefaultValue == nil {
+		t.Error("param3 should have a default value")
+	}
+}

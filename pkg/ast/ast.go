@@ -561,6 +561,103 @@ func (cs *ContinueStatement) String() string {
 	return "continue"
 }
 
+// GlobalStatement represents global variable declaration
+type GlobalStatement struct {
+	Token     lexer.Token   // The GLOBAL token
+	Variables []*Identifier // List of variable names to make global
+}
+
+func (gs *GlobalStatement) statementNode()       {}
+func (gs *GlobalStatement) TokenLiteral() string { return gs.Token.Literal }
+func (gs *GlobalStatement) String() string {
+	vars := ""
+	for i, v := range gs.Variables {
+		if i > 0 {
+			vars += ", "
+		}
+		vars += v.String()
+	}
+	return "global " + vars
+}
+
+// UnsetStatement represents unset() statement
+type UnsetStatement struct {
+	Token     lexer.Token // The UNSET token
+	Variables []Expr      // List of variables/array elements/object properties to unset
+}
+
+func (us *UnsetStatement) statementNode()       {}
+func (us *UnsetStatement) TokenLiteral() string { return us.Token.Literal }
+func (us *UnsetStatement) String() string {
+	vars := ""
+	for i, v := range us.Variables {
+		if i > 0 {
+			vars += ", "
+		}
+		vars += v.String()
+	}
+	return "unset(" + vars + ")"
+}
+
+// NamespaceStatement represents namespace declaration
+// Syntax: namespace Name\Space;  or  namespace Name\Space { ... }
+type NamespaceStatement struct {
+	Token      lexer.Token     // The NAMESPACE token
+	Name       *NamespaceName  // Namespace name (can be nil for global namespace)
+	Body       *BlockStatement // Optional body (for bracketed namespace syntax)
+	Statements []Stmt          // Statements directly in namespace (for unbracketed syntax)
+}
+
+func (ns *NamespaceStatement) statementNode()       {}
+func (ns *NamespaceStatement) TokenLiteral() string { return ns.Token.Literal }
+func (ns *NamespaceStatement) String() string {
+	if ns.Name != nil {
+		return "namespace " + ns.Name.String()
+	}
+	return "namespace"
+}
+
+// NamespaceName represents a namespace or class name with backslash separators
+// e.g., Foo\Bar\Baz
+type NamespaceName struct {
+	Token lexer.Token // The first identifier token
+	Parts []string    // Name parts separated by backslashes
+}
+
+func (nn *NamespaceName) expressionNode()      {}
+func (nn *NamespaceName) TokenLiteral() string { return nn.Token.Literal }
+func (nn *NamespaceName) String() string {
+	result := ""
+	for i, part := range nn.Parts {
+		if i > 0 {
+			result += "\\"
+		}
+		result += part
+	}
+	return result
+}
+
+// UseStatement represents use declaration(s)
+// Syntax: use Name\Space;  use Name\Space as Alias;  use Name\{A, B, C};
+type UseStatement struct {
+	Token  lexer.Token   // The USE token
+	Uses   []*UseImport  // List of use imports
+	Type   string        // "" (normal), "function", or "const"
+	Prefix string        // For group use syntax (namespace prefix)
+}
+
+func (us *UseStatement) statementNode()       {}
+func (us *UseStatement) TokenLiteral() string { return us.Token.Literal }
+func (us *UseStatement) String() string {
+	return "use ..."
+}
+
+// UseImport represents a single use import
+type UseImport struct {
+	Name  *NamespaceName // Fully qualified name
+	Alias string         // Optional alias (empty if no alias)
+}
+
 // IfStatement represents if/elseif/else statement
 type IfStatement struct {
 	Token       lexer.Token // The IF token
@@ -715,11 +812,14 @@ func (ts *ThrowStatement) String() string {
 // Parameter represents a function/method parameter
 type Parameter struct {
 	Name         *Variable
-	Type         Expr // Type hint (can be nil for untyped parameters)
-	DefaultValue Expr // Default value (can be nil)
-	ByRef        bool // Pass by reference (&$param)
-	Variadic     bool // Variadic parameter (...$param)
+	Type         Expr   // Type hint (can be nil for untyped parameters)
+	DefaultValue Expr   // Default value (can be nil)
+	ByRef        bool   // Pass by reference (&$param)
+	Variadic     bool   // Variadic parameter (...$param)
 	Attributes   []*AttributeGroup // PHP 8.0+ attributes
+	// PHP 8.0+ promoted constructor properties
+	Visibility string // "public", "protected", "private", or "" for non-promoted
+	Readonly   bool   // PHP 8.1+ readonly modifier
 }
 
 // FunctionDeclaration represents a function declaration

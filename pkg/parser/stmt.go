@@ -92,6 +92,86 @@ func (p *Parser) parseContinueStatement() *ast.ContinueStatement {
 	return stmt
 }
 
+// parseGlobalStatement parses global variable declaration
+// Syntax: global $var1, $var2, ...;
+func (p *Parser) parseGlobalStatement() *ast.GlobalStatement {
+	stmt := &ast.GlobalStatement{
+		Token:     p.curToken,
+		Variables: []*ast.Identifier{},
+	}
+
+	// Parse variable list
+	for {
+		// Expect a variable
+		if !p.expectPeek(lexer.VARIABLE) {
+			return nil
+		}
+
+		// Create identifier for the variable
+		variable := &ast.Identifier{
+			Token: p.curToken,
+			Value: p.curToken.Literal,
+		}
+		stmt.Variables = append(stmt.Variables, variable)
+
+		// Check for comma (more variables)
+		if !p.peekTokenIs(lexer.COMMA) {
+			break
+		}
+		p.nextToken() // consume comma
+	}
+
+	// Optional semicolon
+	if p.peekTokenIs(lexer.SEMICOLON) {
+		p.nextToken()
+	}
+
+	return stmt
+}
+
+// parseUnsetStatement parses unset() statement
+func (p *Parser) parseUnsetStatement() *ast.UnsetStatement {
+	stmt := &ast.UnsetStatement{
+		Token:     p.curToken,
+		Variables: []ast.Expr{},
+	}
+
+	// Expect opening parenthesis
+	if !p.expectPeek(lexer.LPAREN) {
+		return nil
+	}
+
+	// Parse variable list
+	for {
+		p.nextToken() // move to next expression
+
+		// Parse the expression (variable, array access, object property, etc.)
+		expr := p.parseExpression(LOWEST)
+		if expr == nil {
+			return nil
+		}
+		stmt.Variables = append(stmt.Variables, expr)
+
+		// Check for comma (more variables)
+		if !p.peekTokenIs(lexer.COMMA) {
+			break
+		}
+		p.nextToken() // consume comma
+	}
+
+	// Expect closing parenthesis
+	if !p.expectPeek(lexer.RPAREN) {
+		return nil
+	}
+
+	// Optional semicolon
+	if p.peekTokenIs(lexer.SEMICOLON) {
+		p.nextToken()
+	}
+
+	return stmt
+}
+
 // parseIfStatement parses if/elseif/else statement
 func (p *Parser) parseIfStatement() *ast.IfStatement {
 	stmt := &ast.IfStatement{
@@ -613,4 +693,206 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 	}
 
 	return block
+}
+
+// parseNamespaceStatement parses namespace declaration
+// Syntax: namespace Name\Space;  or  namespace Name\Space { ... }  or  namespace { ... }
+func (p *Parser) parseNamespaceStatement() *ast.NamespaceStatement {
+	stmt := &ast.NamespaceStatement{
+		Token:      p.curToken,
+		Statements: []ast.Stmt{},
+	}
+
+	p.nextToken()
+
+	// Check for global namespace: namespace { ... }
+	if p.curTokenIs(lexer.LBRACE) {
+		stmt.Body = p.parseBlockStatement()
+		return stmt
+	}
+
+	// Parse namespace name
+	stmt.Name = p.parseNamespaceName()
+
+	// Check for bracketed or unbracketed syntax
+	if p.peekTokenIs(lexer.LBRACE) {
+		// Bracketed syntax: namespace Name { ... }
+		p.nextToken()
+		stmt.Body = p.parseBlockStatement()
+	} else {
+		// Unbracketed syntax: namespace Name;
+		if p.peekTokenIs(lexer.SEMICOLON) {
+			p.nextToken()
+		}
+		// Parse all following statements until EOF or next namespace
+		for !p.peekTokenIs(lexer.EOF) && !p.peekTokenIs(lexer.NAMESPACE) {
+			p.nextToken()
+			if s := p.parseStatement(); s != nil {
+				stmt.Statements = append(stmt.Statements, s)
+			}
+		}
+	}
+
+	return stmt
+}
+
+// parseNamespaceName parses a namespace or class name with backslash separators
+// e.g., Foo\Bar\Baz or \Foo\Bar (leading backslash for global namespace)
+// Note: The lexer scans Foo\Bar\Baz as a single IDENT token including backslashes
+func (p *Parser) parseNamespaceName() *ast.NamespaceName {
+	name := &ast.NamespaceName{
+		Token: p.curToken,
+		Parts: []string{},
+	}
+
+	if !p.curTokenIs(lexer.IDENT) {
+		p.error("expected identifier in namespace name")
+		return name
+	}
+
+	// Split the identifier by backslashes to get parts
+	// The lexer includes backslashes in the identifier literal
+	literal := p.curToken.Literal
+
+	// Split on backslash
+	parts := []string{}
+	current := ""
+	for _, ch := range literal {
+		if ch == '\\' {
+			if current != "" {
+				parts = append(parts, current)
+				current = ""
+			}
+		} else {
+			current += string(ch)
+		}
+	}
+	if current != "" {
+		parts = append(parts, current)
+	}
+
+	name.Parts = parts
+	return name
+}
+
+// parseUseStatement parses use declaration(s)
+// Syntax: use Name\Space;  use Name\Space as Alias;  use Name\{A, B};  use function Name;  use const Name;
+func (p *Parser) parseUseStatement() *ast.UseStatement {
+	stmt := &ast.UseStatement{
+		Token: p.curToken,
+		Uses:  []*ast.UseImport{},
+	}
+
+	p.nextToken()
+
+	// Check for function or const type
+	if p.curTokenIs(lexer.FUNCTION) {
+		stmt.Type = "function"
+		p.nextToken()
+	} else if p.curTokenIs(lexer.CONST) {
+		stmt.Type = "const"
+		p.nextToken()
+	}
+
+	// Parse the namespace name
+	startName := p.parseNamespaceName()
+
+	// Check for group use syntax: use Name\{A, B, C};
+	if p.peekTokenIs(lexer.LBRACE) {
+		p.nextToken() // consume name
+		p.nextToken() // consume {
+
+		stmt.Prefix = startName.String()
+
+		// Parse group use clauses
+		for !p.curTokenIs(lexer.RBRACE) && !p.curTokenIs(lexer.EOF) {
+			clause := &ast.UseImport{}
+
+			// Check for function/const prefix in group
+			if p.curTokenIs(lexer.FUNCTION) || p.curTokenIs(lexer.CONST) {
+				p.nextToken()
+			}
+
+			// Parse the name
+			clause.Name = p.parseNamespaceName()
+
+			// Check for alias
+			if p.peekTokenIs(lexer.AS) {
+				p.nextToken() // consume name
+				p.nextToken() // consume 'as'
+
+				if !p.curTokenIs(lexer.IDENT) {
+					p.error("expected identifier after 'as'")
+				} else {
+					clause.Alias = p.curToken.Literal
+				}
+			}
+
+			stmt.Uses = append(stmt.Uses, clause)
+
+			// Check for comma or end of group
+			if p.peekTokenIs(lexer.COMMA) {
+				p.nextToken() // consume comma
+				p.nextToken() // move to next name
+			} else if p.peekTokenIs(lexer.RBRACE) {
+				p.nextToken() // move to }
+				break
+			}
+		}
+
+		// Expect closing brace and semicolon
+		if !p.curTokenIs(lexer.RBRACE) {
+			p.error("expected } after group use")
+		}
+	} else {
+		// Simple use: use Name\Space [as Alias];
+		clause := &ast.UseImport{
+			Name: startName,
+		}
+
+		// Check for alias
+		if p.peekTokenIs(lexer.AS) {
+			p.nextToken() // consume name
+			p.nextToken() // consume 'as'
+
+			if !p.curTokenIs(lexer.IDENT) {
+				p.error("expected identifier after 'as'")
+			} else {
+				clause.Alias = p.curToken.Literal
+			}
+		}
+
+		stmt.Uses = append(stmt.Uses, clause)
+
+		// Handle multiple use declarations separated by commas
+		for p.peekTokenIs(lexer.COMMA) {
+			p.nextToken() // consume comma
+			p.nextToken() // move to next name
+
+			clause := &ast.UseImport{
+				Name: p.parseNamespaceName(),
+			}
+
+			// Check for alias
+			if p.peekTokenIs(lexer.AS) {
+				p.nextToken() // consume name
+				p.nextToken() // consume 'as'
+
+				if !p.curTokenIs(lexer.IDENT) {
+					p.error("expected identifier after 'as'")
+				} else {
+					clause.Alias = p.curToken.Literal
+				}
+			}
+
+			stmt.Uses = append(stmt.Uses, clause)
+		}
+	}
+
+	// Optional semicolon
+	if p.peekTokenIs(lexer.SEMICOLON) {
+		p.nextToken()
+	}
+
+	return stmt
 }

@@ -237,6 +237,10 @@ func (vm *VM) dispatch(frame *Frame, instr Instruction) error {
 		return vm.opFree(frame, instr)
 	case OpIssetIsemptyVar:
 		return vm.opIssetIsemptyVar(frame, instr)
+	case OpBindGlobal:
+		return vm.opBindGlobal(frame, instr)
+	case OpUnsetVar:
+		return vm.opUnsetVar(frame, instr)
 	case OpIncludeOrEval:
 		return vm.opIncludeOrEval(frame, instr)
 
