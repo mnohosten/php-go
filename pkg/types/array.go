@@ -495,6 +495,27 @@ func (a *Array) Keys() *Array {
 	return keys
 }
 
+// GetKeysSlice returns a slice of all keys in iteration order
+// Used internally by the foreach iterator
+func (a *Array) GetKeysSlice() []interface{} {
+	if a == nil || a.IsEmpty() {
+		return []interface{}{}
+	}
+
+	if a.packed {
+		keys := make([]interface{}, len(a.packedData))
+		for i := 0; i < len(a.packedData); i++ {
+			keys[i] = int64(i)
+		}
+		return keys
+	}
+
+	// Return a copy of the order slice
+	keys := make([]interface{}, len(a.order))
+	copy(keys, a.order)
+	return keys
+}
+
 // Values returns an array of all values
 func (a *Array) Values() *Array {
 	if a == nil || a.IsEmpty() {

@@ -1233,6 +1233,9 @@ func (c *Compiler) Compile(node ast.Node) error {
 					valueTemp,
 					keyTemp,
 					arrayTemp)
+
+				// Free the key temp
+				c.FreeTemp()
 			} else {
 				// ADD_ARRAY_ELEMENT without key: array[] = value
 				c.EmitWithLine(vm.OpAddArrayElement, uint32(node.Token.Pos.Line),
@@ -1240,6 +1243,9 @@ func (c *Compiler) Compile(node ast.Node) error {
 					vm.UnusedOperand(),
 					arrayTemp)
 			}
+
+			// Free the value temp
+			c.FreeTemp()
 		}
 		return nil
 
@@ -1962,11 +1968,16 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 	// Foreach Loop
 	case *ast.ForeachStatement:
+		// Save the current temp var stack level
+		savedTempLevel := len(c.tempVarStack)
+
 		// Compile array expression
 		if err := c.Compile(node.Array); err != nil {
 			return err
 		}
-		arrayTemp := vm.TmpVarOperand(0)
+
+		// The result is now in CurrentTemp()
+		arrayOp := c.CurrentTemp()
 
 		// Choose reset opcode based on by-ref
 		resetOp := vm.OpFeResetR
@@ -1976,21 +1987,34 @@ func (c *Compiler) Compile(node ast.Node) error {
 			fetchOp = vm.OpFeFetchRW
 		}
 
+		// Allocate temp for iterator
+		iteratorTemp := c.AllocTemp()
+
 		// FE_RESET: Initialize foreach iterator
+		// Op1: Array value
+		// Result: Iterator
 		c.EmitWithLine(resetOp, uint32(node.Token.Pos.Line),
-			arrayTemp,
+			arrayOp,
 			vm.UnusedOperand(),
-			vm.TmpVarOperand(1)) // Iterator in temp 1
+			iteratorTemp)
+
+		// Allocate temps for value and key (allocated after iterator)
+		valueTemp := c.AllocTemp()
+		keyTemp := c.AllocTemp()
 
 		// Remember start position for continue
 		startPos := c.CurrentPosition()
 		c.EnterLoop(startPos)
 
 		// FE_FETCH: Fetch next element (jumps to end if done)
+		// Op1: Iterator
+		// Op2: Jump target (patched later)
+		// Result: Fetched value
+		// Note: The FE_FETCH handler stores the key in Result+1 (valueTemp+1 = keyTemp)
 		jmpEndPos := c.EmitWithLine(fetchOp, uint32(node.Token.Pos.Line),
-			vm.TmpVarOperand(1), // Iterator
+			iteratorTemp,
 			vm.UnusedOperand(),
-			vm.TmpVarOperand(2)) // Fetched value
+			valueTemp)
 
 		// Assign key if present
 		if node.Key != nil {
@@ -1999,9 +2023,9 @@ func (c *Compiler) Compile(node ast.Node) error {
 				if !ok {
 					symbol = c.DefineVariable(keyVar.Name)
 				}
-				// Assign key (stored in temp 3 by FE_FETCH)
+				// Assign key - the FE_FETCH handler stores it in keyTemp
 				c.EmitWithLine(vm.OpAssign, uint32(node.Token.Pos.Line),
-					vm.TmpVarOperand(3),
+					keyTemp,
 					vm.UnusedOperand(),
 					vm.CVOperand(uint32(symbol.Index)))
 			}
@@ -2013,9 +2037,9 @@ func (c *Compiler) Compile(node ast.Node) error {
 			if !ok {
 				symbol = c.DefineVariable(valueVar.Name)
 			}
-			// Assign value (in temp 2)
+			// Assign value
 			c.EmitWithLine(vm.OpAssign, uint32(node.Token.Pos.Line),
-				vm.TmpVarOperand(2),
+				valueTemp,
 				vm.UnusedOperand(),
 				vm.CVOperand(uint32(symbol.Index)))
 		}
@@ -2026,7 +2050,6 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 		// JMP back to FE_FETCH
-		// Add start position to constants for backward jump
 		foreachStartConst := c.AddConstant(int64(startPos))
 		c.EmitWithLine(vm.OpJmp, uint32(node.Token.Pos.Line),
 			vm.ConstOperand(uint32(foreachStartConst)),
@@ -2036,14 +2059,17 @@ func (c *Compiler) Compile(node ast.Node) error {
 		// End position
 		endPos := c.CurrentPosition()
 
-		// Patch FE_FETCH jump
-		c.PatchJump(jmpEndPos, 1, endPos)
+		// Patch FE_FETCH jump (operand 2 is Op2, the jump target)
+		c.PatchJump(jmpEndPos, 2, endPos)
 
 		// FE_FREE: Clean up iterator
 		c.EmitWithLine(vm.OpFeFree, uint32(node.Token.Pos.Line),
-			vm.TmpVarOperand(1),
+			iteratorTemp,
 			vm.UnusedOperand(),
 			vm.UnusedOperand())
+
+		// Restore temp stack to saved level
+		c.tempVarStack = c.tempVarStack[:savedTempLevel]
 
 		// Exit loop and patch break/continue
 		c.ExitLoop(endPos)

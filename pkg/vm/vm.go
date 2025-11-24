@@ -252,6 +252,18 @@ func (vm *VM) dispatch(frame *Frame, instr Instruction) error {
 	case OpJmpNZ:
 		return vm.opJmpNZ(frame, instr)
 
+	// Foreach
+	case OpFeResetR:
+		return vm.opFeResetR(frame, instr)
+	case OpFeResetRW:
+		return vm.opFeResetRW(frame, instr)
+	case OpFeFetchR:
+		return vm.opFeFetchR(frame, instr)
+	case OpFeFetchRW:
+		return vm.opFeFetchRW(frame, instr)
+	case OpFeFree:
+		return vm.opFeFree(frame, instr)
+
 	// Functions
 	case OpReturn:
 		return vm.opReturn(frame, instr)
