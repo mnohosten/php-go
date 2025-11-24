@@ -2651,9 +2651,10 @@ All property and parameter reflection functionality is already implemented and t
 - ✅ Trailing comma support in arrays - Fixed in `pkg/parser/expr.go:400-410`
 - ✅ Magic constants support (`__DIR__`, `__FILE__`, etc.) - Added `MagicConstant` AST node, parser/compiler/visitor support
 - ✅ `array()` constructor syntax - Added `parseArrayConstructor()` in `pkg/parser/expr.go:460-503` (Nov 24, 2025)
-- ✅ `isset()` language construct - Added `IssetExpression` AST node, parser (`pkg/parser/expr.go:559-612`), compiler (`pkg/compiler/compiler.go:1227-1309`), and VM handler (`pkg/vm/handlers_variables.go:99-161`) (Nov 24, 2025)
-- ✅ `empty()` language construct - Added `EmptyExpression` AST node, parser (`pkg/parser/expr.go:614-653`), compiler (`pkg/compiler/compiler.go:1311-1344`), and VM handler (uses same handler as isset) (Nov 24, 2025)
-- ✅ `require`, `require_once`, `include`, `include_once` - Added `IncludeExpression` AST node, parser (`pkg/parser/expr.go:659-696`), compiler (`pkg/compiler/compiler.go:1350-1380`), VM handler (`pkg/vm/handlers_io.go:35-83`), and visitor support (`pkg/ast/visitor.go:56,354-357,451`) (Nov 24, 2025)
+- ✅ `isset()` language construct - Added `IssetExpression` AST node, parser (`pkg/parser/expr.go:563-617`), compiler (`pkg/compiler/compiler.go:1383-1465`), and VM handler (`pkg/vm/handlers_variables.go:99-161`) (Nov 24, 2025)
+- ✅ `empty()` language construct - Added `EmptyExpression` AST node, parser (`pkg/parser/expr.go:619-658`), compiler (`pkg/compiler/compiler.go:1467-1500`), and VM handler (uses same handler as isset) (Nov 24, 2025)
+- ✅ `require`, `require_once`, `include`, `include_once` - Added `IncludeExpression` AST node, parser (`pkg/parser/expr.go:660-697`), compiler (`pkg/compiler/compiler.go:1502-1532`), VM handler (`pkg/vm/handlers_io.go:35-83`), and visitor support (`pkg/ast/visitor.go:56,354-357,451`) (Nov 24, 2025)
+- ✅ Postfix ++ and -- operators - Fixed compiler to properly save old value before incrementing/decrementing, ensuring correct return semantics (`pkg/compiler/compiler.go:640-698`) (Nov 24, 2025)
 
 ### 10.4 Laravel Testing (16h)
 - [ ] Install Laravel (2h)
