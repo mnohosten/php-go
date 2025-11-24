@@ -1,0 +1,7 @@
+/Users/krizos/code/mnohosten/php-go/tests/wordpress/wordpress/wp-activate.php
+/Users/krizos/code/mnohosten/php-go/tests/wordpress/wordpress/xmlrpc.php
+/Users/krizos/code/mnohosten/php-go/tests/wordpress/wordpress/wp-admin/revision.php
+/Users/krizos/code/mnohosten/php-go/tests/wordpress/wordpress/wp-admin/install.php
+/Users/krizos/code/mnohosten/php-go/tests/wordpress/wordpress/wp-admin/themes.php
+/Users/krizos/code/mnohosten/php-go/tests/wordpress/wordpress/wp-admin/export.php
+/Users/krizos/code/mnohosten/php-go/tests/wordpress/wordpress/wp-admin/network/sites.php

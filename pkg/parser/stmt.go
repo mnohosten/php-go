@@ -807,6 +807,30 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 	p.nextToken()
 
 	for !p.curTokenIs(lexer.RBRACE) && !p.curTokenIs(lexer.EOF) {
+		// Handle inline HTML (convert to echo statement)
+		if p.curTokenIs(lexer.INLINE_HTML) {
+			html := p.curToken.Literal
+			echoStmt := &ast.EchoStatement{
+				Token:       p.curToken,
+				Expressions: []ast.Expr{&ast.StringLiteral{Token: p.curToken, Value: html}},
+			}
+			block.Statements = append(block.Statements, echoStmt)
+			p.nextToken()
+			continue
+		}
+
+		// Handle PHP close tag - just skip it
+		if p.curTokenIs(lexer.CLOSE_TAG) {
+			p.nextToken()
+			continue
+		}
+
+		// Handle PHP open tags
+		if p.curTokenIs(lexer.OPEN_TAG) || p.curTokenIs(lexer.OPEN_TAG_ECHO) {
+			p.nextToken()
+			continue
+		}
+
 		stmt := p.parseStatement()
 		if stmt != nil {
 			block.Statements = append(block.Statements, stmt)
@@ -839,6 +863,30 @@ func (p *Parser) parseAlternativeBlockStatement(terminators ...lexer.TokenType) 
 		}
 		if isTerminator {
 			break
+		}
+
+		// Handle inline HTML (convert to echo statement)
+		if p.curTokenIs(lexer.INLINE_HTML) {
+			html := p.curToken.Literal
+			echoStmt := &ast.EchoStatement{
+				Token:       p.curToken,
+				Expressions: []ast.Expr{&ast.StringLiteral{Token: p.curToken, Value: html}},
+			}
+			block.Statements = append(block.Statements, echoStmt)
+			p.nextToken()
+			continue
+		}
+
+		// Handle PHP close tag - just skip it
+		if p.curTokenIs(lexer.CLOSE_TAG) {
+			p.nextToken()
+			continue
+		}
+
+		// Handle PHP open tags
+		if p.curTokenIs(lexer.OPEN_TAG) || p.curTokenIs(lexer.OPEN_TAG_ECHO) {
+			p.nextToken()
+			continue
 		}
 
 		stmt := p.parseStatement()

@@ -218,6 +218,7 @@ const (
 	OPEN_TAG          // <?php or <?
 	OPEN_TAG_ECHO     // <?=
 	CLOSE_TAG         // ?>
+	INLINE_HTML       // HTML content between ?> and <?php
 
 	// Attributes (PHP 8.0+)
 	ATTRIBUTE_START   // #[
@@ -425,6 +426,7 @@ var tokenNames = map[TokenType]string{
 	OPEN_TAG:          "<?php",
 	OPEN_TAG_ECHO:     "<?=",
 	CLOSE_TAG:         "?>",
+	INLINE_HTML:       "INLINE_HTML",
 
 	ATTRIBUTE_START:   "#[",
 

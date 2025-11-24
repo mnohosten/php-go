@@ -15,6 +15,7 @@ type Lexer struct {
 	line      int    // Current line number (1-based)
 	column    int    // Current column number (1-based)
 	lineStart int    // Byte offset of the start of the current line
+	inPHP     bool   // Whether we're currently inside PHP mode (between <?php and ?>)
 }
 
 // New creates a new Lexer for the given input
@@ -24,8 +25,22 @@ func New(input, filename string) *Lexer {
 		filename: filename,
 		line:     1,
 		column:   0, // Start at 0, readChar will increment to 1
+		inPHP:    true, // Default to PHP mode for backward compatibility
 	}
 	l.readChar() // Initialize first character
+
+	// Determine initial mode based on file content
+	// If file starts with HTML (< but not <?), start in HTML mode
+	// Otherwise, start in PHP mode for backward compatibility
+	if len(input) >= 2 && input[0] == '<' && input[1] != '?' {
+		// Starts with HTML tag (e.g., <html, <div, etc.)
+		l.inPHP = false
+	}
+	// All other cases: start in PHP mode
+	// - Pure PHP code without tags
+	// - <?php or <? tags
+	// - Code starting with PHP constructs (<<<, $, etc.)
+
 	return l
 }
 
@@ -71,6 +86,18 @@ func (l *Lexer) currentPosition() Position {
 // NextToken returns the next token from the input
 func (l *Lexer) NextToken() Token {
 	var tok Token
+
+	// If we're not in PHP mode, scan inline HTML
+	if !l.inPHP && l.ch != 0 {
+		// Check if this is a PHP open tag
+		if l.ch == '<' && l.peekChar() == '?' {
+			// This is a PHP open tag, let it be processed below
+			// Don't scan as inline HTML
+		} else {
+			// We're in HTML mode - scan inline HTML until we find <?php or <?=
+			return l.scanInlineHTML()
+		}
+	}
 
 	l.skipWhitespace()
 
@@ -330,6 +357,7 @@ func (l *Lexer) NextToken() Token {
 		} else if l.peekChar() == '>' {
 			// PHP close tag ?>
 			l.readChar()
+			l.inPHP = false // Exit PHP mode
 			tok = l.makeToken(CLOSE_TAG, "?>")
 		} else {
 			tok = l.makeToken(QUESTION, string(l.ch))
@@ -720,6 +748,7 @@ func (l *Lexer) scanPHPTag() Token {
 
 	if l.ch == '=' {
 		l.readChar()
+		l.inPHP = true // Enter PHP mode
 		return Token{
 			Type:    OPEN_TAG_ECHO,
 			Literal: "<?=",
@@ -735,6 +764,7 @@ func (l *Lexer) scanPHPTag() Token {
 		if l.ch == ' ' || l.ch == '\t' || l.ch == '\n' || l.ch == '\r' {
 			l.skipWhitespace()
 		}
+		l.inPHP = true // Enter PHP mode
 		return Token{
 			Type:    OPEN_TAG,
 			Literal: "<?php",
@@ -743,6 +773,7 @@ func (l *Lexer) scanPHPTag() Token {
 	}
 
 	// Short open tag <?
+	l.inPHP = true // Enter PHP mode
 	return Token{
 		Type:    OPEN_TAG,
 		Literal: "<?",
@@ -786,6 +817,52 @@ func isHexDigit(ch byte) bool {
 
 func isOctalDigit(ch byte) bool {
 	return ch >= '0' && ch <= '7'
+}
+
+// scanInlineHTML scans HTML content between ?> and <?php
+func (l *Lexer) scanInlineHTML() Token {
+	pos := l.currentPosition()
+	startPos := l.pos
+
+	// Scan until we find <?php, <?=, <?, or EOF
+	for {
+		if l.ch == 0 {
+			// EOF - return all remaining content as inline HTML
+			break
+		}
+
+		if l.ch == '<' && l.peekChar() == '?' {
+			// Check if it's <?php, <?=, or <?
+			if l.peekCharN(2) == 'p' && l.peekCharN(3) == 'h' && l.peekCharN(4) == 'p' {
+				// Found <?php - stop here
+				break
+			} else if l.peekCharN(2) == '=' {
+				// Found <?= - stop here
+				break
+			} else {
+				// Found <? (short tag) - stop here
+				break
+			}
+		}
+
+		// Track line numbers in HTML content
+		if l.ch == '\n' {
+			l.line++
+			l.column = 0
+			l.lineStart = l.readPos
+		}
+
+		l.readChar()
+	}
+
+	// Extract the HTML content
+	html := l.input[startPos:l.pos]
+
+	return Token{
+		Type:    INLINE_HTML,
+		Literal: html,
+		Pos:     pos,
+	}
 }
 
 // Error creates an error token
