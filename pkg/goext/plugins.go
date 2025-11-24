@@ -2,9 +2,11 @@ package goext
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"plugin"
 	"sync"
+	"time"
 )
 
 // PluginInfo holds information about a loaded plugin.
@@ -14,15 +16,18 @@ type PluginInfo struct {
 	Extension Extension
 	Loaded    bool
 	LoadError error
+	ModTime   time.Time // Last modification time of the plugin file
 }
 
 // PluginManager manages dynamically loaded Go plugins.
 // Plugins are shared libraries (.so on Linux/macOS, .dll on Windows)
 // that export an Extension via a well-known symbol.
 type PluginManager struct {
-	mu      sync.RWMutex
-	plugins map[string]*PluginInfo
-	extMgr  *ExtensionManager
+	mu           sync.RWMutex
+	plugins      map[string]*PluginInfo
+	extMgr       *ExtensionManager
+	watchStop    chan struct{}
+	watchEnabled bool
 }
 
 // Global plugin manager
@@ -42,8 +47,9 @@ func GetGlobalPluginManager() *PluginManager {
 // NewPluginManager creates a new plugin manager.
 func NewPluginManager(extMgr *ExtensionManager) *PluginManager {
 	return &PluginManager{
-		plugins: make(map[string]*PluginInfo),
-		extMgr:  extMgr,
+		plugins:   make(map[string]*PluginInfo),
+		extMgr:    extMgr,
+		watchStop: make(chan struct{}),
 	}
 }
 
@@ -80,12 +86,20 @@ func (pm *PluginManager) LoadPlugin(path string) error {
 		// If previously failed, allow retry
 	}
 
+	// Get file modification time
+	fileInfo, err := os.Stat(absPath)
+	if err != nil {
+		return fmt.Errorf("stating plugin file '%s': %w", absPath, err)
+	}
+	modTime := fileInfo.ModTime()
+
 	// Load the plugin
 	p, err := plugin.Open(absPath)
 	if err != nil {
 		info := &PluginInfo{
 			Path:      absPath,
 			LoadError: err,
+			ModTime:   modTime,
 		}
 		pm.plugins[absPath] = info
 		return fmt.Errorf("loading plugin '%s': %w", absPath, err)
@@ -98,6 +112,7 @@ func (pm *PluginManager) LoadPlugin(path string) error {
 			Path:      absPath,
 			Plugin:    p,
 			LoadError: err,
+			ModTime:   modTime,
 		}
 		pm.plugins[absPath] = info
 		return fmt.Errorf("plugin '%s' does not export 'Extension' symbol: %w", absPath, err)
@@ -116,6 +131,7 @@ func (pm *PluginManager) LoadPlugin(path string) error {
 				Path:      absPath,
 				Plugin:    p,
 				LoadError: err,
+				ModTime:   modTime,
 			}
 			pm.plugins[absPath] = info
 			return err
@@ -129,6 +145,7 @@ func (pm *PluginManager) LoadPlugin(path string) error {
 			Plugin:    p,
 			Extension: ext,
 			LoadError: err,
+			ModTime:   modTime,
 		}
 		pm.plugins[absPath] = info
 		return fmt.Errorf("registering extension from plugin '%s': %w", absPath, err)
@@ -140,6 +157,7 @@ func (pm *PluginManager) LoadPlugin(path string) error {
 		Plugin:    p,
 		Extension: ext,
 		Loaded:    true,
+		ModTime:   modTime,
 	}
 
 	return nil
@@ -286,4 +304,137 @@ func GetPluginInfo(path string) (*PluginInfo, bool) {
 // ListPlugins returns all loaded plugins using the global plugin manager.
 func ListPlugins() []string {
 	return GetGlobalPluginManager().List()
+}
+
+// EnableHotReload enables automatic reloading of plugins when their files change.
+// It starts a background goroutine that checks for file modifications at the specified interval.
+// When a plugin file is modified, it will be unloaded and reloaded automatically.
+//
+// Note: Due to Go's plugin system limitations, the old plugin code remains in memory
+// even after reloading. The reload operation only updates the registered extension.
+//
+// interval: How often to check for file changes (e.g., 1*time.Second)
+func (pm *PluginManager) EnableHotReload(interval time.Duration) {
+	pm.mu.Lock()
+	if pm.watchEnabled {
+		pm.mu.Unlock()
+		return // Already enabled
+	}
+	pm.watchEnabled = true
+	pm.mu.Unlock()
+
+	go pm.watchPlugins(interval)
+}
+
+// DisableHotReload stops the hot reload watcher.
+func (pm *PluginManager) DisableHotReload() {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+
+	if !pm.watchEnabled {
+		return
+	}
+
+	pm.watchEnabled = false
+	close(pm.watchStop)
+	pm.watchStop = make(chan struct{})
+}
+
+// watchPlugins is the internal goroutine that monitors plugin files for changes.
+func (pm *PluginManager) watchPlugins(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			pm.checkPluginsForChanges()
+		case <-pm.watchStop:
+			return
+		}
+	}
+}
+
+// checkPluginsForChanges checks all loaded plugins for file modifications.
+func (pm *PluginManager) checkPluginsForChanges() {
+	pm.mu.RLock()
+	// Create a snapshot of plugin paths to check
+	pluginsToCheck := make(map[string]*PluginInfo)
+	for path, info := range pm.plugins {
+		if info.Loaded {
+			pluginsToCheck[path] = info
+		}
+	}
+	pm.mu.RUnlock()
+
+	// Check each plugin outside the lock to avoid blocking
+	for path, info := range pluginsToCheck {
+		fileInfo, err := os.Stat(path)
+		if err != nil {
+			// File no longer exists or is inaccessible
+			continue
+		}
+
+		modTime := fileInfo.ModTime()
+		if modTime.After(info.ModTime) {
+			// File has been modified, attempt to reload
+			pm.reloadPlugin(path)
+		}
+	}
+}
+
+// reloadPlugin attempts to reload a plugin that has been modified.
+func (pm *PluginManager) reloadPlugin(path string) error {
+	// Note: Due to Go's plugin limitations, we can't truly unload the old code.
+	// What we do instead is unregister the old extension and register the new one.
+	// The old code remains in memory but is no longer accessible.
+
+	// Get the old extension name before unloading
+	pm.mu.RLock()
+	info, exists := pm.plugins[path]
+	if !exists || !info.Loaded {
+		pm.mu.RUnlock()
+		return fmt.Errorf("plugin not loaded: %s", path)
+	}
+	oldExtName := info.Extension.Name()
+	pm.mu.RUnlock()
+
+	// Unload the old plugin (removes from tracking and unregisters extension)
+	if err := pm.UnloadPlugin(path); err != nil {
+		return fmt.Errorf("unloading plugin for reload: %w", err)
+	}
+
+	// Load the new version
+	if err := pm.LoadPlugin(path); err != nil {
+		return fmt.Errorf("reloading plugin: %w", err)
+	}
+
+	// Verify the extension name hasn't changed
+	pm.mu.RLock()
+	newInfo, _ := pm.plugins[path]
+	if newInfo.Extension.Name() != oldExtName {
+		pm.mu.RUnlock()
+		return fmt.Errorf("plugin extension name changed from '%s' to '%s' during reload",
+			oldExtName, newInfo.Extension.Name())
+	}
+	pm.mu.RUnlock()
+
+	return nil
+}
+
+// ReloadPlugin manually reloads a specific plugin.
+// This can be called even when hot reload is not enabled.
+func (pm *PluginManager) ReloadPlugin(path string) error {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return fmt.Errorf("resolving plugin path: %w", err)
+	}
+	return pm.reloadPlugin(absPath)
+}
+
+// IsHotReloadEnabled returns whether hot reload is currently enabled.
+func (pm *PluginManager) IsHotReloadEnabled() bool {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+	return pm.watchEnabled
 }

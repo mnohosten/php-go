@@ -1,0 +1,7 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/krizos/php-go/benchmarks
+cpu: Apple M4 Max
+BenchmarkSimpleLoop-14    	     752	   4671939 ns/op	 1815945 B/op	  112020 allocs/op
+PASS
+ok  	github.com/krizos/php-go/benchmarks	4.179s

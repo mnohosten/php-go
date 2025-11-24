@@ -915,7 +915,7 @@ func (vm *VM) opFetchClassName(frame *Frame, instr Instruction) error {
 		}
 		// For regular class names, use them as-is
 	} else {
-		return fmt.Errorf("FETCH_CLASS_NAME: expected string class name, got %s", classVal.Type())
+		return fmt.Errorf("FETCH_CLASS_NAME: expected string class name, got %v", classVal.Type())
 	}
 
 	// Return the class name as a string

@@ -59,3 +59,4 @@ mem.out
 
 # PHP source reference (not part of this project)
 /php-src/
+/tests/symfony/symfony-framework/
