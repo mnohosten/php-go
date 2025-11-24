@@ -1,6 +1,8 @@
 package parser
 
 import (
+	"fmt"
+
 	"github.com/krizos/php-go/pkg/ast"
 	"github.com/krizos/php-go/pkg/lexer"
 )
@@ -1096,6 +1098,97 @@ func (p *Parser) parseUseStatement() *ast.UseStatement {
 	// Optional semicolon
 	if p.peekTokenIs(lexer.SEMICOLON) {
 		p.nextToken()
+	}
+
+	return stmt
+}
+// parseDeclareStatement parses declare() statement
+// Syntax: declare(directive=value);  declare(directive=value) { ... }
+// Examples: declare(strict_types=1); declare(ticks=1) { ... }
+func (p *Parser) parseDeclareStatement() *ast.DeclareStatement {
+	stmt := &ast.DeclareStatement{
+		Token:      p.curToken,
+		Directives: make(map[string]interface{}),
+	}
+
+	// Expect opening parenthesis
+	if !p.expectPeek(lexer.LPAREN) {
+		return nil
+	}
+
+	// Parse directives
+	for {
+		p.nextToken() // move to directive name
+
+		// Get directive name
+		if !p.curTokenIs(lexer.IDENT) {
+			p.error("expected directive name in declare()")
+			return nil
+		}
+		directiveName := p.curToken.Literal
+
+		// Expect equals sign
+		if !p.expectPeek(lexer.ASSIGN) {
+			return nil
+		}
+
+		p.nextToken() // move to value
+
+		// Parse directive value (must be a literal)
+		var value interface{}
+		switch p.curToken.Type {
+		case lexer.INTEGER:
+			// Parse as integer
+			intVal := 0
+			fmt.Sscanf(p.curToken.Literal, "%d", &intVal)
+			value = intVal
+		case lexer.STRING:
+			// Parse as string (remove quotes)
+			value = p.curToken.Literal
+		default:
+			p.error("directive value must be a literal (integer or string)")
+			return nil
+		}
+
+		stmt.Directives[directiveName] = value
+
+		// Check for comma (more directives) or closing parenthesis
+		if p.peekTokenIs(lexer.COMMA) {
+			p.nextToken() // consume comma
+			continue
+		} else if p.peekTokenIs(lexer.RPAREN) {
+			p.nextToken() // consume closing parenthesis
+			break
+		} else {
+			p.error("expected ',' or ')' in declare()")
+			return nil
+		}
+	}
+
+	// Check for statement body or semicolon
+	if p.peekTokenIs(lexer.LBRACE) {
+		p.nextToken() // move to opening brace
+		stmt.Body = p.parseBlockStatement()
+	} else if p.peekTokenIs(lexer.COLON) {
+		// Alternative syntax: declare(...): ... enddeclare;
+		p.nextToken() // consume colon
+		stmt.Body = p.parseAlternativeBlockStatement(lexer.ENDDECLARE)
+
+		// Expect enddeclare token
+		if !p.curTokenIs(lexer.ENDDECLARE) {
+			p.error("expected 'enddeclare' after declare block")
+			return nil
+		}
+
+		// Optional semicolon after enddeclare
+		if p.peekTokenIs(lexer.SEMICOLON) {
+			p.nextToken()
+		}
+	} else {
+		// No body, just semicolon
+		if p.peekTokenIs(lexer.SEMICOLON) {
+			p.nextToken()
+		}
 	}
 
 	return stmt

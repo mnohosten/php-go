@@ -1299,3 +1299,208 @@ func TestSwitchAlternativeSyntax(t *testing.T) {
 		t.Error("default case should have nil value")
 	}
 }
+func TestDeclareStatement(t *testing.T) {
+	input := `<?php
+	declare(strict_types=1);
+	`
+
+	l := lexer.New(input, "test.php")
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	stmt, ok := program.Statements[0].(*ast.DeclareStatement)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not *ast.DeclareStatement. got=%T", program.Statements[0])
+	}
+
+	if len(stmt.Directives) != 1 {
+		t.Fatalf("expected 1 directive, got %d", len(stmt.Directives))
+	}
+
+	if val, ok := stmt.Directives["strict_types"]; !ok {
+		t.Error("expected strict_types directive")
+	} else if intVal, ok := val.(int); !ok || intVal != 1 {
+		t.Errorf("expected strict_types=1, got %v", val)
+	}
+
+	if stmt.Body != nil {
+		t.Error("expected no body for simple declare")
+	}
+}
+
+func TestDeclareStatementMultipleDirectives(t *testing.T) {
+	input := `<?php
+	declare(strict_types=1, ticks=1);
+	`
+
+	l := lexer.New(input, "test.php")
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	stmt, ok := program.Statements[0].(*ast.DeclareStatement)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not *ast.DeclareStatement. got=%T", program.Statements[0])
+	}
+
+	if len(stmt.Directives) != 2 {
+		t.Fatalf("expected 2 directives, got %d", len(stmt.Directives))
+	}
+
+	if val, ok := stmt.Directives["strict_types"]; !ok {
+		t.Error("expected strict_types directive")
+	} else if intVal, ok := val.(int); !ok || intVal != 1 {
+		t.Errorf("expected strict_types=1, got %v", val)
+	}
+
+	if val, ok := stmt.Directives["ticks"]; !ok {
+		t.Error("expected ticks directive")
+	} else if intVal, ok := val.(int); !ok || intVal != 1 {
+		t.Errorf("expected ticks=1, got %v", val)
+	}
+}
+
+func TestDeclareStatementWithStringValue(t *testing.T) {
+	input := `<?php
+	declare(encoding='UTF-8');
+	`
+
+	l := lexer.New(input, "test.php")
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	stmt, ok := program.Statements[0].(*ast.DeclareStatement)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not *ast.DeclareStatement. got=%T", program.Statements[0])
+	}
+
+	if len(stmt.Directives) != 1 {
+		t.Fatalf("expected 1 directive, got %d", len(stmt.Directives))
+	}
+
+	if val, ok := stmt.Directives["encoding"]; !ok {
+		t.Error("expected encoding directive")
+	} else if strVal, ok := val.(string); !ok || strVal != "UTF-8" {
+		t.Errorf("expected encoding=UTF-8, got %v", val)
+	}
+}
+
+func TestDeclareStatementWithBlock(t *testing.T) {
+	input := `<?php
+	declare(strict_types=1) {
+		echo "test";
+	}
+	`
+
+	l := lexer.New(input, "test.php")
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	stmt, ok := program.Statements[0].(*ast.DeclareStatement)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not *ast.DeclareStatement. got=%T", program.Statements[0])
+	}
+
+	if stmt.Body == nil {
+		t.Fatal("expected body block")
+	}
+
+	blockStmt, ok := stmt.Body.(*ast.BlockStatement)
+	if !ok {
+		t.Fatalf("expected BlockStatement body, got %T", stmt.Body)
+	}
+
+	if len(blockStmt.Statements) != 1 {
+		t.Fatalf("expected 1 statement in body, got %d", len(blockStmt.Statements))
+	}
+}
+
+func TestDeclareStatementWithAlternativeSyntax(t *testing.T) {
+	input := `<?php
+	declare(ticks=1):
+		echo "test";
+	enddeclare;
+	`
+
+	l := lexer.New(input, "test.php")
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d", len(program.Statements))
+	}
+
+	stmt, ok := program.Statements[0].(*ast.DeclareStatement)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not *ast.DeclareStatement. got=%T", program.Statements[0])
+	}
+
+	if stmt.Body == nil {
+		t.Fatal("expected body block")
+	}
+
+	blockStmt, ok := stmt.Body.(*ast.BlockStatement)
+	if !ok {
+		t.Fatalf("expected BlockStatement body, got %T", stmt.Body)
+	}
+
+	if len(blockStmt.Statements) != 1 {
+		t.Fatalf("expected 1 statement in body, got %d", len(blockStmt.Statements))
+	}
+}
+
+func TestDeclareStatementAtFileStart(t *testing.T) {
+	// This is the most common pattern: declare at the start of a PHP file
+	input := `<?php declare(strict_types=1);
+
+	function test() {
+		return 123;
+	}
+	`
+
+	l := lexer.New(input, "test.php")
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	if len(program.Statements) < 2 {
+		t.Fatalf("program.Statements should contain at least 2 statements. got=%d", len(program.Statements))
+	}
+
+	stmt, ok := program.Statements[0].(*ast.DeclareStatement)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not *ast.DeclareStatement. got=%T", program.Statements[0])
+	}
+
+	if val, ok := stmt.Directives["strict_types"]; !ok {
+		t.Error("expected strict_types directive")
+	} else if intVal, ok := val.(int); !ok || intVal != 1 {
+		t.Errorf("expected strict_types=1, got %v", val)
+	}
+
+	// Check that the function declaration follows
+	_, ok = program.Statements[1].(*ast.FunctionDeclaration)
+	if !ok {
+		t.Fatalf("program.Statements[1] is not *ast.FunctionDeclaration. got=%T", program.Statements[1])
+	}
+}

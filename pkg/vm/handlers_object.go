@@ -864,6 +864,65 @@ func (vm *VM) opGetClass(frame *Frame, instr Instruction) error {
 	return vm.setOperandValue(frame, instr.Result, result)
 }
 
+// opFetchClassName handles the ::class constant (PHP 5.5+)
+// Returns the fully qualified class name as a string
+// Supports: ClassName::class, self::class, parent::class, static::class
+func (vm *VM) opFetchClassName(frame *Frame, instr Instruction) error {
+	// Get the class name or identifier
+	classVal, err := vm.getOperandValue(frame, instr.Op1)
+	if err != nil {
+		return err
+	}
+
+	var className string
+
+	// Check if it's a string (class name identifier)
+	if classVal.Type() == types.TypeString {
+		className = classVal.ToString()
+
+		// Handle special keywords
+		switch className {
+		case "self":
+			// self::class returns the name of the class where it's used
+			if frame.currentClass != nil {
+				className = frame.currentClass.Name
+			} else {
+				return fmt.Errorf("FETCH_CLASS_NAME: 'self' used outside class context")
+			}
+
+		case "parent":
+			// parent::class returns the name of the parent class
+			if frame.currentClass == nil {
+				return fmt.Errorf("FETCH_CLASS_NAME: 'parent' used outside class context")
+			}
+			if frame.currentClass.ParentClass == nil {
+				return fmt.Errorf("FETCH_CLASS_NAME: class '%s' has no parent", frame.currentClass.Name)
+			}
+			className = frame.currentClass.ParentClass.Name
+
+		case "static":
+			// static::class returns the name of the called class (late static binding)
+			// Use calledClass if available (for late static binding), otherwise use currentClass
+			if frame.calledClass != nil {
+				className = frame.calledClass.Name
+			} else if frame.currentClass != nil {
+				className = frame.currentClass.Name
+			} else if frame.thisObject != nil && frame.thisObject.ClassEntry != nil {
+				className = frame.thisObject.ClassEntry.Name
+			} else {
+				return fmt.Errorf("FETCH_CLASS_NAME: 'static' used outside class context")
+			}
+		}
+		// For regular class names, use them as-is
+	} else {
+		return fmt.Errorf("FETCH_CLASS_NAME: expected string class name, got %s", classVal.Type())
+	}
+
+	// Return the class name as a string
+	result := types.NewString(className)
+	return vm.setOperandValue(frame, instr.Result, result)
+}
+
 // opFetchThis handles fetching $this variable
 // OpFetchThis - Fetch $this variable
 func (vm *VM) opFetchThis(frame *Frame, instr Instruction) error {

@@ -39,6 +39,7 @@ func (p *Parser) registerExpressionParsers() {
 	p.prefixParseFns[lexer.LBRACKET] = p.parseArrayExpression
 	p.prefixParseFns[lexer.ARRAY] = p.parseArrayConstructor
 	p.prefixParseFns[lexer.NEW] = p.parseNewExpression
+	p.prefixParseFns[lexer.CLONE] = p.parseCloneExpression
 	p.prefixParseFns[lexer.MATCH] = p.parseMatchExpression
 	p.prefixParseFns[lexer.FUNCTION] = p.parseClosureExpression
 	p.prefixParseFns[lexer.FN] = p.parseArrowFunctionExpression
@@ -528,6 +529,19 @@ func (p *Parser) parseNewExpression() ast.Expr {
 	return expression
 }
 
+func (p *Parser) parseCloneExpression() ast.Expr {
+	expression := &ast.CloneExpression{
+		Token: p.curToken,
+	}
+
+	p.nextToken()
+
+	// Parse object expression
+	expression.Object = p.parseExpression(NEW_CLONE)
+
+	return expression
+}
+
 func (p *Parser) parseExitExpression() ast.Expr {
 	// exit and die can be used as:
 	// 1. exit; or die;  (no parentheses, no argument)
@@ -937,6 +951,17 @@ func (p *Parser) parseStaticAccessOrCall(left ast.Expr) ast.Expr {
 	token := p.curToken
 	p.nextToken()
 
+	// Special case: ::class constant (PHP 5.5+)
+	// Returns the fully qualified class name as a string
+	if p.curTokenIs(lexer.CLASS) {
+		// Don't consume 'class' token - leave curToken at the last token of this expression
+		// The main parseExpression loop will advance to the next token
+		return &ast.ClassNameExpression{
+			Token: token,
+			Class: left,
+		}
+	}
+
 	// Parse member (method, property, or constant)
 	member := p.parseExpression(POSTFIX)
 
@@ -1003,6 +1028,12 @@ func (p *Parser) parseCallArguments() []*ast.Argument {
 
 	for p.peekTokenIs(lexer.COMMA) {
 		p.nextToken() // consume comma
+
+		// Allow trailing comma - check if next token is closing parenthesis
+		if p.peekTokenIs(lexer.RPAREN) {
+			break
+		}
+
 		p.nextToken() // move to next argument
 		arg := p.parseArgument()
 		if arg != nil {

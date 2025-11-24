@@ -15,6 +15,7 @@ type Visitor interface {
 	VisitUnsetStatement(node *UnsetStatement) bool
 	VisitNamespaceStatement(node *NamespaceStatement) bool
 	VisitUseStatement(node *UseStatement) bool
+	VisitDeclareStatement(node *DeclareStatement) bool
 	VisitIfStatement(node *IfStatement) bool
 	VisitWhileStatement(node *WhileStatement) bool
 	VisitDoWhileStatement(node *DoWhileStatement) bool
@@ -51,10 +52,12 @@ type Visitor interface {
 	VisitPropertyExpression(node *PropertyExpression) bool
 	VisitNullsafePropertyExpression(node *NullsafePropertyExpression) bool
 	VisitStaticPropertyExpression(node *StaticPropertyExpression) bool
+	VisitClassNameExpression(node *ClassNameExpression) bool
 	VisitCallExpression(node *CallExpression) bool
 	VisitMethodCallExpression(node *MethodCallExpression) bool
 	VisitStaticCallExpression(node *StaticCallExpression) bool
 	VisitNewExpression(node *NewExpression) bool
+	VisitCloneExpression(node *CloneExpression) bool
 	VisitInstanceofExpression(node *InstanceofExpression) bool
 	VisitIssetExpression(node *IssetExpression) bool
 	VisitEmptyExpression(node *EmptyExpression) bool
@@ -130,6 +133,12 @@ func Walk(v Visitor, node Node) {
 		if v.VisitUseStatement(n) {
 			for _, useImport := range n.Uses {
 				Walk(v, useImport.Name)
+			}
+		}
+	case *DeclareStatement:
+		if v.VisitDeclareStatement(n) {
+			if n.Body != nil {
+				Walk(v, n.Body)
 			}
 		}
 	case *IfStatement:
@@ -342,6 +351,10 @@ func Walk(v Visitor, node Node) {
 			Walk(v, n.Class)
 			Walk(v, n.Property)
 		}
+	case *ClassNameExpression:
+		if v.VisitClassNameExpression(n) {
+			Walk(v, n.Class)
+		}
 	case *CallExpression:
 		if v.VisitCallExpression(n) {
 			Walk(v, n.Function)
@@ -371,6 +384,10 @@ func Walk(v Visitor, node Node) {
 			for _, arg := range n.Arguments {
 				Walk(v, arg)
 			}
+		}
+	case *CloneExpression:
+		if v.VisitCloneExpression(n) {
+			Walk(v, n.Object)
 		}
 	case *InstanceofExpression:
 		if v.VisitInstanceofExpression(n) {
@@ -451,6 +468,9 @@ func (bv *BaseVisitor) VisitBreakStatement(node *BreakStatement) bool           
 func (bv *BaseVisitor) VisitContinueStatement(node *ContinueStatement) bool           { return true }
 func (bv *BaseVisitor) VisitGlobalStatement(node *GlobalStatement) bool               { return true }
 func (bv *BaseVisitor) VisitUnsetStatement(node *UnsetStatement) bool                 { return true }
+func (bv *BaseVisitor) VisitNamespaceStatement(node *NamespaceStatement) bool         { return true }
+func (bv *BaseVisitor) VisitUseStatement(node *UseStatement) bool                     { return true }
+func (bv *BaseVisitor) VisitDeclareStatement(node *DeclareStatement) bool             { return true }
 func (bv *BaseVisitor) VisitIfStatement(node *IfStatement) bool                       { return true }
 func (bv *BaseVisitor) VisitWhileStatement(node *WhileStatement) bool                 { return true }
 func (bv *BaseVisitor) VisitDoWhileStatement(node *DoWhileStatement) bool             { return true }
@@ -470,6 +490,7 @@ func (bv *BaseVisitor) VisitClassConstantDeclaration(node *ClassConstantDeclarat
 }
 func (bv *BaseVisitor) VisitTraitUse(node *TraitUse) bool                             { return true }
 func (bv *BaseVisitor) VisitIdentifier(node *Identifier) bool                         { return true }
+func (bv *BaseVisitor) VisitNamespaceName(node *NamespaceName) bool                   { return true }
 func (bv *BaseVisitor) VisitIntegerLiteral(node *IntegerLiteral) bool                 { return true }
 func (bv *BaseVisitor) VisitFloatLiteral(node *FloatLiteral) bool                     { return true }
 func (bv *BaseVisitor) VisitStringLiteral(node *StringLiteral) bool                   { return true }
@@ -490,10 +511,14 @@ func (bv *BaseVisitor) VisitNullsafePropertyExpression(node *NullsafePropertyExp
 func (bv *BaseVisitor) VisitStaticPropertyExpression(node *StaticPropertyExpression) bool {
 	return true
 }
+func (bv *BaseVisitor) VisitClassNameExpression(node *ClassNameExpression) bool {
+	return true
+}
 func (bv *BaseVisitor) VisitCallExpression(node *CallExpression) bool             { return true }
 func (bv *BaseVisitor) VisitMethodCallExpression(node *MethodCallExpression) bool { return true }
 func (bv *BaseVisitor) VisitStaticCallExpression(node *StaticCallExpression) bool { return true }
 func (bv *BaseVisitor) VisitNewExpression(node *NewExpression) bool               { return true }
+func (bv *BaseVisitor) VisitCloneExpression(node *CloneExpression) bool           { return true }
 func (bv *BaseVisitor) VisitInstanceofExpression(node *InstanceofExpression) bool { return true }
 func (bv *BaseVisitor) VisitIssetExpression(node *IssetExpression) bool           { return true }
 func (bv *BaseVisitor) VisitEmptyExpression(node *EmptyExpression) bool           { return true }

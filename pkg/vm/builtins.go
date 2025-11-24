@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"github.com/krizos/php-go/pkg/stdlib/file"
 	"github.com/krizos/php-go/pkg/stdlib/hash"
 	stringfuncs "github.com/krizos/php-go/pkg/stdlib/string"
 	varfuncs "github.com/krizos/php-go/pkg/stdlib/var"
@@ -18,6 +19,10 @@ var builtinFunctions = map[string]BuiltinFunction{
 	// String functions
 	"strlen":     builtinStrlen,
 	"str_repeat": builtinStrRepeat,
+
+	// File functions
+	"file_exists":       builtinFileExists,
+	"file_get_contents": builtinFileGetContents,
 
 	// Hash functions
 	"hash":            builtinHash,
@@ -83,6 +88,26 @@ func builtinStrRepeat(args []*types.Value) (*types.Value, error) {
 		return types.NewString(""), nil
 	}
 	return stringfuncs.StrRepeat(args[0], args[1]), nil
+}
+
+// ============================================================================
+// File Functions
+// ============================================================================
+
+// builtinFileExists implements file_exists(string $filename): bool
+func builtinFileExists(args []*types.Value) (*types.Value, error) {
+	if len(args) < 1 {
+		return types.NewBool(false), nil
+	}
+	return file.FileExists(args[0]), nil
+}
+
+// builtinFileGetContents implements file_get_contents(string $filename): string|false
+func builtinFileGetContents(args []*types.Value) (*types.Value, error) {
+	if len(args) < 1 {
+		return types.NewBool(false), nil
+	}
+	return file.FileGetContents(args[0]), nil
 }
 
 // ============================================================================

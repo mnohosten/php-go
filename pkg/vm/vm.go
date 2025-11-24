@@ -385,6 +385,8 @@ func (vm *VM) dispatch(frame *Frame, instr Instruction) error {
 		return vm.opInstanceof(frame, instr)
 	case OpGetClass:
 		return vm.opGetClass(frame, instr)
+	case OpFetchClassName:
+		return vm.opFetchClassName(frame, instr)
 	case OpFetchThis:
 		return vm.opFetchThis(frame, instr)
 

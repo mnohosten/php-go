@@ -1,0 +1,114 @@
+FAILED: src/Symfony/Component/Console/Tests/TerminalTest.php
+Parser encountered 8 error(s):
+  1. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/Console/Tests/TerminalTest.php:120:9] Parse error: no prefix parse function for YIELD
+  2. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/Console/Tests/TerminalTest.php:121:9] Parse error: no prefix parse function for YIELD
+  3. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/Console/Tests/TerminalTest.php:122:9] Parse error: no prefix parse function for YIELD
+  4. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/Console/Tests/TerminalTest.php:123:9] Parse error: no prefix parse function for YIELD
+---
+FAILED: src/Symfony/Component/Console/Tests/ApplicationTest.php
+Parser encountered 92 error(s):
+  1. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/Console/Tests/ApplicationTest.php:828:67] Parse error: no prefix parse function for THROW
+  2. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/Console/Tests/ApplicationTest.php:828:67] Parse error: expected next token to be ), got NEW instead
+  3. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/Console/Tests/ApplicationTest.php:828:67] Parse error: expected next token to be ), got NEW instead
+  4. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/Console/Tests/ApplicationTest.php:828:104] Parse error: no prefix parse function for )
+---
+FAILED: src/Symfony/Component/Console/Tests/Logger/ConsoleLoggerTest.php
+Parser encountered 55 error(s):
+  1. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/Console/Tests/Logger/ConsoleLoggerTest.php:113:18] Parse error: no prefix parse function for {
+  2. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/Console/Tests/Logger/ConsoleLoggerTest.php:113:27] Parse error: expected type name
+  3. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/Console/Tests/Logger/ConsoleLoggerTest.php:113:27] Parse error: expected next token to be ), got , instead
+  4. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/Console/Tests/Logger/ConsoleLoggerTest.php:113:27] Parse error: expected next token to be VARIABLE, got , instead
+---
+FAILED: src/Symfony/Component/Console/Tests/Input/ArgvInputTest.php
+Parser encountered 8 error(s):
+  1. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/Console/Tests/Input/ArgvInputTest.php:588:9] Parse error: no prefix parse function for YIELD
+  2. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/Console/Tests/Input/ArgvInputTest.php:589:9] Parse error: no prefix parse function for YIELD
+  3. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/Console/Tests/Input/ArgvInputTest.php:590:9] Parse error: no prefix parse function for YIELD
+  4. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/Console/Tests/Input/ArgvInputTest.php:591:9] Parse error: no prefix parse function for YIELD
+---
+FAILED: src/Symfony/Component/DependencyInjection/Tests/ContainerTest.php
+Parser encountered 7 error(s):
+  1. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/DependencyInjection/Tests/ContainerTest.php:323:35] Parse error: no prefix parse function for CLASS
+  2. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/DependencyInjection/Tests/ContainerTest.php:323:35] Parse error: expected next token to be ), got IMPLEMENTS instead
+  3. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/DependencyInjection/Tests/ContainerTest.php:323:41] Parse error: no prefix parse function for IMPLEMENTS
+  4. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/DependencyInjection/Tests/ContainerTest.php:324:13] Parse error: no prefix parse function for PUBLIC
+---
+FAILED: src/Symfony/Component/DependencyInjection/Tests/Extension/AbstractExtensionTest.php
+Parser encountered 22 error(s):
+  1. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/DependencyInjection/Tests/Extension/AbstractExtensionTest.php:30:26] Parse error: no prefix parse function for CLASS
+  2. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/DependencyInjection/Tests/Extension/AbstractExtensionTest.php:30:32] Parse error: no prefix parse function for EXTENDS
+  3. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/DependencyInjection/Tests/Extension/AbstractExtensionTest.php:31:13] Parse error: no prefix parse function for PUBLIC
+  4. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/DependencyInjection/Tests/Extension/AbstractExtensionTest.php:45:10] Parse error: no prefix parse function for ;
+---
+FAILED: src/Symfony/Component/DependencyInjection/Tests/Attribute/AutowireInlineTest.php
+Parser encountered 53 error(s):
+  1. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/DependencyInjection/Tests/Attribute/AutowireInlineTest.php:40:9] Parse error: no prefix parse function for YIELD
+  2. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/DependencyInjection/Tests/Attribute/AutowireInlineTest.php:40:33] Parse error: no prefix parse function for =>
+  3. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/DependencyInjection/Tests/Attribute/AutowireInlineTest.php:41:9] Parse error: no prefix parse function for YIELD
+  4. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/DependencyInjection/Tests/Attribute/AutowireInlineTest.php:41:45] Parse error: no prefix parse function for =>
+---
+FAILED: src/Symfony/Component/DependencyInjection/Tests/Attribute/AutowireCallableTest.php
+Parser encountered 42 error(s):
+  1. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/DependencyInjection/Tests/Attribute/AutowireCallableTest.php:32:30] Parse error: no prefix parse function for CALLABLE
+  2. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/DependencyInjection/Tests/Attribute/AutowireCallableTest.php:32:30] Parse error: expected next token to be ), got : instead
+  3. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/DependencyInjection/Tests/Attribute/AutowireCallableTest.php:32:38] Parse error: no prefix parse function for :
+  4. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/DependencyInjection/Tests/Attribute/AutowireCallableTest.php:32:53] Parse error: no prefix parse function for ,
+---
+FAILED: src/Symfony/Component/HttpFoundation/Tests/RateLimiter/AbstractRequestRateLimiterTest.php
+Parser encountered 6 error(s):
+  1. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/HttpFoundation/Tests/RateLimiter/AbstractRequestRateLimiterTest.php:68:9] Parse error: no prefix parse function for YIELD
+  2. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/HttpFoundation/Tests/RateLimiter/AbstractRequestRateLimiterTest.php:68:73] Parse error: no prefix parse function for =>
+  3. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/HttpFoundation/Tests/RateLimiter/AbstractRequestRateLimiterTest.php:76:9] Parse error: no prefix parse function for YIELD
+  4. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/HttpFoundation/Tests/RateLimiter/AbstractRequestRateLimiterTest.php:76:68] Parse error: no prefix parse function for =>
+---
+FAILED: src/Symfony/Component/HttpKernel/Tests/DataCollector/LoggerDataCollectorTest.php
+Parser encountered 9 error(s):
+  1. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/HttpKernel/Tests/DataCollector/LoggerDataCollectorTest.php:155:22] Parse error: no prefix parse function for &
+  2. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/HttpKernel/Tests/DataCollector/LoggerDataCollectorTest.php:172:9] Parse error: no prefix parse function for YIELD
+  3. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/HttpKernel/Tests/DataCollector/LoggerDataCollectorTest.php:172:29] Parse error: no prefix parse function for =>
+  4. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/HttpKernel/Tests/DataCollector/LoggerDataCollectorTest.php:180:9] Parse error: no prefix parse function for YIELD
+---
+FAILED: src/Symfony/Component/Cache/Tests/Traits/RedisTraitTest.php
+Parser encountered 10 error(s):
+  1. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/Cache/Tests/Traits/RedisTraitTest.php:35:21] Parse error: no prefix parse function for CLASS
+  2. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/Cache/Tests/Traits/RedisTraitTest.php:37:10] Parse error: no prefix parse function for ;
+  3. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/Cache/Tests/Traits/RedisTraitTest.php:49:21] Parse error: no prefix parse function for CLASS
+  4. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/Cache/Tests/Traits/RedisTraitTest.php:51:10] Parse error: no prefix parse function for ;
+---
+FAILED: src/Symfony/Component/EventDispatcher/Tests/EventDispatcherTest.php
+Parser encountered 22 error(s):
+  1. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/EventDispatcher/Tests/EventDispatcherTest.php:50:80] Parse error: no prefix parse function for )
+  2. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/EventDispatcher/Tests/EventDispatcherTest.php:50:81] Parse error: expected next token to be ), got ; instead
+  3. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/EventDispatcher/Tests/EventDispatcherTest.php:73:73] Parse error: no prefix parse function for )
+  4. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/EventDispatcher/Tests/EventDispatcherTest.php:73:78] Parse error: expected next token to be ), got ; instead
+---
+FAILED: src/Symfony/Component/EventDispatcher/Tests/DependencyInjection/RegisterListenersPassTest.php
+Parser encountered 14 error(s):
+  1. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/EventDispatcher/Tests/DependencyInjection/RegisterListenersPassTest.php:205:52] Parse error: no prefix parse function for CLASS
+  2. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/EventDispatcher/Tests/DependencyInjection/RegisterListenersPassTest.php:205:52] Parse error: expected next token to be ), got { instead
+  3. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/EventDispatcher/Tests/DependencyInjection/RegisterListenersPassTest.php:205:52] Parse error: expected next token to be ), got { instead
+  4. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/EventDispatcher/Tests/DependencyInjection/RegisterListenersPassTest.php:206:13] Parse error: no prefix parse function for PUBLIC
+---
+FAILED: src/Symfony/Component/EventDispatcher/Tests/ImmutableEventDispatcherTest.php
+Parser encountered 3 error(s):
+  1. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/EventDispatcher/Tests/ImmutableEventDispatcherTest.php:26:13] Parse error: expected next token to be VARIABLE, got & instead
+  2. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/EventDispatcher/Tests/ImmutableEventDispatcherTest.php:26:23] Parse error: expected type name
+  3. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/EventDispatcher/Tests/ImmutableEventDispatcherTest.php:26:23] Parse error: expected next token to be VARIABLE, got IDENT instead
+---
+FAILED: src/Symfony/Component/Routing/Tests/RouteTest.php
+Parser encountered 23 error(s):
+  1. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/Routing/Tests/RouteTest.php:242:9] Parse error: no prefix parse function for YIELD
+  2. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/Routing/Tests/RouteTest.php:243:9] Parse error: no prefix parse function for YIELD
+  3. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/Routing/Tests/RouteTest.php:244:9] Parse error: no prefix parse function for YIELD
+  4. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/Routing/Tests/RouteTest.php:245:9] Parse error: no prefix parse function for YIELD
+---
+FAILED: src/Symfony/Component/Routing/Tests/RouterTest.php
+Parser encountered 3 error(s):
+  1. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/Routing/Tests/RouterTest.php:30:13] Parse error: expected next token to be VARIABLE, got & instead
+  2. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/Routing/Tests/RouterTest.php:30:23] Parse error: expected type name
+  3. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/Routing/Tests/RouterTest.php:30:23] Parse error: expected next token to be VARIABLE, got IDENT instead
+---
+FAILED: src/Symfony/Component/Config/Tests/ResourceCheckerConfigCacheTest.php
+Parser encountered 1 error(s):
+  1. [/Users/krizos/code/mnohosten/php-go/tests/symfony/symfony-framework/src/Symfony/Component/Config/Tests/ResourceCheckerConfigCacheTest.php:53:30] Parse error: no prefix parse function for NEVER
+---

@@ -413,6 +413,18 @@ func (c *Compiler) Compile(node ast.Node) error {
 		// TODO: Register use imports in symbol table for proper name resolution
 		return nil
 
+	case *ast.DeclareStatement:
+		// Declare statements are compile-time directives that affect execution
+		// The most common directive is strict_types=1 which affects type checking
+		// For now, we'll just compile the body if present
+		// TODO: Store directives in compiler state for semantic analysis
+		if node.Body != nil {
+			if err := c.Compile(node.Body); err != nil {
+				return err
+			}
+		}
+		return nil
+
 	case *ast.UnsetStatement:
 		// Emit UNSET_* for each variable
 		for _, variable := range node.Variables {
@@ -1757,6 +1769,20 @@ func (c *Compiler) Compile(node ast.Node) error {
 			classTemp,
 			vm.UnusedOperand(),
 			vm.TmpVarOperand(1)) // New object in temp 1
+		return nil
+
+	case *ast.CloneExpression:
+		// Compile object expression
+		if err := c.Compile(node.Object); err != nil {
+			return err
+		}
+		objectTemp := vm.TmpVarOperand(0)
+
+		// CLONE instruction
+		c.EmitWithLine(vm.OpClone, uint32(node.Token.Pos.Line),
+			objectTemp,
+			vm.UnusedOperand(),
+			vm.TmpVarOperand(1)) // Cloned object in temp 1
 		return nil
 
 	// ========================================
@@ -3257,6 +3283,10 @@ func findVarsRecursive(node ast.Node, vars map[string]bool) {
 		for _, arg := range n.Arguments {
 			findVarsRecursive(arg.Value, vars)
 		}
+
+	case *ast.CloneExpression:
+		// Check object expression
+		findVarsRecursive(n.Object, vars)
 
 	case *ast.CastExpression:
 		findVarsRecursive(n.Expr, vars)

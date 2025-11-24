@@ -963,6 +963,75 @@ func TestListExpressionInAssignment(t *testing.T) {
 	}
 }
 
+func TestTrailingCommaInFunctionCall(t *testing.T) {
+	tests := []struct {
+		input         string
+		expectedArgs  int
+		description   string
+	}{
+		{
+			input:        `<?php foo(1, 2, 3,);`,
+			expectedArgs: 3,
+			description:  "trailing comma in positional arguments",
+		},
+		{
+			input:        `<?php foo(1,);`,
+			expectedArgs: 1,
+			description:  "trailing comma with single argument",
+		},
+		{
+			input:        `<?php foo(name: 'value',);`,
+			expectedArgs: 1,
+			description:  "trailing comma with named argument",
+		},
+		{
+			input: `<?php foo(
+				name: 'value',
+				age: 30,
+			);`,
+			expectedArgs: 2,
+			description:  "trailing comma in multi-line named arguments",
+		},
+		{
+			input:        `<?php $obj->method(1, 2,);`,
+			expectedArgs: 2,
+			description:  "trailing comma in method call",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.description, func(t *testing.T) {
+			l := lexer.New(tt.input, "test.php")
+			p := New(l)
+			program := p.ParseProgram()
+			checkParserErrors(t, p)
+
+			if len(program.Statements) != 1 {
+				t.Fatalf("program has wrong number of statements. got=%d", len(program.Statements))
+			}
+
+			stmt, ok := program.Statements[0].(*ast.ExpressionStatement)
+			if !ok {
+				t.Fatalf("program.Statements[0] is not ast.ExpressionStatement. got=%T", program.Statements[0])
+			}
+
+			var args []*ast.Argument
+			switch expr := stmt.Expression.(type) {
+			case *ast.CallExpression:
+				args = expr.Arguments
+			case *ast.MethodCallExpression:
+				args = expr.Arguments
+			default:
+				t.Fatalf("unexpected expression type. got=%T", stmt.Expression)
+			}
+
+			if len(args) != tt.expectedArgs {
+				t.Errorf("wrong number of arguments. expected=%d, got=%d", tt.expectedArgs, len(args))
+			}
+		})
+	}
+}
+
 func testInfixExpression(t *testing.T, exp ast.Expr, left interface{},
 	operator string, right interface{}) bool {
 
@@ -978,4 +1047,60 @@ func testInfixExpression(t *testing.T, exp ast.Expr, left interface{},
 	}
 
 	return true
+}
+
+func TestCloneExpression(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      string
+		objectType string // expected type of the object being cloned
+	}{
+		{
+			name:       "clone simple variable",
+			input:      `<?php clone $obj;`,
+			objectType: "*ast.Variable",
+		},
+		{
+			name:       "clone property access",
+			input:      `<?php clone ($this->obj);`,
+			objectType: "*ast.PropertyExpression",
+		},
+		{
+			name:       "clone method call",
+			input:      `<?php clone ($factory->createObject());`,
+			objectType: "*ast.MethodCallExpression",
+		},
+		{
+			name:       "clone new expression",
+			input:      `<?php clone new MyClass();`,
+			objectType: "*ast.NewExpression",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := lexer.New(tt.input, "test.php")
+			p := New(l)
+			program := p.ParseProgram()
+			checkParserErrors(t, p)
+
+			if len(program.Statements) != 1 {
+				t.Fatalf("program has not enough statements. got=%d", len(program.Statements))
+			}
+
+			stmt, ok := program.Statements[0].(*ast.ExpressionStatement)
+			if !ok {
+				t.Fatalf("program.Statements[0] is not ast.ExpressionStatement. got=%T", program.Statements[0])
+			}
+
+			cloneExp, ok := stmt.Expression.(*ast.CloneExpression)
+			if !ok {
+				t.Fatalf("exp not *ast.CloneExpression. got=%T", stmt.Expression)
+			}
+
+			if cloneExp.Object == nil {
+				t.Fatalf("cloneExp.Object is nil")
+			}
+		})
+	}
 }

@@ -106,6 +106,8 @@ func (p *Parser) parseStatement() ast.Stmt {
 		return p.parseNamespaceStatement()
 	case lexer.USE:
 		return p.parseUseStatement()
+	case lexer.DECLARE:
+		return p.parseDeclareStatement()
 	case lexer.IF:
 		return p.parseIfStatement()
 	case lexer.WHILE:

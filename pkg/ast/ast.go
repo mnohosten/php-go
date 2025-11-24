@@ -296,6 +296,20 @@ func (spe *StaticPropertyExpression) String() string {
 	return "(" + spe.Class.String() + "::" + spe.Property.String() + ")"
 }
 
+// ClassNameExpression represents the ::class constant (PHP 5.5+)
+// Returns the fully qualified class name as a string
+// Examples: MyClass::class, self::class, parent::class
+type ClassNameExpression struct {
+	Token lexer.Token // The :: token
+	Class Expr        // Class name or expression (self, parent, static, or class name)
+}
+
+func (cne *ClassNameExpression) expressionNode()      {}
+func (cne *ClassNameExpression) TokenLiteral() string { return cne.Token.Literal }
+func (cne *ClassNameExpression) String() string {
+	return cne.Class.String() + "::class"
+}
+
 // CallExpression represents a function call func($args)
 // Argument represents a function call argument (positional or named)
 // Example: foo(42, name: "value", ...$array)
@@ -373,6 +387,18 @@ func (ne *NewExpression) expressionNode()      {}
 func (ne *NewExpression) TokenLiteral() string { return ne.Token.Literal }
 func (ne *NewExpression) String() string {
 	return "new " + ne.Class.String() + "(...)"
+}
+
+// CloneExpression represents object cloning clone $obj
+type CloneExpression struct {
+	Token  lexer.Token // The CLONE token
+	Object Expr        // Object to clone
+}
+
+func (ce *CloneExpression) expressionNode()      {}
+func (ce *CloneExpression) TokenLiteral() string { return ce.Token.Literal }
+func (ce *CloneExpression) String() string {
+	return "clone " + ce.Object.String()
 }
 
 // InstanceofExpression represents instanceof check
@@ -680,6 +706,21 @@ func (us *UseStatement) String() string {
 type UseImport struct {
 	Name  *NamespaceName // Fully qualified name
 	Alias string         // Optional alias (empty if no alias)
+}
+
+// DeclareStatement represents declare() statement
+// Syntax: declare(directive=value);  declare(directive=value) { ... }
+// Directives: strict_types, ticks, encoding
+type DeclareStatement struct {
+	Token      lexer.Token            // The DECLARE token
+	Directives map[string]interface{} // Map of directive name to value (int or string)
+	Body       Stmt                   // Optional body (nil for simple declare)
+}
+
+func (ds *DeclareStatement) statementNode()       {}
+func (ds *DeclareStatement) TokenLiteral() string { return ds.Token.Literal }
+func (ds *DeclareStatement) String() string {
+	return "declare(...)"
 }
 
 // IfStatement represents if/elseif/else statement

@@ -1,0 +1,2 @@
+<?php
+$x = stdClass::class;
