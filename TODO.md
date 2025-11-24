@@ -2609,8 +2609,8 @@ All property and parameter reflection functionality is already implemented and t
 8. ❌ `else`/`elseif` - 1,222 → 154 errors (1,068 fixed, 87% reduction) - **CRITICAL P0** - Partially fixed (else still has issues)
 9. ✅ `namespace`/`use` - 543 → 205 errors (338 fixed, 62% reduction) - **CRITICAL P0** - FIXED (Nov 24, 2025)
 10. ❌ Alternative syntax (`:`, `endif`, etc.) - 334 → 299 errors - **HIGH P1**
-11. ❌ `list()` - 265 errors - **HIGH P1**
-12. ❌ Type declarations (param/return types) - 51,702 errors - **CRITICAL P0**
+11. ✅ `list()` - 265 errors - **HIGH P1** - FIXED (Nov 24, 2025) - Parser only (compiler/VM pending)
+12. ✅ Type declarations (param/return types) - Cast expressions fixed (FLOAT_TYPE token) - **CRITICAL P0** - FIXED (Nov 24, 2025)
 
 **Missing Extensions**:
 - ❌ mysqli/PDO - **CRITICAL** - WordPress cannot run without database
@@ -2659,6 +2659,8 @@ All property and parameter reflection functionality is already implemented and t
 - ✅ `global` statement - Added `GlobalStatement` AST node (`pkg/ast/ast.go:564-581`), parser (`pkg/parser/stmt.go:95-130`), compiler (`pkg/compiler/compiler.go:372-385`), VM handler (`pkg/vm/handlers_variables.go:167-189`), and visitor support (`pkg/ast/visitor.go:101-106,14,412`) - Added comprehensive tests (`pkg/parser/stmt_test.go:118-173`, `pkg/compiler/compiler_test.go:480-515`) (Nov 24, 2025)
 - ✅ `unset()` language construct - Added `UnsetStatement` AST node (`pkg/ast/ast.go:583-600`), parser (`pkg/parser/stmt.go:132-173`), compiler (`pkg/compiler/compiler.go:387-455`), VM handler for UNSET_VAR (`pkg/vm/handlers_variables.go:191-208`), UNSET_DIM and UNSET_OBJ handlers already existed (`pkg/vm/handlers_array.go:308-331`, `pkg/vm/handlers_object.go:315-352`), and visitor support (`pkg/ast/visitor.go:15,109-114,420`) - Added comprehensive tests (`pkg/parser/stmt_test.go:175-239`, `pkg/compiler/compiler_test.go:3627-3703`) - Supports unsetting variables, array elements, and object properties (Nov 24, 2025)
 - ✅ `namespace` and `use` statements - Added `NamespaceStatement`, `UseStatement`, `NamespaceName`, and `UseImport` AST nodes (`pkg/ast/ast.go:602-659`), parser (`pkg/parser/stmt.go:698-894`), compiler (`pkg/compiler/compiler.go:388-414`), and visitor support (`pkg/ast/visitor.go:16-17,37,118-133,281-282`) - Added comprehensive tests (`pkg/parser/stmt_test.go:856-1068`) - Supports bracketed and unbracketed namespace syntax, simple use, use with alias, multiple use, function/const use, and group use syntax - Reduced namespace errors by 135 (40%) and use errors by 203 (97%) (Nov 24, 2025)
+- ✅ Type declarations - Cast expressions - Fixed `parseGroupedOrCastExpression()` in `pkg/parser/expr.go:367-371` to recognize `lexer.FLOAT_TYPE` token (was incorrectly checking `lexer.FLOAT` which is for float literals, not the type keyword). Added tests for `(float)`, `(array)`, and `(object)` cast expressions in `pkg/parser/expr_test.go:698-700`. This fixes "no prefix parse function for FLOAT_TYPE" errors throughout WordPress codebase (Nov 24, 2025)
+- ✅ `list()` language construct - Added `ListExpression` and `ListElement` AST nodes (`pkg/ast/ast.go:419-441`), parser (`pkg/parser/expr.go:49,660-754`), and visitor support (`pkg/ast/visitor.go:61,390-400,500`) - Added comprehensive tests (`pkg/parser/expr_test.go:833-964`) - Supports basic list assignment, skipped elements, keyed list (PHP 7.1+), and list in assignment context - Parser implementation complete, compiler and VM support pending (Nov 24, 2025)
 
 ### 10.4 Laravel Testing (16h)
 - [ ] Install Laravel (2h)

@@ -416,6 +416,30 @@ func (ee *EmptyExpression) String() string {
 	return "empty(" + ee.Variable.String() + ")"
 }
 
+// ListElement represents a single element in a list() construct
+type ListElement struct {
+	Key   Expr // Optional key for associative arrays (PHP 7.1+)
+	Value Expr // Variable to assign to (can be nil for skipped elements)
+}
+
+// ListExpression represents list() language construct for array destructuring
+// list() assigns variables as if they were an array
+// Examples:
+//   list($a, $b) = array(1, 2)           // Basic list assignment
+//   list($a, , $c) = array(1, 2, 3)      // Skip middle element
+//   list($x[0], $y->prop) = array(1, 2)  // Assign to array elements/properties
+//   list("a" => $a) = ["a" => 1]         // Keyed list (PHP 7.1+)
+type ListExpression struct {
+	Token    lexer.Token     // The LIST token
+	Elements []*ListElement  // List elements (can have nil Value for skipped elements)
+}
+
+func (le *ListExpression) expressionNode()      {}
+func (le *ListExpression) TokenLiteral() string { return le.Token.Literal }
+func (le *ListExpression) String() string {
+	return "list(...)"
+}
+
 // FirstClassCallableExpression represents PHP 8.1+ first-class callable syntax
 // Examples: strlen(...), $obj->method(...), Class::staticMethod(...)
 type FirstClassCallableExpression struct {

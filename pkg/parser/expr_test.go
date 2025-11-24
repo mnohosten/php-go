@@ -695,6 +695,9 @@ func TestCastExpression(t *testing.T) {
 		{"<?php (int)$x;", "int"},
 		{"<?php (string)$y;", "string"},
 		{"<?php (bool)$z;", "bool"},
+		{"<?php (float)$a;", "float"},
+		{"<?php (array)$b;", "array"},
+		{"<?php (object)$c;", "object"},
 	}
 
 	for _, tt := range tests {
@@ -825,6 +828,139 @@ func testVariable(t *testing.T, exp ast.Expr, name string) bool {
 	}
 
 	return true
+}
+
+func TestListExpression(t *testing.T) {
+	tests := []struct {
+		input          string
+		expectedLength int
+		description    string
+	}{
+		{"<?php list($a, $b);", 2, "basic list with two elements"},
+		{"<?php list($a, $b, $c);", 3, "list with three elements"},
+		{"<?php list($x);", 1, "list with single element"},
+		{"<?php list($a, , $c);", 3, "list with skipped middle element"},
+		{"<?php list($a, , , $d);", 4, "list with multiple skipped elements"},
+	}
+
+	for _, tt := range tests {
+		l := lexer.New(tt.input, "test.php")
+		p := New(l)
+		program := p.ParseProgram()
+		checkParserErrors(t, p)
+
+		if len(program.Statements) != 1 {
+			t.Fatalf("%s: program has wrong number of statements. got=%d",
+				tt.description, len(program.Statements))
+		}
+
+		stmt, ok := program.Statements[0].(*ast.ExpressionStatement)
+		if !ok {
+			t.Fatalf("%s: program.Statements[0] is not ast.ExpressionStatement. got=%T",
+				tt.description, program.Statements[0])
+		}
+
+		listExpr, ok := stmt.Expression.(*ast.ListExpression)
+		if !ok {
+			t.Fatalf("%s: exp not *ast.ListExpression. got=%T",
+				tt.description, stmt.Expression)
+		}
+
+		if len(listExpr.Elements) != tt.expectedLength {
+			t.Errorf("%s: wrong number of elements. got=%d, want=%d",
+				tt.description, len(listExpr.Elements), tt.expectedLength)
+		}
+	}
+}
+
+func TestListExpressionWithKeyedElements(t *testing.T) {
+	// Test PHP 7.1+ keyed list syntax: list("a" => $a, "b" => $b)
+	input := `<?php list("x" => $a, "y" => $b);`
+
+	l := lexer.New(input, "test.php")
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program has wrong number of statements. got=%d", len(program.Statements))
+	}
+
+	stmt, ok := program.Statements[0].(*ast.ExpressionStatement)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.ExpressionStatement. got=%T",
+			program.Statements[0])
+	}
+
+	listExpr, ok := stmt.Expression.(*ast.ListExpression)
+	if !ok {
+		t.Fatalf("exp not *ast.ListExpression. got=%T", stmt.Expression)
+	}
+
+	if len(listExpr.Elements) != 2 {
+		t.Fatalf("wrong number of elements. got=%d", len(listExpr.Elements))
+	}
+
+	// Check first element has a key
+	if listExpr.Elements[0].Key == nil {
+		t.Errorf("first element should have a key")
+	}
+
+	// Check second element has a key
+	if listExpr.Elements[1].Key == nil {
+		t.Errorf("second element should have a key")
+	}
+
+	// Check values are variables
+	if _, ok := listExpr.Elements[0].Value.(*ast.Variable); !ok {
+		t.Errorf("first element value should be a variable. got=%T", listExpr.Elements[0].Value)
+	}
+
+	if _, ok := listExpr.Elements[1].Value.(*ast.Variable); !ok {
+		t.Errorf("second element value should be a variable. got=%T", listExpr.Elements[1].Value)
+	}
+}
+
+func TestListExpressionInAssignment(t *testing.T) {
+	// Test list() in assignment context
+	input := `<?php list($a, $b) = array(1, 2);`
+
+	l := lexer.New(input, "test.php")
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program has wrong number of statements. got=%d", len(program.Statements))
+	}
+
+	stmt, ok := program.Statements[0].(*ast.ExpressionStatement)
+	if !ok {
+		t.Fatalf("program.Statements[0] is not ast.ExpressionStatement. got=%T",
+			program.Statements[0])
+	}
+
+	assignExpr, ok := stmt.Expression.(*ast.AssignmentExpression)
+	if !ok {
+		t.Fatalf("exp not *ast.AssignmentExpression. got=%T", stmt.Expression)
+	}
+
+	// Left side should be a list expression
+	listExpr, ok := assignExpr.Left.(*ast.ListExpression)
+	if !ok {
+		t.Fatalf("assignment left side not *ast.ListExpression. got=%T", assignExpr.Left)
+	}
+
+	if len(listExpr.Elements) != 2 {
+		t.Errorf("wrong number of list elements. got=%d", len(listExpr.Elements))
+	}
+
+	// Right side should be an array expression
+	_, ok = assignExpr.Right.(*ast.ArrayExpression)
+	if !ok {
+		t.Fatalf("assignment right side not *ast.ArrayExpression. got=%T",
+			assignExpr.Right)
+	}
 }
 
 func testInfixExpression(t *testing.T, exp ast.Expr, left interface{},

@@ -46,6 +46,7 @@ func (p *Parser) registerExpressionParsers() {
 	p.prefixParseFns[lexer.EXIT] = p.parseExitExpression
 	p.prefixParseFns[lexer.ISSET] = p.parseIssetExpression
 	p.prefixParseFns[lexer.EMPTY] = p.parseEmptyExpression
+	p.prefixParseFns[lexer.LIST] = p.parseListExpression
 	p.prefixParseFns[lexer.INCLUDE] = p.parseIncludeExpression
 	p.prefixParseFns[lexer.INCLUDE_ONCE] = p.parseIncludeExpression
 	p.prefixParseFns[lexer.REQUIRE] = p.parseIncludeExpression
@@ -365,7 +366,7 @@ func (p *Parser) parseGroupedOrCastExpression() ast.Expr {
 	// Grouped: any other expression in parentheses
 
 	if p.peekTokenIs(lexer.INT) || p.peekTokenIs(lexer.STRING_TYPE) ||
-	   p.peekTokenIs(lexer.BOOL) || p.peekTokenIs(lexer.FLOAT) ||
+	   p.peekTokenIs(lexer.BOOL) || p.peekTokenIs(lexer.FLOAT_TYPE) ||
 	   p.peekTokenIs(lexer.ARRAY) || p.peekTokenIs(lexer.OBJECT) {
 		return p.parseCastExpression()
 	}
@@ -646,6 +647,108 @@ func (p *Parser) parseEmptyExpression() ast.Expr {
 	expression := &ast.EmptyExpression{
 		Token:    token,
 		Variable: variable,
+	}
+
+	// Expect closing parenthesis
+	if !p.expectPeek(lexer.RPAREN) {
+		return nil
+	}
+
+	return expression
+}
+
+func (p *Parser) parseListExpression() ast.Expr {
+	// list() is used for array destructuring assignment
+	// Examples:
+	// list($a, $b) = array(1, 2)                  // Basic list
+	// list($a, , $c) = array(1, 2, 3)             // Skip middle element
+	// list($x[0], $y->prop) = array(1, 2)         // Assign to array/object
+	// list("a" => $a, "b" => $b) = ["a"=>1,"b"=>2] // Keyed list (PHP 7.1+)
+
+	token := p.curToken // The LIST token
+
+	// Expect opening parenthesis
+	if !p.expectPeek(lexer.LPAREN) {
+		return nil
+	}
+
+	expression := &ast.ListExpression{
+		Token:    token,
+		Elements: []*ast.ListElement{},
+	}
+
+	// Check for empty list()
+	if p.peekTokenIs(lexer.RPAREN) {
+		p.nextToken() // move to )
+		p.error("list() cannot be empty")
+		return expression
+	}
+
+	p.nextToken() // move past (
+
+	// Parse list elements
+	for !p.curTokenIs(lexer.RPAREN) {
+		var element *ast.ListElement
+
+		// Check for skipped element at start or after comma: list(, $a) or list($a, , $c)
+		if p.curTokenIs(lexer.COMMA) {
+			// Skipped element
+			element = &ast.ListElement{
+				Key:   nil,
+				Value: nil,
+			}
+			expression.Elements = append(expression.Elements, element)
+			p.nextToken() // move past ,
+			continue
+		}
+
+		// Parse a normal element
+		// Check for keyed list (PHP 7.1+): list("key" => $var)
+		expr := p.parseExpression(LOWEST)
+		if expr == nil {
+			return nil
+		}
+
+		// Check if this is a keyed element
+		if p.peekTokenIs(lexer.DOUBLE_ARROW) {
+			p.nextToken() // move to =>
+			p.nextToken() // move past =>
+
+			// Parse the value
+			value := p.parseExpression(LOWEST)
+			if value == nil {
+				return nil
+			}
+
+			element = &ast.ListElement{
+				Key:   expr,
+				Value: value,
+			}
+		} else {
+			// Non-keyed element
+			element = &ast.ListElement{
+				Key:   nil,
+				Value: expr,
+			}
+		}
+
+		expression.Elements = append(expression.Elements, element)
+
+		// Check for comma
+		if !p.peekTokenIs(lexer.COMMA) {
+			// No more elements
+			break
+		}
+
+		p.nextToken() // move to ,
+
+		// Check if next is closing paren (trailing comma)
+		if p.peekTokenIs(lexer.RPAREN) {
+			break
+		}
+
+		p.nextToken() // move past ,
+		// Continue loop - if next is comma, it's a skipped element
 	}
 
 	// Expect closing parenthesis

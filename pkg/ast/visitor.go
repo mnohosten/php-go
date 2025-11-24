@@ -58,6 +58,7 @@ type Visitor interface {
 	VisitInstanceofExpression(node *InstanceofExpression) bool
 	VisitIssetExpression(node *IssetExpression) bool
 	VisitEmptyExpression(node *EmptyExpression) bool
+	VisitListExpression(node *ListExpression) bool
 	VisitIncludeExpression(node *IncludeExpression) bool
 	VisitCastExpression(node *CastExpression) bool
 	VisitGroupedExpression(node *GroupedExpression) bool
@@ -386,6 +387,17 @@ func Walk(v Visitor, node Node) {
 		if v.VisitEmptyExpression(n) {
 			Walk(v, n.Variable)
 		}
+	case *ListExpression:
+		if v.VisitListExpression(n) {
+			for _, element := range n.Elements {
+				if element.Key != nil {
+					Walk(v, element.Key)
+				}
+				if element.Value != nil {
+					Walk(v, element.Value)
+				}
+			}
+		}
 	case *IncludeExpression:
 		if v.VisitIncludeExpression(n) {
 			Walk(v, n.Path)
@@ -485,6 +497,7 @@ func (bv *BaseVisitor) VisitNewExpression(node *NewExpression) bool             
 func (bv *BaseVisitor) VisitInstanceofExpression(node *InstanceofExpression) bool { return true }
 func (bv *BaseVisitor) VisitIssetExpression(node *IssetExpression) bool           { return true }
 func (bv *BaseVisitor) VisitEmptyExpression(node *EmptyExpression) bool           { return true }
+func (bv *BaseVisitor) VisitListExpression(node *ListExpression) bool             { return true }
 func (bv *BaseVisitor) VisitIncludeExpression(node *IncludeExpression) bool       { return true }
 func (bv *BaseVisitor) VisitCastExpression(node *CastExpression) bool             { return true }
 func (bv *BaseVisitor) VisitGroupedExpression(node *GroupedExpression) bool       { return true }
