@@ -3,6 +3,7 @@ package goext
 import (
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/krizos/php-go/pkg/types"
 	"github.com/krizos/php-go/pkg/vm"
@@ -488,5 +489,159 @@ func BenchmarkPluginManagerGetPlugin(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		pm.GetPlugin("/test.so")
+	}
+}
+
+// TestEnableDisableHotReload tests enabling and disabling hot reload
+func TestEnableDisableHotReload(t *testing.T) {
+	pm := NewPluginManager(NewExtensionManager(NewFunctionRegistry()))
+
+	// Initially disabled
+	if pm.IsHotReloadEnabled() {
+		t.Error("Expected hot reload to be disabled initially")
+	}
+
+	// Enable hot reload
+	pm.EnableHotReload(100 * time.Millisecond)
+
+	// Should be enabled now
+	if !pm.IsHotReloadEnabled() {
+		t.Error("Expected hot reload to be enabled after EnableHotReload")
+	}
+
+	// Enabling again should be a no-op
+	pm.EnableHotReload(100 * time.Millisecond)
+	if !pm.IsHotReloadEnabled() {
+		t.Error("Expected hot reload to still be enabled")
+	}
+
+	// Disable hot reload
+	pm.DisableHotReload()
+
+	// Should be disabled now
+	if pm.IsHotReloadEnabled() {
+		t.Error("Expected hot reload to be disabled after DisableHotReload")
+	}
+
+	// Disabling again should be a no-op
+	pm.DisableHotReload()
+	if pm.IsHotReloadEnabled() {
+		t.Error("Expected hot reload to still be disabled")
+	}
+}
+
+// TestModTimeTracking tests that modification times are tracked correctly
+func TestModTimeTracking(t *testing.T) {
+	pm := NewPluginManager(NewExtensionManager(NewFunctionRegistry()))
+
+	// Create a test plugin info with mod time
+	modTime := time.Now()
+	pm.mu.Lock()
+	pm.plugins["/test.so"] = &PluginInfo{
+		Path:    "/test.so",
+		Loaded:  true,
+		ModTime: modTime,
+	}
+	pm.mu.Unlock()
+
+	// Get the plugin and verify mod time
+	info, ok := pm.GetPlugin("/test.so")
+	if !ok {
+		t.Fatal("Failed to get plugin")
+	}
+
+	if info.ModTime != modTime {
+		t.Errorf("Expected ModTime %v, got %v", modTime, info.ModTime)
+	}
+}
+
+// TestReloadPluginNotLoaded tests reloading a plugin that isn't loaded
+func TestReloadPluginNotLoaded(t *testing.T) {
+	pm := NewPluginManager(NewExtensionManager(NewFunctionRegistry()))
+
+	// Try to reload a non-existent plugin
+	err := pm.ReloadPlugin("/nonexistent.so")
+	if err == nil {
+		t.Error("Expected error when reloading non-existent plugin")
+	}
+}
+
+// TestCheckPluginsForChangesEmptyList tests checking for changes with no plugins
+func TestCheckPluginsForChangesEmptyList(t *testing.T) {
+	pm := NewPluginManager(NewExtensionManager(NewFunctionRegistry()))
+
+	// This should not panic or cause errors
+	pm.checkPluginsForChanges()
+}
+
+// TestCheckPluginsForChangesNonExistentFile tests checking for changes when file doesn't exist
+func TestCheckPluginsForChangesNonExistentFile(t *testing.T) {
+	pm := NewPluginManager(NewExtensionManager(NewFunctionRegistry()))
+
+	// Add a plugin info for a non-existent file
+	pm.mu.Lock()
+	pm.plugins["/nonexistent.so"] = &PluginInfo{
+		Path:    "/nonexistent.so",
+		Loaded:  true,
+		ModTime: time.Now(),
+	}
+	pm.mu.Unlock()
+
+	// This should not panic - it should skip the missing file
+	pm.checkPluginsForChanges()
+}
+
+// TestHotReloadConcurrency tests that hot reload works correctly with concurrent operations
+func TestHotReloadConcurrency(t *testing.T) {
+	pm := NewPluginManager(NewExtensionManager(NewFunctionRegistry()))
+
+	// Enable hot reload
+	pm.EnableHotReload(50 * time.Millisecond)
+
+	// Perform concurrent operations
+	done := make(chan bool)
+	for i := 0; i < 10; i++ {
+		go func() {
+			for j := 0; j < 100; j++ {
+				pm.List()
+				pm.Count()
+				pm.IsHotReloadEnabled()
+			}
+			done <- true
+		}()
+	}
+
+	// Wait for all goroutines
+	for i := 0; i < 10; i++ {
+		<-done
+	}
+
+	// Disable hot reload
+	pm.DisableHotReload()
+
+	if pm.IsHotReloadEnabled() {
+		t.Error("Expected hot reload to be disabled")
+	}
+}
+
+// TestPluginInfoWithModTime tests creating PluginInfo with ModTime field
+func TestPluginInfoWithModTime(t *testing.T) {
+	now := time.Now()
+	info := &PluginInfo{
+		Path:    "/test.so",
+		Loaded:  true,
+		ModTime: now,
+	}
+
+	if info.ModTime != now {
+		t.Errorf("Expected ModTime %v, got %v", now, info.ModTime)
+	}
+
+	if !info.Loaded {
+		t.Error("Expected Loaded to be true")
+	}
+
+	if info.Path != "/test.so" {
+		t.Errorf("Expected Path '/test.so', got '%s'", info.Path)
 	}
 }

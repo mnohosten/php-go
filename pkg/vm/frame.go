@@ -5,6 +5,7 @@ import "github.com/krizos/php-go/pkg/types"
 // CallParams holds parameters being collected for a function call
 type CallParams struct {
 	params []*types.Value
+	byRef  []bool // Whether each parameter is passed by reference
 }
 
 // Frame represents a single execution frame (function call)
@@ -24,17 +25,23 @@ type Frame struct {
 	// Base pointer (for stack-based operations)
 	bp int
 
+	// Global bindings: maps local variable index to global variable name
+	// When a variable is bound to global, reads/writes go through vm.globals
+	globalBindings map[int]string
+
 	// Object/class context (for method calls)
 	thisObject    *types.Object     // $this for instance methods
 	currentClass  *types.ClassEntry // Current class context for self/parent
 	calledClass   *types.ClassEntry // Called class for late static binding (static::)
 
 	// Pending method call information (set by OpInitMethodCall)
-	pendingMethod *types.MethodDef // Method to be called
-	pendingObject *types.Object    // Object for instance method calls (nil for static)
+	pendingMethod            *types.MethodDef // Method to be called
+	pendingObject            *types.Object    // Object for instance method calls (nil for static)
+	pendingNativeConstructor string           // Name of built-in class with native constructor
 
 	// Pending function call information (set by OpInitFcall)
 	pendingFunction *CompiledFunction // Function to be called
+	pendingClosure  *Closure          // Closure to be called (if calling a closure)
 	pendingParams   *CallParams       // Parameters being collected
 
 	// Generator context (if this frame is executing a generator)
@@ -48,6 +55,9 @@ type Frame struct {
 
 	// Class entry context (for method/property access)
 	classEntry *types.ClassEntry
+
+	// Finally block return address stack (for FAST_CALL/FAST_RET)
+	finallyStack []int
 }
 
 // NewFrame creates a new execution frame for a function
@@ -72,6 +82,7 @@ func NewFrame(fn *CompiledFunction) *Frame {
 // ============================================================================
 
 // getLocal retrieves a local variable by index
+// If the value is a reference, it's automatically dereferenced
 func (f *Frame) getLocal(index int) *types.Value {
 	if index < 0 || index >= len(f.locals) {
 		return types.NewNull()
@@ -85,12 +96,26 @@ func (f *Frame) getLocal(index int) *types.Value {
 	// Debug: log local variable access (disabled)
 	// fmt.Printf("DEBUG getLocal [%s]: index=%d, value=%v\n", f.fn.Name, index, val)
 
+	// Auto-dereference references when reading
+	if val.Type() == types.TypeReference {
+		return val.GetReferenceTarget()
+	}
+
 	return val
 }
 
+// getLocalRaw retrieves a local variable by index without dereferencing
+// Used internally when we need to check if a slot contains a reference
+func (f *Frame) getLocalRaw(index int) *types.Value {
+	if index < 0 || index >= len(f.locals) {
+		return nil
+	}
+	return f.locals[index]
+}
+
 // setLocal sets a local variable by index
+// If the current value at this slot is a reference, updates the reference target instead
 func (f *Frame) setLocal(index int, value *types.Value) {
-	// fmt.Printf("DEBUG setLocal [%s]: index=%d, value=%v\n", f.fn.Name, index, value)
 	// Expand locals if needed
 	if index >= len(f.locals) {
 		newSize := index + 1
@@ -101,6 +126,14 @@ func (f *Frame) setLocal(index int, value *types.Value) {
 		newLocals := make([]*types.Value, newSize)
 		copy(newLocals, f.locals)
 		f.locals = newLocals
+	}
+
+	// Check if the current value is a reference - if so, update the reference target
+	// This enables pass-by-reference semantics for function parameters
+	if f.locals[index] != nil && f.locals[index].Type() == types.TypeReference {
+		// Update the reference target
+		f.locals[index].SetReferenceTarget(value)
+		return
 	}
 
 	f.locals[index] = value
@@ -142,12 +175,27 @@ func (f *Frame) popTemp(index int) *types.Value {
 // ============================================================================
 
 // setParam sets a parameter value
+// This stores the value directly without checking for reference semantics
+// since we want references to be stored as-is for by-reference parameters
 func (f *Frame) setParam(index int, value *types.Value) {
 	if index < 0 || index >= f.fn.NumParams {
 		return
 	}
 
-	f.setLocal(index, value)
+	// Expand locals if needed
+	if index >= len(f.locals) {
+		newSize := index + 1
+		if newSize < len(f.locals)*2 {
+			newSize = len(f.locals) * 2
+		}
+		newLocals := make([]*types.Value, newSize)
+		copy(newLocals, f.locals)
+		f.locals = newLocals
+	}
+
+	// Store the value directly - for references, this stores the Reference object
+	// so later assignments to this param will go through the reference
+	f.locals[index] = value
 }
 
 // getParam gets a parameter value

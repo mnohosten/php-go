@@ -2,11 +2,22 @@ package varfuncs
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"sort"
 	"strings"
 
 	"github.com/krizos/php-go/pkg/types"
 )
+
+// outputWriter is the global output writer for debugging functions
+// Defaults to os.Stdout but can be set by the VM for output capturing
+var outputWriter io.Writer = os.Stdout
+
+// SetOutputWriter sets the global output writer for debugging functions
+func SetOutputWriter(w io.Writer) {
+	outputWriter = w
+}
 
 // ============================================================================
 // Variable Dumping Functions
@@ -27,28 +38,28 @@ func dumpValue(val *types.Value, indent int, visited map[interface{}]bool) {
 
 	switch val.Type() {
 	case types.TypeNull:
-		fmt.Printf("%sNULL\n", prefix)
+		fmt.Fprintf(outputWriter, "%sNULL\n", prefix)
 
 	case types.TypeBool:
 		if val.ToBool() {
-			fmt.Printf("%sbool(true)\n", prefix)
+			fmt.Fprintf(outputWriter, "%sbool(true)\n", prefix)
 		} else {
-			fmt.Printf("%sbool(false)\n", prefix)
+			fmt.Fprintf(outputWriter, "%sbool(false)\n", prefix)
 		}
 
 	case types.TypeInt:
-		fmt.Printf("%sint(%d)\n", prefix, val.ToInt())
+		fmt.Fprintf(outputWriter, "%sint(%d)\n", prefix, val.ToInt())
 
 	case types.TypeFloat:
-		fmt.Printf("%sfloat(%g)\n", prefix, val.ToFloat())
+		fmt.Fprintf(outputWriter, "%sfloat(%g)\n", prefix, val.ToFloat())
 
 	case types.TypeString:
 		str := val.ToString()
-		fmt.Printf("%sstring(%d) \"%s\"\n", prefix, len(str), str)
+		fmt.Fprintf(outputWriter, "%sstring(%d) \"%s\"\n", prefix, len(str), str)
 
 	case types.TypeArray:
 		arr := val.ToArray()
-		fmt.Printf("%sarray(%d) {\n", prefix, arr.Len())
+		fmt.Fprintf(outputWriter, "%sarray(%d) {\n", prefix, arr.Len())
 
 		// Collect and sort keys for consistent output
 		var keys []*types.Value
@@ -62,9 +73,9 @@ func dumpValue(val *types.Value, indent int, visited map[interface{}]bool) {
 		arr.Each(func(key, value *types.Value) bool {
 			// Print key
 			if key.Type() == types.TypeInt {
-				fmt.Printf("%s  [%d]=>\n", prefix, key.ToInt())
+				fmt.Fprintf(outputWriter, "%s  [%d]=>\n", prefix, key.ToInt())
 			} else {
-				fmt.Printf("%s  [\"%s\"]=>\n", prefix, key.ToString())
+				fmt.Fprintf(outputWriter, "%s  [\"%s\"]=>\n", prefix, key.ToString())
 			}
 
 			// Check for circular reference
@@ -72,7 +83,7 @@ func dumpValue(val *types.Value, indent int, visited map[interface{}]bool) {
 				// Use pointer as identifier for visited tracking
 				ptr := fmt.Sprintf("%p", value)
 				if visited[ptr] {
-					fmt.Printf("%s    *RECURSION*\n", prefix)
+					fmt.Fprintf(outputWriter, "%s    *RECURSION*\n", prefix)
 					return true
 				}
 				visited[ptr] = true
@@ -85,7 +96,7 @@ func dumpValue(val *types.Value, indent int, visited map[interface{}]bool) {
 			return true
 		})
 
-		fmt.Printf("%s}\n", prefix)
+		fmt.Fprintf(outputWriter, "%s}\n", prefix)
 
 	case types.TypeObject:
 		obj := val.ToObject()
@@ -94,37 +105,44 @@ func dumpValue(val *types.Value, indent int, visited map[interface{}]bool) {
 		// Check for circular reference
 		ptr := fmt.Sprintf("%p", obj)
 		if visited[ptr] {
-			fmt.Printf("%sobject(%s)#%d *RECURSION*\n", prefix, className, obj.ObjectID)
+			fmt.Fprintf(outputWriter, "%sobject(%s)#%d *RECURSION*\n", prefix, className, obj.ObjectID)
 			return
 		}
 		visited[ptr] = true
 
 		// Get property count
 		propCount := len(obj.ClassEntry.Properties)
-		fmt.Printf("%sobject(%s)#%d (%d) {\n", prefix, className, obj.ObjectID, propCount)
+		fmt.Fprintf(outputWriter, "%sobject(%s)#%d (%d) {\n", prefix, className, obj.ObjectID, propCount)
 
-		// Dump properties
+		// Dump properties - access directly from instance to bypass visibility checks
 		for name, propDef := range obj.ClassEntry.Properties {
 			visibility := propDef.Visibility.String()
 
-			// Get property value (no access context needed for var_dump)
-			value, _ := obj.GetProperty(name, nil)
-			fmt.Printf("%s  [\"%s\":%s]=>\n", prefix, name, visibility)
+			// Get property value directly from instance (var_dump shows all properties)
+			var value *types.Value
+			if prop, exists := obj.Properties[name]; exists && prop.Value != nil {
+				value = prop.Value
+			} else if propDef.HasDefault {
+				value = propDef.Default
+			} else {
+				value = types.NewNull()
+			}
+			fmt.Fprintf(outputWriter, "%s  [\"%s\":%s]=>\n", prefix, name, visibility)
 			dumpValue(value, indent+1, visited)
 		}
 
-		fmt.Printf("%s}\n", prefix)
+		fmt.Fprintf(outputWriter, "%s}\n", prefix)
 
 	case types.TypeResource:
 		res := val.ToResource()
 		if res.IsValid() {
-			fmt.Printf("%sresource(%d) of type (%s)\n", prefix, res.ID(), res.Type())
+			fmt.Fprintf(outputWriter, "%sresource(%d) of type (%s)\n", prefix, res.ID(), res.Type())
 		} else {
-			fmt.Printf("%sresource(%d) of type (%s) (closed)\n", prefix, res.ID(), res.Type())
+			fmt.Fprintf(outputWriter, "%sresource(%d) of type (%s) (closed)\n", prefix, res.ID(), res.Type())
 		}
 
 	default:
-		fmt.Printf("%sunknown type\n", prefix)
+		fmt.Fprintf(outputWriter, "%sunknown type\n", prefix)
 	}
 }
 
@@ -144,7 +162,7 @@ func PrintR(val *types.Value, returnOutput ...*types.Value) *types.Value {
 		return types.NewString(result)
 	}
 
-	fmt.Print(result)
+	fmt.Fprint(outputWriter, result)
 	return types.NewBool(true)
 }
 
@@ -222,9 +240,16 @@ func printValue(out *strings.Builder, val *types.Value, indent int, visited map[
 		out.WriteString(fmt.Sprintf("%s Object\n", className))
 		out.WriteString(prefix + "(\n")
 
-		// Print properties
-		for name, _ := range obj.ClassEntry.Properties {
-			value, _ := obj.GetProperty(name, nil)
+		// Print properties - access directly from instance to bypass visibility checks
+		for name, propDef := range obj.ClassEntry.Properties {
+			var value *types.Value
+			if prop, exists := obj.Properties[name]; exists && prop.Value != nil {
+				value = prop.Value
+			} else if propDef.HasDefault {
+				value = propDef.Default
+			} else {
+				value = types.NewNull()
+			}
 			out.WriteString(fmt.Sprintf("%s    [%s] => ", prefix, name))
 
 			if value.Type() == types.TypeArray || value.Type() == types.TypeObject {
@@ -372,8 +397,16 @@ func exportValue(out *strings.Builder, val *types.Value, indent int, visited map
 
 		out.WriteString(fmt.Sprintf("%s::__set_state(array(\n", className))
 
-		for name, _ := range obj.ClassEntry.Properties {
-			value, _ := obj.GetProperty(name, nil)
+		// Access properties directly from instance to bypass visibility checks
+		for name, propDef := range obj.ClassEntry.Properties {
+			var value *types.Value
+			if prop, exists := obj.Properties[name]; exists && prop.Value != nil {
+				value = prop.Value
+			} else if propDef.HasDefault {
+				value = propDef.Default
+			} else {
+				value = types.NewNull()
+			}
 			out.WriteString(fmt.Sprintf("%s  '%s' => ", prefix, name))
 			exportValue(out, value, indent+1, visited)
 			out.WriteString(",\n")
@@ -582,5 +615,265 @@ func GetType(val *types.Value) *types.Value {
 		return types.NewString("resource")
 	default:
 		return types.NewString("unknown type")
+	}
+}
+
+// ============================================================================
+// Function/Class Existence Checks
+// ============================================================================
+
+// Note: These functions require VM context to check defined functions/classes.
+// The actual implementation will be in builtins.go with access to VM state.
+
+// FunctionExistsStub is a placeholder - real implementation needs VM context
+// function_exists(string $function_name): bool
+func FunctionExistsStub(funcName *types.Value) *types.Value {
+	// This is a stub - the real implementation is in builtins.go
+	// which has access to the VM's function registry
+	return types.NewBool(false)
+}
+
+// ClassExistsStub is a placeholder - real implementation needs VM context
+// class_exists(string $class, bool $autoload = true): bool
+func ClassExistsStub(className *types.Value, args ...*types.Value) *types.Value {
+	// This is a stub - the real implementation is in builtins.go
+	// which has access to the VM's class registry
+	return types.NewBool(false)
+}
+
+// MethodExistsStub is a placeholder - real implementation needs VM context
+// method_exists(object|string $object_or_class, string $method): bool
+func MethodExistsStub(objectOrClass *types.Value, method *types.Value) *types.Value {
+	// Check if the first argument is an object
+	if objectOrClass.Type() == types.TypeObject {
+		obj := objectOrClass.ToObject()
+		methodName := method.ToString()
+		_, exists := obj.ClassEntry.Methods[methodName]
+		return types.NewBool(exists)
+	}
+	// For string class names, we need VM context
+	return types.NewBool(false)
+}
+
+// ============================================================================
+// Serialization Functions
+// ============================================================================
+
+// Serialize generates a storable representation of a value
+// serialize(mixed $value): string
+func Serialize(value *types.Value) *types.Value {
+	// PHP serialize format implementation
+	return types.NewString(serializeValue(value))
+}
+
+// serializeValue recursively serializes a PHP value
+func serializeValue(value *types.Value) string {
+	switch value.Type() {
+	case types.TypeNull:
+		return "N;"
+	case types.TypeBool:
+		if value.ToBool() {
+			return "b:1;"
+		}
+		return "b:0;"
+	case types.TypeInt:
+		return fmt.Sprintf("i:%d;", value.ToInt())
+	case types.TypeFloat:
+		return fmt.Sprintf("d:%v;", value.ToFloat())
+	case types.TypeString:
+		s := value.ToString()
+		return fmt.Sprintf("s:%d:\"%s\";", len(s), s)
+	case types.TypeArray:
+		arr := value.ToArray()
+		var result strings.Builder
+		result.WriteString(fmt.Sprintf("a:%d:{", arr.Len()))
+		arr.Each(func(key, val *types.Value) bool {
+			result.WriteString(serializeValue(key))
+			result.WriteString(serializeValue(val))
+			return true
+		})
+		result.WriteString("}")
+		return result.String()
+	case types.TypeObject:
+		obj := value.ToObject()
+		className := obj.ClassName
+		var result strings.Builder
+		propCount := len(obj.Properties)
+		result.WriteString(fmt.Sprintf("O:%d:\"%s\":%d:{", len(className), className, propCount))
+		for name, prop := range obj.Properties {
+			// Serialize property name
+			result.WriteString(fmt.Sprintf("s:%d:\"%s\";", len(name), name))
+			// Serialize property value
+			result.WriteString(serializeValue(prop.Value))
+		}
+		result.WriteString("}")
+		return result.String()
+	default:
+		return "N;"
+	}
+}
+
+// Unserialize creates a PHP value from a stored representation
+// unserialize(string $data, array $options = []): mixed
+func Unserialize(data *types.Value, args ...*types.Value) *types.Value {
+	str := data.ToString()
+	if str == "" {
+		return types.NewBool(false)
+	}
+
+	result, _, err := unserializeValue(str, 0)
+	if err != nil {
+		return types.NewBool(false)
+	}
+	return result
+}
+
+// unserializeValue recursively unserializes a PHP value
+// Returns the value, the new position, and any error
+func unserializeValue(data string, pos int) (*types.Value, int, error) {
+	if pos >= len(data) {
+		return nil, pos, fmt.Errorf("unexpected end of data")
+	}
+
+	switch data[pos] {
+	case 'N': // Null
+		// Expect "N;"
+		if pos+1 < len(data) && data[pos+1] == ';' {
+			return types.NewNull(), pos + 2, nil
+		}
+		return nil, pos, fmt.Errorf("invalid null format")
+
+	case 'b': // Boolean
+		// Expect "b:0;" or "b:1;"
+		if pos+3 < len(data) && data[pos+1] == ':' && data[pos+3] == ';' {
+			if data[pos+2] == '1' {
+				return types.NewBool(true), pos + 4, nil
+			}
+			return types.NewBool(false), pos + 4, nil
+		}
+		return nil, pos, fmt.Errorf("invalid boolean format")
+
+	case 'i': // Integer
+		// Expect "i:NUMBER;"
+		if pos+2 < len(data) && data[pos+1] == ':' {
+			endPos := pos + 2
+			for endPos < len(data) && data[endPos] != ';' {
+				endPos++
+			}
+			if endPos >= len(data) {
+				return nil, pos, fmt.Errorf("invalid integer format")
+			}
+			numStr := data[pos+2 : endPos]
+			var num int64
+			fmt.Sscanf(numStr, "%d", &num)
+			return types.NewInt(num), endPos + 1, nil
+		}
+		return nil, pos, fmt.Errorf("invalid integer format")
+
+	case 'd': // Float/Double
+		// Expect "d:NUMBER;"
+		if pos+2 < len(data) && data[pos+1] == ':' {
+			endPos := pos + 2
+			for endPos < len(data) && data[endPos] != ';' {
+				endPos++
+			}
+			if endPos >= len(data) {
+				return nil, pos, fmt.Errorf("invalid float format")
+			}
+			numStr := data[pos+2 : endPos]
+			var num float64
+			fmt.Sscanf(numStr, "%f", &num)
+			return types.NewFloat(num), endPos + 1, nil
+		}
+		return nil, pos, fmt.Errorf("invalid float format")
+
+	case 's': // String
+		// Expect "s:LENGTH:"STRING";"
+		if pos+2 < len(data) && data[pos+1] == ':' {
+			colonPos := pos + 2
+			for colonPos < len(data) && data[colonPos] != ':' {
+				colonPos++
+			}
+			if colonPos >= len(data) {
+				return nil, pos, fmt.Errorf("invalid string format")
+			}
+			lengthStr := data[pos+2 : colonPos]
+			var length int
+			fmt.Sscanf(lengthStr, "%d", &length)
+
+			// Expect opening quote
+			if colonPos+1 >= len(data) || data[colonPos+1] != '"' {
+				return nil, pos, fmt.Errorf("invalid string format: missing opening quote")
+			}
+
+			stringStart := colonPos + 2
+			stringEnd := stringStart + length
+
+			if stringEnd > len(data) {
+				return nil, pos, fmt.Errorf("invalid string format: string too short")
+			}
+
+			str := data[stringStart:stringEnd]
+
+			// Expect closing quote and semicolon
+			if stringEnd+1 >= len(data) || data[stringEnd] != '"' || data[stringEnd+1] != ';' {
+				return nil, pos, fmt.Errorf("invalid string format: missing closing")
+			}
+
+			return types.NewString(str), stringEnd + 2, nil
+		}
+		return nil, pos, fmt.Errorf("invalid string format")
+
+	case 'a': // Array
+		// Expect "a:SIZE:{...}"
+		if pos+2 < len(data) && data[pos+1] == ':' {
+			colonPos := pos + 2
+			for colonPos < len(data) && data[colonPos] != ':' {
+				colonPos++
+			}
+			if colonPos >= len(data) {
+				return nil, pos, fmt.Errorf("invalid array format")
+			}
+			sizeStr := data[pos+2 : colonPos]
+			var size int
+			fmt.Sscanf(sizeStr, "%d", &size)
+
+			// Expect opening brace
+			if colonPos+1 >= len(data) || data[colonPos+1] != '{' {
+				return nil, pos, fmt.Errorf("invalid array format: missing opening brace")
+			}
+
+			arr := types.NewEmptyArray()
+			currentPos := colonPos + 2
+
+			for i := 0; i < size; i++ {
+				// Unserialize key
+				key, newPos, err := unserializeValue(data, currentPos)
+				if err != nil {
+					return nil, pos, err
+				}
+				currentPos = newPos
+
+				// Unserialize value
+				val, newPos, err := unserializeValue(data, currentPos)
+				if err != nil {
+					return nil, pos, err
+				}
+				currentPos = newPos
+
+				arr.Set(key, val)
+			}
+
+			// Expect closing brace
+			if currentPos >= len(data) || data[currentPos] != '}' {
+				return nil, pos, fmt.Errorf("invalid array format: missing closing brace")
+			}
+
+			return types.NewArray(arr), currentPos + 1, nil
+		}
+		return nil, pos, fmt.Errorf("invalid array format")
+
+	default:
+		return nil, pos, fmt.Errorf("unknown type: %c", data[pos])
 	}
 }

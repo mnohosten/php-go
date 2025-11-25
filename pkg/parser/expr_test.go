@@ -1104,3 +1104,62 @@ func TestCloneExpression(t *testing.T) {
 		})
 	}
 }
+
+// Test array spread operator parsing
+func TestParseArraySpreadOperator(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{
+			"<?php [...$arr];",
+			"[...$arr]",
+		},
+		{
+			"<?php [1, ...$arr, 2];",
+			"[1, ...$arr, 2]",
+		},
+		{
+			"<?php [...$a, ...$b];",
+			"[...$a, ...$b]",
+		},
+		{
+			"<?php ['key' => 'value', ...$arr];",
+			"[key => value, ...$arr]",
+		},
+	}
+
+	for _, tt := range tests {
+		l := lexer.New(tt.input, "test.php")
+		p := New(l)
+		program := p.ParseProgram()
+		checkParserErrors(t, p)
+
+		if len(program.Statements) != 1 {
+			t.Fatalf("Expected 1 statement, got %d", len(program.Statements))
+		}
+
+		stmt, ok := program.Statements[0].(*ast.ExpressionStatement)
+		if !ok {
+			t.Fatalf("Expected ExpressionStatement, got %T", program.Statements[0])
+		}
+
+		arrExpr, ok := stmt.Expression.(*ast.ArrayExpression)
+		if !ok {
+			t.Fatalf("Expected ArrayExpression, got %T", stmt.Expression)
+		}
+
+		// Check that at least one element has Spread = true
+		hasSpread := false
+		for _, elem := range arrExpr.Elements {
+			if elem.Spread {
+				hasSpread = true
+				break
+			}
+		}
+
+		if !hasSpread {
+			t.Errorf("Expected array to have at least one spread element")
+		}
+	}
+}

@@ -234,8 +234,9 @@ type ArrayExpression struct {
 }
 
 type ArrayElement struct {
-	Key   Expr // nil for non-associative elements
-	Value Expr
+	Key    Expr // nil for non-associative elements
+	Value  Expr
+	Spread bool // true for spread elements (...$array)
 }
 
 func (ae *ArrayExpression) expressionNode()      {}
@@ -389,6 +390,23 @@ func (ne *NewExpression) String() string {
 	return "new " + ne.Class.String() + "(...)"
 }
 
+// AnonymousClassExpression represents an anonymous class definition
+// Example: new class($args) extends Base implements Iface { ... }
+type AnonymousClassExpression struct {
+	Token           lexer.Token       // The CLASS token
+	ConstructorArgs []*Argument       // Constructor arguments passed to new class($args)
+	Extends         *Identifier       // Parent class (can be nil)
+	Implements      []*Identifier     // Implemented interfaces
+	Body            []Stmt            // Class body (properties, methods, etc.)
+	Attributes      []*AttributeGroup // PHP 8.0+ attributes
+}
+
+func (ace *AnonymousClassExpression) expressionNode()      {}
+func (ace *AnonymousClassExpression) TokenLiteral() string { return ace.Token.Literal }
+func (ace *AnonymousClassExpression) String() string {
+	return "new class { ... }"
+}
+
 // CloneExpression represents object cloning clone $obj
 type CloneExpression struct {
 	Token  lexer.Token // The CLONE token
@@ -477,6 +495,30 @@ func (fcce *FirstClassCallableExpression) expressionNode()      {}
 func (fcce *FirstClassCallableExpression) TokenLiteral() string { return fcce.Token.Literal }
 func (fcce *FirstClassCallableExpression) String() string {
 	return fcce.Callable.String() + "(...)"
+}
+
+// YieldExpression represents a yield expression in a generator (PHP 5.5+)
+// Examples:
+//   yield $value;              // Yield value with auto-incremented key
+//   yield $key => $value;      // Yield value with explicit key
+//   $x = yield;                // Yield without value (yields null)
+//   $x = yield $value;         // Yield value and receive sent value
+type YieldExpression struct {
+	Token lexer.Token // The YIELD token
+	Key   Expr        // Optional key (for associative arrays)
+	Value Expr        // Optional value (nil means yield null)
+}
+
+func (ye *YieldExpression) expressionNode()      {}
+func (ye *YieldExpression) TokenLiteral() string { return ye.Token.Literal }
+func (ye *YieldExpression) String() string {
+	if ye.Key != nil {
+		return "yield " + ye.Key.String() + " => " + ye.Value.String()
+	}
+	if ye.Value != nil {
+		return "yield " + ye.Value.String()
+	}
+	return "yield"
 }
 
 // CastExpression represents type casting (int)$var
@@ -869,6 +911,18 @@ type ThrowStatement struct {
 func (ts *ThrowStatement) statementNode()       {}
 func (ts *ThrowStatement) TokenLiteral() string { return ts.Token.Literal }
 func (ts *ThrowStatement) String() string {
+	return "throw ..."
+}
+
+// ThrowExpression represents throw expression (PHP 8.0+)
+type ThrowExpression struct {
+	Token      lexer.Token // The THROW token
+	Expression Expr
+}
+
+func (te *ThrowExpression) expressionNode()      {}
+func (te *ThrowExpression) TokenLiteral() string { return te.Token.Literal }
+func (te *ThrowExpression) String() string {
 	return "throw ..."
 }
 

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/krizos/php-go/pkg/types"
 )
@@ -749,5 +750,212 @@ func TestCopy(t *testing.T) {
 
 	if string(data) != content {
 		t.Errorf("Copied file content = %v, want %v", string(data), content)
+	}
+}
+
+// ============================================================================
+// File Permission Tests
+// ============================================================================
+
+func TestFilePermissionConstants(t *testing.T) {
+	tests := []struct {
+		name     string
+		constant os.FileMode
+		expected os.FileMode
+	}{
+		{"FilePermissionPrivate", FilePermissionPrivate, 0600},
+		{"FilePermissionPublic", FilePermissionPublic, 0644},
+		{"DirPermissionPrivate", DirPermissionPrivate, 0700},
+		{"DirPermissionPublic", DirPermissionPublic, 0755},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.constant != tt.expected {
+				t.Errorf("Expected %o, got %o", tt.expected, tt.constant)
+			}
+		})
+	}
+}
+
+// ============================================================================
+// Integer Overflow Protection Tests (Phase 2)
+// ============================================================================
+
+func TestFreadIntegerOverflowProtection(t *testing.T) {
+	tmpfile, err := os.CreateTemp("", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpfile.Name())
+
+	content := "test content"
+	tmpfile.WriteString(content)
+	tmpfile.Close()
+
+	fp := Fopen(types.NewString(tmpfile.Name()), types.NewString("r"))
+	defer Fclose(fp)
+
+	// Normal read should work
+	result := Fread(fp, types.NewInt(int64(len(content))))
+	if result.Type() != types.TypeString {
+		t.Error("Expected normal read to succeed")
+	}
+}
+
+func TestFwriteIntegerOverflowProtection(t *testing.T) {
+	tmpfile, err := os.CreateTemp("", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpfile.Name())
+	tmpfile.Close()
+
+	fp := Fopen(types.NewString(tmpfile.Name()), types.NewString("w"))
+	defer Fclose(fp)
+
+	// Normal write should work
+	content := "test content"
+	result := Fwrite(fp, types.NewString(content), types.NewInt(5))
+	if result.ToInt() != 5 {
+		t.Error("Expected normal write to succeed")
+	}
+}
+
+// ============================================================================
+// Filemtime, Touch, Chmod Tests
+// ============================================================================
+
+func TestFilemtime(t *testing.T) {
+	// Create a temporary file
+	tmpfile, err := os.CreateTemp("", "test_filemtime")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpfile.Name())
+	tmpfile.Close()
+
+	// Get modification time
+	result := Filemtime(types.NewString(tmpfile.Name()))
+	if result.Type() != types.TypeInt {
+		t.Errorf("Expected int type, got %v", result.Type())
+	}
+
+	// Modification time should be recent (within last minute)
+	mtime := result.ToInt()
+	now := time.Now().Unix()
+	if now-mtime > 60 {
+		t.Errorf("Expected recent modification time, got %d (now: %d)", mtime, now)
+	}
+}
+
+func TestFilemtimeNonExistent(t *testing.T) {
+	result := Filemtime(types.NewString("/nonexistent/file"))
+	if result.Type() != types.TypeBool || result.ToBool() != false {
+		t.Error("Expected false for nonexistent file")
+	}
+}
+
+func TestTouch(t *testing.T) {
+	// Create a temporary directory
+	tmpdir, err := os.MkdirTemp("", "test_touch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpdir)
+
+	// Touch creates a new file if it doesn't exist
+	newFile := tmpdir + "/newfile.txt"
+	result := Touch(types.NewString(newFile))
+	if !result.ToBool() {
+		t.Error("Expected touch to succeed for new file")
+	}
+
+	// File should exist now
+	if _, err := os.Stat(newFile); os.IsNotExist(err) {
+		t.Error("Expected file to be created by touch")
+	}
+}
+
+func TestTouchExistingFile(t *testing.T) {
+	// Create a temporary file
+	tmpfile, err := os.CreateTemp("", "test_touch_existing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpfile.Name())
+	tmpfile.Close()
+
+	// Get original mtime
+	info1, _ := os.Stat(tmpfile.Name())
+	origMtime := info1.ModTime()
+
+	// Wait a bit and touch
+	time.Sleep(10 * time.Millisecond)
+
+	result := Touch(types.NewString(tmpfile.Name()))
+	if !result.ToBool() {
+		t.Error("Expected touch to succeed for existing file")
+	}
+
+	// mtime should be updated
+	info2, _ := os.Stat(tmpfile.Name())
+	newMtime := info2.ModTime()
+
+	if !newMtime.After(origMtime) && !newMtime.Equal(origMtime) {
+		t.Error("Expected modification time to be updated")
+	}
+}
+
+func TestTouchWithMtime(t *testing.T) {
+	// Create a temporary file
+	tmpfile, err := os.CreateTemp("", "test_touch_mtime")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpfile.Name())
+	tmpfile.Close()
+
+	// Set a specific mtime (1 day ago)
+	specificTime := time.Now().Add(-24 * time.Hour).Unix()
+	result := Touch(types.NewString(tmpfile.Name()), types.NewInt(specificTime))
+	if !result.ToBool() {
+		t.Error("Expected touch with mtime to succeed")
+	}
+
+	// Verify mtime was set
+	info, _ := os.Stat(tmpfile.Name())
+	if info.ModTime().Unix() != specificTime {
+		t.Errorf("Expected mtime %d, got %d", specificTime, info.ModTime().Unix())
+	}
+}
+
+func TestChmod(t *testing.T) {
+	// Create a temporary file
+	tmpfile, err := os.CreateTemp("", "test_chmod")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpfile.Name())
+	tmpfile.Close()
+
+	// Change permissions to 0600
+	result := Chmod(types.NewString(tmpfile.Name()), types.NewInt(0600))
+	if !result.ToBool() {
+		t.Error("Expected chmod to succeed")
+	}
+
+	// Verify permissions
+	info, _ := os.Stat(tmpfile.Name())
+	perm := info.Mode().Perm()
+	if perm != 0600 {
+		t.Errorf("Expected permissions 0600, got %o", perm)
+	}
+}
+
+func TestChmodNonExistent(t *testing.T) {
+	result := Chmod(types.NewString("/nonexistent/file"), types.NewInt(0644))
+	if result.Type() != types.TypeBool || result.ToBool() != false {
+		t.Error("Expected false for nonexistent file")
 	}
 }

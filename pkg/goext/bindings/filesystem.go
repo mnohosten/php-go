@@ -152,7 +152,9 @@ func (e *FilesystemExtension) fileCopy(v *vm.VM, args []*types.Value) (*types.Va
 	}
 	defer sourceFile.Close()
 
-	destFile, err := os.Create(dst)
+	// Create destination file with explicit permissions (0644)
+	// Owner: read/write, Group/Others: read
+	destFile, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
 		return types.NewBool(false), nil
 	}

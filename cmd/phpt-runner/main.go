@@ -183,9 +183,10 @@ func main() {
 
 	// Generate report
 	fmt.Printf("\n")
-	fmt.Printf(strings.Repeat("=", 80) + "\n")
+	fmt.Println(strings.Repeat("=", 80))
 	fmt.Printf("Test Results\n")
-	fmt.Printf(strings.Repeat("=", 80) + "\n\n")
+	fmt.Println(strings.Repeat("=", 80))
+	fmt.Printf("\n")
 
 	total := len(results)
 	passRate := 0.0

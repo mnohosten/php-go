@@ -6,6 +6,48 @@ import (
 	"github.com/krizos/php-go/pkg/types"
 )
 
+// builtinExceptionClasses lists classes that have native constructors
+var builtinExceptionClasses = map[string]bool{
+	"Exception":                true,
+	"Error":                    true,
+	"RuntimeException":         true,
+	"LogicException":           true,
+	"InvalidArgumentException": true,
+	"OutOfBoundsException":     true,
+	"TypeError":                true,
+	"ArgumentCountError":       true,
+}
+
+// isBuiltinExceptionClass checks if a class name is a built-in exception class
+func isBuiltinExceptionClass(name string) bool {
+	return builtinExceptionClasses[name]
+}
+
+// handleBuiltinExceptionConstructor handles constructors for built-in exception classes
+// Exception::__construct(string $message = "", int $code = 0, ?Throwable $previous = null)
+func handleBuiltinExceptionConstructor(obj *types.Object, args []*types.Value) {
+	// Set message (first parameter, default "")
+	message := ""
+	if len(args) > 0 && args[0] != nil {
+		message = args[0].ToString()
+	}
+	obj.SetPropertyDirect("message", types.NewString(message))
+
+	// Set code (second parameter, default 0)
+	code := int64(0)
+	if len(args) > 1 && args[1] != nil {
+		code = args[1].ToInt()
+	}
+	obj.SetPropertyDirect("code", types.NewInt(code))
+
+	// Set previous (third parameter, default null)
+	previous := types.NewNull()
+	if len(args) > 2 && args[2] != nil {
+		previous = args[2]
+	}
+	obj.SetPropertyDirect("previous", previous)
+}
+
 // ============================================================================
 // Object Property Opcode Handlers
 // ============================================================================
@@ -35,9 +77,7 @@ func (vm *VM) opFetchObjR(frame *Frame, instr Instruction) error {
 	propNameStr := propName.ToString()
 
 	// Get current class context for visibility checking
-	// For now, assume public access (nil context)
-	// TODO: Track current class context in frame
-	var accessContext *types.ClassEntry = nil
+	accessContext := frame.currentClass
 
 	// Get property value
 	value, exists := obj.GetProperty(propNameStr, accessContext)
@@ -354,7 +394,11 @@ func (vm *VM) opUnsetObj(frame *Frame, instr Instruction) error {
 
 // opIssetIsemptyPropObj handles isset/empty check on object property
 // OpIssetIsemptyPropObj - Check isset/empty on object property
+// ExtendedValue: 0 = isset mode, 1 = empty mode
 func (vm *VM) opIssetIsemptyPropObj(frame *Frame, instr Instruction) error {
+	// Get mode from ExtendedValue: 0 = isset, 1 = empty
+	mode := instr.ExtendedValue
+
 	// Get the object
 	objVal, err := vm.getOperandValue(frame, instr.Op1)
 	if err != nil {
@@ -362,8 +406,9 @@ func (vm *VM) opIssetIsemptyPropObj(frame *Frame, instr Instruction) error {
 	}
 
 	if objVal.Type() != types.TypeObject {
-		// Non-object is considered not set
-		return vm.setOperandValue(frame, instr.Result, types.NewBool(false))
+		// Non-object: isset returns false, empty returns true
+		result := mode != 0
+		return vm.setOperandValue(frame, instr.Result, types.NewBool(result))
 	}
 
 	obj := objVal.ToObject()
@@ -389,11 +434,17 @@ func (vm *VM) opIssetIsemptyPropObj(frame *Frame, instr Instruction) error {
 	value, exists := obj.GetProperty(propNameStr, accessContext)
 
 	var result bool
-	// For isset: check if exists and not null
-	// For empty: check if exists and is "empty" (falsy)
-	// TODO: Determine from instruction if this is isset or empty check
-	// For now, implement isset semantics
-	result = exists && !value.IsNull()
+	if mode == 0 {
+		// isset mode: returns true if property exists and value is not null
+		result = exists && !value.IsNull()
+	} else {
+		// empty mode: returns true if property doesn't exist OR value is falsy/null
+		if !exists {
+			result = true
+		} else {
+			result = value.IsFalse() || value.IsNull() || value.IsUndef()
+		}
+	}
 
 	return vm.setOperandValue(frame, instr.Result, types.NewBool(result))
 }
@@ -600,7 +651,7 @@ func (vm *VM) opInitMethodCall(frame *Frame, instr Instruction) error {
 	}
 
 	if objVal.Type() != types.TypeObject {
-		return fmt.Errorf("INIT_METHOD_CALL: not an object")
+		return fmt.Errorf("INIT_METHOD_CALL: not an object, got %v", objVal.Type())
 	}
 
 	obj := objVal.ToObject()
@@ -621,20 +672,44 @@ func (vm *VM) opInitMethodCall(frame *Frame, instr Instruction) error {
 	// Look up the method in the class hierarchy
 	method, exists := obj.ClassEntry.GetMethod(methodNameStr)
 	if !exists {
-		// Check for __call magic method
-		if magicCall, hasMagic := obj.ClassEntry.MagicMethods["__call"]; hasMagic {
-			// TODO: Set up __call($method, $args) invocation
-			_ = magicCall
-			return fmt.Errorf("INIT_METHOD_CALL: method '%s' not found (magic method __call not yet implemented)", methodNameStr)
+		// Special case: __construct is optional - if it doesn't exist, skip silently
+		if methodNameStr == "__construct" {
+			// Check for built-in exception class constructors
+			if isBuiltinExceptionClass(obj.ClassEntry.Name) {
+				// Mark this as a native constructor - will be handled in DO_FCALL
+				frame.pendingNativeConstructor = obj.ClassEntry.Name
+				frame.pendingObject = obj
+				return nil
+			}
+			// No constructor - this is OK
+			// Create a dummy empty method so DO_FCALL has something to call
+			// This dummy method will just return immediately
+			method = &types.MethodDef{
+				Name:        "__construct",
+				NumParams:   0,
+				NumLocals:   0,
+				Instructions: []interface{}{}, // Empty - will just return
+			}
+			// Continue to set up the call with the dummy method
+		} else {
+			// Check for __call magic method
+			if magicCall, hasMagic := obj.ClassEntry.MagicMethods["__call"]; hasMagic {
+				// TODO: Set up __call($method, $args) invocation
+				_ = magicCall
+				return fmt.Errorf("INIT_METHOD_CALL: method '%s' not found (magic method __call not yet implemented)", methodNameStr)
+			}
+			return fmt.Errorf("INIT_METHOD_CALL: method '%s' not found in class '%s'", methodNameStr, obj.ClassEntry.Name)
 		}
-		return fmt.Errorf("INIT_METHOD_CALL: method '%s' not found in class '%s'", methodNameStr, obj.ClassEntry.Name)
 	}
 
 	// Check if method is static (cannot call static method as instance method in strict mode)
 	// In PHP, you can call static methods on instances, but we'll allow it for now
 
-	// TODO: Check method visibility based on current context
-	// For now, we'll assume all methods are accessible
+	// Check method visibility based on current context
+	if !canAccessMethod(method, frame.currentClass, obj.ClassEntry) {
+		visibilityStr := method.Visibility.String()
+		return fmt.Errorf("INIT_METHOD_CALL: cannot access %s method '%s::%s'", visibilityStr, obj.ClassEntry.Name, methodNameStr)
+	}
 
 	// Store method information for OpDoFcall
 	// We'll use frame locals to pass this information
@@ -714,6 +789,12 @@ func (vm *VM) opInitStaticMethodCall(frame *Frame, instr Instruction) error {
 		// TODO: Add warning/notice system
 	}
 
+	// Check method visibility based on current context
+	if !canAccessMethod(method, frame.currentClass, classEntry) {
+		visibilityStr := method.Visibility.String()
+		return fmt.Errorf("INIT_STATIC_METHOD_CALL: cannot access %s method '%s::%s'", visibilityStr, classNameStr, methodNameStr)
+	}
+
 	// Store method information for OpDoFcall
 	frame.pendingMethod = method
 	frame.pendingObject = nil // No object for static calls
@@ -764,15 +845,63 @@ func (vm *VM) opClone(frame *Frame, instr Instruction) error {
 	newObjVal := types.NewObject(newObj)
 
 	// Check for __clone magic method
+	// Look in both MagicMethods and Methods map (compiler may put it in either)
 	if obj.ClassEntry != nil {
-		if magicClone, hasMagic := obj.ClassEntry.MagicMethods["__clone"]; hasMagic {
-			// TODO: Call __clone() on the new object
-			// The __clone method is called on the copy, not the original
-			_ = magicClone
+		var magicClone *types.MethodDef
+		if m, hasMagic := obj.ClassEntry.MagicMethods["__clone"]; hasMagic {
+			magicClone = m
+		} else if m, hasMethod := obj.ClassEntry.Methods["__clone"]; hasMethod && m.IsMagic {
+			magicClone = m
+		}
+		if magicClone != nil {
+			// Call __clone() on the new object (not the original)
+			// The __clone method takes no arguments and its return value is ignored
+			if err := vm.callMagicClone(newObj, magicClone); err != nil {
+				return err
+			}
 		}
 	}
 
 	return vm.setOperandValue(frame, instr.Result, newObjVal)
+}
+
+// callMagicClone calls the __clone() magic method on an object
+// The __clone method is called on the cloned object (not the original)
+// It takes no parameters and its return value is ignored
+func (vm *VM) callMagicClone(obj *types.Object, method *types.MethodDef) error {
+	// Convert MethodDef to CompiledFunction
+	fn := &CompiledFunction{
+		Name:         method.Name,
+		Instructions: convertInstructions(method.Instructions),
+		NumLocals:    method.NumLocals,
+		NumParams:    method.NumParams,
+	}
+
+	// Create new frame for the __clone method
+	newFrame := NewFrame(fn)
+
+	// Set $this to the cloned object
+	newFrame.thisObject = obj
+	if obj.ClassEntry != nil {
+		newFrame.currentClass = obj.ClassEntry
+		newFrame.calledClass = obj.ClassEntry
+	}
+
+	// Push the frame and execute
+	if err := vm.pushFrame(newFrame); err != nil {
+		return err
+	}
+
+	// Execute the __clone method
+	err := vm.runFrame(newFrame)
+	if err != nil {
+		return err
+	}
+
+	// Pop the completed frame (return value is ignored)
+	vm.popFrame()
+
+	return nil
 }
 
 // opInstanceof handles instanceof check: result = $obj instanceof Class
@@ -933,4 +1062,154 @@ func (vm *VM) opFetchThis(frame *Frame, instr Instruction) error {
 	}
 
 	return vm.setOperandValue(frame, instr.Result, types.NewObject(frame.thisObject))
+}
+
+// opDeclareClass handles class declaration/registration at runtime
+// OpDeclareClass - Register a class with the runtime
+func (vm *VM) opDeclareClass(frame *Frame, instr Instruction) error {
+	// Op1: ClassEntry constant index
+	// Op2: Class start position (constant) - unused for now
+	// Result: Class end position (constant) - unused for now
+
+	// The ClassEntry should be stored directly in constants
+	// Extract it by checking if it's a *types.ClassEntry
+	var classEntry *types.ClassEntry
+
+	// Constants are stored as interface{}, we need to type assert
+	// Get the actual constant value
+	if instr.Op1.Type == OpConst {
+		constIdx := instr.Op1.Value
+		if int(constIdx) < len(vm.constants) {
+			if ce, ok := vm.constants[constIdx].(*types.ClassEntry); ok {
+				classEntry = ce
+			} else {
+				return fmt.Errorf("DECLARE_CLASS: expected ClassEntry constant, got %T", vm.constants[constIdx])
+			}
+		} else {
+			return fmt.Errorf("DECLARE_CLASS: constant index out of range")
+		}
+	} else {
+		return fmt.Errorf("DECLARE_CLASS: Op1 must be a constant")
+	}
+
+	// Resolve parent class and perform inheritance
+	if classEntry.ParentClassName != "" {
+		parentClass, exists := vm.classes[classEntry.ParentClassName]
+		if !exists {
+			return fmt.Errorf("Class '%s' not found (parent of %s)", classEntry.ParentClassName, classEntry.Name)
+		}
+
+		// Perform inheritance (this checks for final class and final method violations)
+		if err := classEntry.InheritFrom(parentClass); err != nil {
+			return err
+		}
+	}
+
+	// Register the class in VM's class registry
+	vm.classes[classEntry.Name] = classEntry
+
+	return nil
+}
+
+// opFetchClassConstant fetches a class constant value
+// OpFetchClassConstant - Fetch class constant: Class::CONSTANT
+func (vm *VM) opFetchClassConstant(frame *Frame, instr Instruction) error {
+	// Op1: Class name (temp or string constant)
+	// Op2: Constant name (string constant)
+	// Result: Fetched value
+
+	// Get class name
+	classVal, err := vm.getOperandValue(frame, instr.Op1)
+	if err != nil {
+		return err
+	}
+	className := classVal.ToString()
+
+	// Get constant name from constant pool
+	if instr.Op2.Type != OpConst {
+		return fmt.Errorf("FETCH_CLASS_CONSTANT: Op2 must be a constant")
+	}
+	constName, ok := vm.constants[instr.Op2.Value].(string)
+	if !ok {
+		return fmt.Errorf("FETCH_CLASS_CONSTANT: expected string constant for constant name")
+	}
+
+	// Look up the class
+	classEntry, ok := vm.classes[className]
+	if !ok {
+		return fmt.Errorf("Class '%s' not found", className)
+	}
+
+	// Look up the constant
+	classConst, ok := classEntry.Constants[constName]
+	if !ok {
+		return fmt.Errorf("Undefined class constant %s::%s", className, constName)
+	}
+
+	// Check visibility
+	// For now, we'll check visibility based on current call context
+	accessContext := frame.currentClass
+	if classConst.Visibility == types.VisibilityPrivate {
+		if accessContext == nil || accessContext.Name != classEntry.Name {
+			return fmt.Errorf("Cannot access private constant %s::%s", className, constName)
+		}
+	} else if classConst.Visibility == types.VisibilityProtected {
+		if accessContext == nil {
+			return fmt.Errorf("Cannot access protected constant %s::%s", className, constName)
+		}
+		// Check if accessContext is same class or subclass
+		if accessContext != classEntry && !isSubclassOfClass(accessContext, classEntry) {
+			return fmt.Errorf("Cannot access protected constant %s::%s", className, constName)
+		}
+	}
+
+	// Store result in destination temp
+	return vm.setOperandValue(frame, instr.Result, classConst.Value)
+}
+
+// ============================================================================
+// Visibility Checking Helpers
+// ============================================================================
+
+// canAccessMethod checks if a method can be called from the given context
+func canAccessMethod(method *types.MethodDef, accessContext *types.ClassEntry, ownerClass *types.ClassEntry) bool {
+	switch method.Visibility {
+	case types.VisibilityPublic:
+		return true
+	case types.VisibilityProtected:
+		// Accessible from same class or subclasses
+		if accessContext == nil {
+			return false
+		}
+		return accessContext == ownerClass || isSubclassOfClass(accessContext, ownerClass)
+	case types.VisibilityPrivate:
+		// Only accessible from the declaring class
+		if accessContext == nil {
+			return false
+		}
+		// For private, we need to check the declaring class, not the owner
+		declaringClassName := method.DeclaringClass
+		if declaringClassName == "" {
+			declaringClassName = ownerClass.Name
+		}
+		return accessContext.Name == declaringClassName
+	default:
+		return false
+	}
+}
+
+// isSubclassOfClass checks if childClass is a subclass of parentClass
+func isSubclassOfClass(childClass, parentClass *types.ClassEntry) bool {
+	if childClass == nil || parentClass == nil {
+		return false
+	}
+
+	current := childClass.ParentClass
+	for current != nil {
+		if current == parentClass || current.Name == parentClass.Name {
+			return true
+		}
+		current = current.ParentClass
+	}
+	return false
 }

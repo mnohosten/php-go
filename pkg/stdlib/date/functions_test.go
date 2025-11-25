@@ -515,3 +515,170 @@ func TestIsLeapYear(t *testing.T) {
 		}
 	}
 }
+
+// ============================================================================
+// Integer Overflow Protection Tests (Phase 2)
+// ============================================================================
+
+func TestMktimeIntegerOverflowProtection(t *testing.T) {
+	tests := []struct {
+		name        string
+		hour        int64
+		minute      int64
+		second      int64
+		month       int64
+		day         int64
+		year        int64
+		shouldBlock bool
+	}{
+		{
+			name:        "NormalValues",
+			hour:        12,
+			minute:      30,
+			second:      45,
+			month:       6,
+			day:         15,
+			year:        2023,
+			shouldBlock: false,
+		},
+		{
+			name:        "LargeButValidHour",
+			hour:        24 * 365 * 50, // 50 years worth of hours
+			minute:      0,
+			second:      0,
+			month:       1,
+			day:         1,
+			year:        2000,
+			shouldBlock: false,
+		},
+		{
+			name:        "ExtremelyLargeHour",
+			hour:        24 * 365 * 101, // Beyond 100 year limit
+			minute:      0,
+			second:      0,
+			month:       1,
+			day:         1,
+			year:        2000,
+			shouldBlock: true,
+		},
+		{
+			name:        "ExtremelyLargeMinute",
+			hour:        0,
+			minute:      60 * 24 * 365 * 101,
+			second:      0,
+			month:       1,
+			day:         1,
+			year:        2000,
+			shouldBlock: true,
+		},
+		{
+			name:        "ExtremelyLargeSecond",
+			hour:        0,
+			minute:      0,
+			second:      60 * 60 * 24 * 365 * 101,
+			month:       1,
+			day:         1,
+			year:        2000,
+			shouldBlock: true,
+		},
+		{
+			name:        "ExtremelyLargeMonth",
+			hour:        0,
+			minute:      0,
+			second:      0,
+			month:       12 * 101,
+			day:         1,
+			year:        2000,
+			shouldBlock: true,
+		},
+		{
+			name:        "ExtremelyLargeDay",
+			hour:        0,
+			minute:      0,
+			second:      0,
+			month:       1,
+			day:         365 * 101,
+			year:        2000,
+			shouldBlock: true,
+		},
+		{
+			name:        "ExtremelyLargeYear",
+			hour:        0,
+			minute:      0,
+			second:      0,
+			month:       1,
+			day:         1,
+			year:        10001,
+			shouldBlock: true,
+		},
+		{
+			name:        "NegativeValuesWithinRange",
+			hour:        -24,
+			minute:      -60,
+			second:      -60,
+			month:       -1,
+			day:         -1,
+			year:        -100,
+			shouldBlock: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := Mktime(
+				types.NewInt(tt.hour),
+				types.NewInt(tt.minute),
+				types.NewInt(tt.second),
+				types.NewInt(tt.month),
+				types.NewInt(tt.day),
+				types.NewInt(tt.year),
+			)
+			isBlocked := result.Type() == types.TypeBool && !result.ToBool()
+
+			if tt.shouldBlock && !isBlocked {
+				t.Errorf("Expected overflow to be blocked for %+v", tt)
+			}
+			if !tt.shouldBlock && isBlocked {
+				t.Errorf("Expected values to be accepted for %+v", tt)
+			}
+		})
+	}
+}
+
+func TestGmmktimeIntegerOverflowProtection(t *testing.T) {
+	tests := []struct {
+		name        string
+		hour        int64
+		shouldBlock bool
+	}{
+		{
+			name:        "NormalHour",
+			hour:        12,
+			shouldBlock: false,
+		},
+		{
+			name:        "LargeButValidHour",
+			hour:        24 * 365 * 50,
+			shouldBlock: false,
+		},
+		{
+			name:        "ExtremelyLargeHour",
+			hour:        24 * 365 * 101,
+			shouldBlock: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := Gmmktime(types.NewInt(tt.hour))
+			isBlocked := result.Type() == types.TypeBool && !result.ToBool()
+
+			if tt.shouldBlock && !isBlocked {
+				t.Errorf("Expected overflow to be blocked for hour=%d", tt.hour)
+			}
+			if !tt.shouldBlock && isBlocked {
+				t.Errorf("Expected hour=%d to be accepted", tt.hour)
+			}
+		})
+	}
+}

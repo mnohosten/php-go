@@ -397,6 +397,87 @@ func myFunction(v *vm.VM, args []*types.Value) (*types.Value, error) {
 }
 ```
 
+## Hot Reloading
+
+The plugin system supports hot reloading of plugins when their files change on disk. This is useful during development or when you need to update plugins without restarting PHP-Go.
+
+### Enabling Hot Reload
+
+```go
+import (
+	"time"
+	"github.com/krizos/php-go/pkg/goext"
+)
+
+// Enable hot reload with a 1-second check interval
+pm := goext.GetGlobalPluginManager()
+pm.EnableHotReload(1 * time.Second)
+
+// Later, disable hot reload
+pm.DisableHotReload()
+
+// Check if hot reload is enabled
+if pm.IsHotReloadEnabled() {
+	fmt.Println("Hot reload is active")
+}
+```
+
+### Manual Reloading
+
+You can also manually reload a specific plugin:
+
+```go
+err := pm.ReloadPlugin("/path/to/plugin.so")
+if err != nil {
+	log.Printf("Failed to reload plugin: %v", err)
+}
+```
+
+### How Hot Reload Works
+
+1. **File monitoring**: The plugin manager periodically checks plugin files for modifications
+2. **Change detection**: When a file's modification time is newer than the loaded version, it triggers a reload
+3. **Unload and reload**: The old extension is unregistered and the new version is loaded
+4. **Extension name validation**: The reload fails if the extension name changes
+
+### Important Notes
+
+- **Go limitations**: Due to Go's plugin system, the old code remains in memory even after reload
+- **Extension update**: Only the registered extension is updated; old code is no longer accessible
+- **Performance**: Set an appropriate check interval to balance responsiveness and overhead
+- **Extension name**: The extension name must remain the same between reloads
+- **Active VMs**: Existing VM instances will continue using the old extension; only new VMs get the updated version
+
+### Example
+
+```go
+package main
+
+import (
+	"log"
+	"time"
+
+	"github.com/krizos/php-go/pkg/goext"
+)
+
+func main() {
+	// Load initial plugin
+	err := goext.LoadPlugin("./mathext.so")
+	if err != nil {
+		log.Fatalf("Failed to load plugin: %v", err)
+	}
+
+	// Enable hot reload with 2-second interval
+	pm := goext.GetGlobalPluginManager()
+	pm.EnableHotReload(2 * time.Second)
+	defer pm.DisableHotReload()
+
+	// Now the plugin will automatically reload when mathext.so is modified
+	// Your application continues running...
+	select {}
+}
+```
+
 ## Limitations
 
 ### Go Plugin System Limitations
@@ -406,14 +487,16 @@ func myFunction(v *vm.VM, args []*types.Value) (*types.Value, error) {
 3. **Dependency sensitivity**: All dependencies must match exactly
 4. **Platform-specific**: Plugins are not cross-platform
 5. **No Windows support**: Limited or no support on Windows (check Go version)
+6. **Hot reload memory**: Old plugin code remains in memory after hot reload
 
 ### Workarounds
 
-For hot reloading or dynamic updates:
+For additional flexibility:
 
-1. **Process isolation**: Run plugins in separate processes and communicate via IPC
+1. **Process isolation**: Run plugins in separate processes and communicate via IPC for true unloading
 2. **Embedded extensions**: For critical extensions, compile them directly into PHP-Go
 3. **Configuration-based loading**: Use config files to control which extensions to load at startup
+4. **Hot reload**: Use the built-in hot reload feature for development and updates (with limitations)
 
 ## Troubleshooting
 

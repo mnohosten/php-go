@@ -1,13 +1,219 @@
 package file
 
 import (
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/krizos/php-go/pkg/types"
+	"github.com/krizos/php-go/pkg/util"
 )
+
+// ============================================================================
+// Security - File Permissions
+// ============================================================================
+
+// File permission constants for secure file operations
+// These constants make permission modes explicit and easier to audit
+const (
+	// FilePermissionPrivate creates files readable/writable only by owner (0600)
+	// Use for sensitive data like credentials, tokens, or user-specific files
+	FilePermissionPrivate os.FileMode = 0600
+
+	// FilePermissionPublic creates files readable by all, writable by owner (0644)
+	// Use for general application files, logs, and publicly readable data
+	// This is the default for PHP file operations
+	FilePermissionPublic os.FileMode = 0644
+
+	// DirPermissionPrivate creates directories accessible only by owner (0700)
+	// Use for user-specific directories containing sensitive data
+	DirPermissionPrivate os.FileMode = 0700
+
+	// DirPermissionPublic creates directories with standard Unix permissions (0755)
+	// Owner: read/write/execute, Others: read/execute
+	// This is the default for PHP directory operations
+	DirPermissionPublic os.FileMode = 0755
+)
+
+// ============================================================================
+// Security - Path Traversal Protection
+// ============================================================================
+
+// PathValidationConfig holds configuration for path validation
+type PathValidationConfig struct {
+	// BasePath restricts file operations to this directory and subdirectories
+	// Empty string means no restriction (use with caution in production)
+	BasePath string
+
+	// AllowAbsolutePaths allows absolute paths outside BasePath
+	// Only applies when BasePath is set
+	AllowAbsolutePaths bool
+
+	// AllowSymlinks allows following symbolic links within the base directory
+	// When true: symlinks are allowed but must resolve to paths within BasePath
+	// When false: any symlink usage is blocked
+	AllowSymlinks bool
+
+	// MaxFileSize limits the maximum size of files that can be read (in bytes)
+	// 0 means no limit (use with caution in production)
+	// Recommended: 10MB (10485760) for general use, 100MB (104857600) for larger files
+	MaxFileSize int64
+
+	// MaxWriteSize limits the maximum size of data that can be written (in bytes)
+	// 0 means no limit (use with caution in production)
+	// Recommended: 10MB (10485760) for general use
+	MaxWriteSize int64
+}
+
+// DefaultPathValidationConfig returns a secure default configuration
+// By default, restricts to current working directory
+var DefaultPathValidationConfig = PathValidationConfig{
+	BasePath:           "", // Empty = no restriction (for backward compatibility)
+	AllowAbsolutePaths: false,
+	AllowSymlinks:      false,
+	MaxFileSize:        0, // 0 = no limit (for backward compatibility)
+	MaxWriteSize:       0, // 0 = no limit (for backward compatibility)
+}
+
+// globalPathConfig is the global path validation configuration
+// Can be modified by applications for stricter security
+var globalPathConfig = DefaultPathValidationConfig
+
+// SetPathValidationConfig sets the global path validation configuration
+func SetPathValidationConfig(config PathValidationConfig) {
+	globalPathConfig = config
+}
+
+// GetPathValidationConfig returns the current global path validation configuration
+func GetPathValidationConfig() PathValidationConfig {
+	return globalPathConfig
+}
+
+// validatePath validates a file path for security issues
+// Returns the cleaned absolute path or an error
+func validatePath(path string) (string, error) {
+	if path == "" {
+		return "", errors.New("empty path not allowed")
+	}
+
+	// Clean the path to remove . and .. components
+	cleaned := filepath.Clean(path)
+
+	// Check for null bytes (security issue)
+	if strings.Contains(cleaned, "\x00") {
+		return "", errors.New("null byte in path not allowed")
+	}
+
+	// If no base path restriction, just return cleaned path
+	if globalPathConfig.BasePath == "" {
+		return cleaned, nil
+	}
+
+	// Convert to absolute path
+	absPath, err := filepath.Abs(cleaned)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve absolute path: %w", err)
+	}
+
+	// Get absolute base path
+	absBase, err := filepath.Abs(globalPathConfig.BasePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve base path: %w", err)
+	}
+
+	// Check if path is within base directory
+	relPath, err := filepath.Rel(absBase, absPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to compute relative path: %w", err)
+	}
+
+	// Check for path traversal attempts
+	if strings.HasPrefix(relPath, "..") {
+		if !globalPathConfig.AllowAbsolutePaths {
+			return "", fmt.Errorf("path traversal detected: %s escapes base directory %s", path, absBase)
+		}
+	}
+
+	// Evaluate symlinks for both paths to ensure consistent comparison
+	// This handles cases where system directories themselves are symlinks (e.g., /var -> /private/var)
+	evalPath, err1 := filepath.EvalSymlinks(absPath)
+	evalBase, err2 := filepath.EvalSymlinks(absBase)
+
+	// Check symlink behavior based on configuration
+	if err1 == nil && err2 == nil {
+		// Always check that the resolved path stays within base directory
+		// (applies whether symlinks are allowed or not)
+		evalRel, err := filepath.Rel(evalBase, evalPath)
+		if err != nil || strings.HasPrefix(evalRel, "..") {
+			return "", fmt.Errorf("path escapes base directory: %s -> %s", path, evalPath)
+		}
+
+		// If symlinks are not allowed, check if the resolved path differs from original
+		// Note: We only check this AFTER confirming the resolved path is within base
+		// This prevents false positives from system-level symlinks (e.g., /var -> /private/var)
+		if !globalPathConfig.AllowSymlinks {
+			// Compare relative paths to detect user-introduced symlinks
+			// Get relative path from base for both original and resolved
+			origRel, err1 := filepath.Rel(absBase, absPath)
+			evalRelPath, err2 := filepath.Rel(evalBase, evalPath)
+
+			if err1 == nil && err2 == nil && origRel != evalRelPath {
+				// The relative paths differ, meaning a symlink was followed within the base directory
+				return "", fmt.Errorf("symlink detected and not allowed: %s -> %s", path, evalPath)
+			}
+		}
+	}
+
+	// Return the cleaned path (or absolute path if base path was configured)
+	// This ensures file operations work correctly with both relative and absolute paths
+	if globalPathConfig.BasePath != "" {
+		return absPath, nil
+	}
+	return cleaned, nil
+}
+
+// validateFileSize checks if a file's size is within the configured limit
+// Returns an error if the file is too large
+func validateFileSize(path string) error {
+	// If no limit is configured, allow any size
+	if globalPathConfig.MaxFileSize <= 0 {
+		return nil
+	}
+
+	// Get file info to check size
+	info, err := os.Stat(path)
+	if err != nil {
+		// If file doesn't exist or can't be stat'd, let the actual read operation handle it
+		return nil
+	}
+
+	// Check if file size exceeds limit
+	if info.Size() > globalPathConfig.MaxFileSize {
+		return fmt.Errorf("file size (%d bytes) exceeds maximum allowed size (%d bytes)", info.Size(), globalPathConfig.MaxFileSize)
+	}
+
+	return nil
+}
+
+// validateWriteSize checks if the data size is within the configured write limit
+// Returns an error if the data is too large
+func validateWriteSize(dataSize int64) error {
+	// If no limit is configured, allow any size
+	if globalPathConfig.MaxWriteSize <= 0 {
+		return nil
+	}
+
+	// Check if write size exceeds limit
+	if dataSize > globalPathConfig.MaxWriteSize {
+		return fmt.Errorf("write size (%d bytes) exceeds maximum allowed size (%d bytes)", dataSize, globalPathConfig.MaxWriteSize)
+	}
+
+	return nil
+}
 
 // ============================================================================
 // File Reading Functions
@@ -18,7 +224,20 @@ import (
 func FileGetContents(filename *types.Value) *types.Value {
 	path := filename.ToString()
 
-	data, err := os.ReadFile(path)
+	// Validate path for security
+	validPath, err := validatePath(path)
+	if err != nil {
+		// Security violation - return false
+		return types.NewBool(false)
+	}
+
+	// Check file size limit
+	if err := validateFileSize(validPath); err != nil {
+		// File too large - return false
+		return types.NewBool(false)
+	}
+
+	data, err := os.ReadFile(validPath)
 	if err != nil {
 		return types.NewBool(false)
 	}
@@ -30,7 +249,21 @@ func FileGetContents(filename *types.Value) *types.Value {
 // file_put_contents(string $filename, mixed $data, int $flags = 0): int|false
 func FilePutContents(filename *types.Value, data *types.Value, args ...*types.Value) *types.Value {
 	path := filename.ToString()
+
+	// Validate path for security
+	validPath, err := validatePath(path)
+	if err != nil {
+		// Security violation - return false
+		return types.NewBool(false)
+	}
+
 	content := data.ToString()
+
+	// Check write size limit
+	if err := validateWriteSize(int64(len(content))); err != nil {
+		// Data too large - return false
+		return types.NewBool(false)
+	}
 
 	flags := 0
 	if len(args) > 0 {
@@ -45,7 +278,7 @@ func FilePutContents(filename *types.Value, data *types.Value, args ...*types.Va
 		writeFlags = os.O_CREATE | os.O_WRONLY | os.O_TRUNC
 	}
 
-	file, err := os.OpenFile(path, writeFlags, 0644)
+	file, err := os.OpenFile(validPath, writeFlags, FilePermissionPublic)
 	if err != nil {
 		return types.NewBool(false)
 	}
@@ -64,7 +297,20 @@ func FilePutContents(filename *types.Value, data *types.Value, args ...*types.Va
 func File(filename *types.Value, args ...*types.Value) *types.Value {
 	path := filename.ToString()
 
-	data, err := os.ReadFile(path)
+	// Validate path for security
+	validPath, err := validatePath(path)
+	if err != nil {
+		// Security violation - return false
+		return types.NewBool(false)
+	}
+
+	// Check file size limit
+	if err := validateFileSize(validPath); err != nil {
+		// File too large - return false
+		return types.NewBool(false)
+	}
+
+	data, err := os.ReadFile(validPath)
 	if err != nil {
 		return types.NewBool(false)
 	}
@@ -105,7 +351,20 @@ func File(filename *types.Value, args ...*types.Value) *types.Value {
 func Readfile(filename *types.Value) *types.Value {
 	path := filename.ToString()
 
-	data, err := os.ReadFile(path)
+	// Validate path for security
+	validPath, err := validatePath(path)
+	if err != nil {
+		// Security violation - return false
+		return types.NewBool(false)
+	}
+
+	// Check file size limit
+	if err := validateFileSize(validPath); err != nil {
+		// File too large - return false
+		return types.NewBool(false)
+	}
+
+	data, err := os.ReadFile(validPath)
 	if err != nil {
 		return types.NewBool(false)
 	}
@@ -123,6 +382,14 @@ func Readfile(filename *types.Value) *types.Value {
 // fopen(string $filename, string $mode): resource|false
 func Fopen(filename *types.Value, mode *types.Value) *types.Value {
 	path := filename.ToString()
+
+	// Validate path for security
+	validPath, err := validatePath(path)
+	if err != nil {
+		// Security violation - return false
+		return types.NewBool(false)
+	}
+
 	modeStr := mode.ToString()
 
 	var flags int
@@ -147,7 +414,7 @@ func Fopen(filename *types.Value, mode *types.Value) *types.Value {
 		return types.NewBool(false)
 	}
 
-	file, err := os.OpenFile(path, flags, 0644)
+	file, err := os.OpenFile(validPath, flags, FilePermissionPublic)
 	if err != nil {
 		return types.NewBool(false)
 	}
@@ -193,7 +460,19 @@ func Fread(stream *types.Value, length *types.Value) *types.Value {
 		return types.NewBool(false)
 	}
 
-	n := int(length.ToInt())
+	// Safely convert int64 to int with overflow checking
+	lengthInt64 := length.ToInt()
+	n, err := util.SafeConvertToInt(lengthInt64, "read_length")
+	if err != nil {
+		return types.NewBool(false)
+	}
+
+	// Check if read size exceeds limit
+	if err := validateWriteSize(int64(n)); err != nil {
+		// Using validateWriteSize as it checks size limit for memory allocation
+		return types.NewBool(false)
+	}
+
 	buf := make([]byte, n)
 
 	bytesRead, err := file.Read(buf)
@@ -225,10 +504,20 @@ func Fwrite(stream *types.Value, data *types.Value, args ...*types.Value) *types
 
 	// Optional length parameter
 	if len(args) > 0 {
-		length := int(args[0].ToInt())
-		if length < len(content) {
-			content = content[:length]
+		lengthInt64 := args[0].ToInt()
+		lengthInt, err := util.SafeConvertToInt(lengthInt64, "write_length")
+		if err != nil {
+			return types.NewBool(false)
 		}
+		if lengthInt < len(content) {
+			content = content[:lengthInt]
+		}
+	}
+
+	// Check write size limit
+	if err := validateWriteSize(int64(len(content))); err != nil {
+		// Data too large - return false
+		return types.NewBool(false)
 	}
 
 	n, err := file.WriteString(content)
@@ -314,7 +603,15 @@ func Fgetc(stream *types.Value) *types.Value {
 // file_exists(string $filename): bool
 func FileExists(filename *types.Value) *types.Value {
 	path := filename.ToString()
-	_, err := os.Stat(path)
+
+	// Validate path for security
+	validPath, err := validatePath(path)
+	if err != nil {
+		// Security violation - return false
+		return types.NewBool(false)
+	}
+
+	_, err = os.Stat(validPath)
 	return types.NewBool(err == nil)
 }
 
@@ -322,7 +619,15 @@ func FileExists(filename *types.Value) *types.Value {
 // is_file(string $filename): bool
 func IsFile(filename *types.Value) *types.Value {
 	path := filename.ToString()
-	info, err := os.Stat(path)
+
+	// Validate path for security
+	validPath, err := validatePath(path)
+	if err != nil {
+		// Security violation - return false
+		return types.NewBool(false)
+	}
+
+	info, err := os.Stat(validPath)
 	if err != nil {
 		return types.NewBool(false)
 	}
@@ -333,7 +638,15 @@ func IsFile(filename *types.Value) *types.Value {
 // is_dir(string $filename): bool
 func IsDir(filename *types.Value) *types.Value {
 	path := filename.ToString()
-	info, err := os.Stat(path)
+
+	// Validate path for security
+	validPath, err := validatePath(path)
+	if err != nil {
+		// Security violation - return false
+		return types.NewBool(false)
+	}
+
+	info, err := os.Stat(validPath)
 	if err != nil {
 		return types.NewBool(false)
 	}
@@ -344,7 +657,15 @@ func IsDir(filename *types.Value) *types.Value {
 // is_readable(string $filename): bool
 func IsReadable(filename *types.Value) *types.Value {
 	path := filename.ToString()
-	file, err := os.OpenFile(path, os.O_RDONLY, 0)
+
+	// Validate path for security
+	validPath, err := validatePath(path)
+	if err != nil {
+		// Security violation - return false
+		return types.NewBool(false)
+	}
+
+	file, err := os.OpenFile(validPath, os.O_RDONLY, 0)
 	if err != nil {
 		return types.NewBool(false)
 	}
@@ -357,11 +678,18 @@ func IsReadable(filename *types.Value) *types.Value {
 func IsWritable(filename *types.Value) *types.Value {
 	path := filename.ToString()
 
+	// Validate path for security
+	validPath, err := validatePath(path)
+	if err != nil {
+		// Security violation - return false
+		return types.NewBool(false)
+	}
+
 	// Check if file exists
-	info, err := os.Stat(path)
+	info, err := os.Stat(validPath)
 	if err != nil {
 		// File doesn't exist, check if directory is writable
-		dir := filepath.Dir(path)
+		dir := filepath.Dir(validPath)
 		dirInfo, err := os.Stat(dir)
 		if err != nil {
 			return types.NewBool(false)
@@ -377,7 +705,15 @@ func IsWritable(filename *types.Value) *types.Value {
 // filesize(string $filename): int|false
 func Filesize(filename *types.Value) *types.Value {
 	path := filename.ToString()
-	info, err := os.Stat(path)
+
+	// Validate path for security
+	validPath, err := validatePath(path)
+	if err != nil {
+		// Security violation - return false
+		return types.NewBool(false)
+	}
+
+	info, err := os.Stat(validPath)
 	if err != nil {
 		return types.NewBool(false)
 	}
@@ -388,7 +724,15 @@ func Filesize(filename *types.Value) *types.Value {
 // filetype(string $filename): string|false
 func Filetype(filename *types.Value) *types.Value {
 	path := filename.ToString()
-	info, err := os.Stat(path)
+
+	// Validate path for security
+	validPath, err := validatePath(path)
+	if err != nil {
+		// Security violation - return false
+		return types.NewBool(false)
+	}
+
+	info, err := os.Stat(validPath)
 	if err != nil {
 		return types.NewBool(false)
 	}
@@ -421,6 +765,13 @@ func Filetype(filename *types.Value) *types.Value {
 func Mkdir(directory *types.Value, args ...*types.Value) *types.Value {
 	path := directory.ToString()
 
+	// Validate path for security
+	validPath, err := validatePath(path)
+	if err != nil {
+		// Security violation - return false
+		return types.NewBool(false)
+	}
+
 	permissions := os.FileMode(0777)
 	if len(args) > 0 {
 		permissions = os.FileMode(args[0].ToInt())
@@ -431,11 +782,10 @@ func Mkdir(directory *types.Value, args ...*types.Value) *types.Value {
 		recursive = args[1].ToBool()
 	}
 
-	var err error
 	if recursive {
-		err = os.MkdirAll(path, permissions)
+		err = os.MkdirAll(validPath, permissions)
 	} else {
-		err = os.Mkdir(path, permissions)
+		err = os.Mkdir(validPath, permissions)
 	}
 
 	return types.NewBool(err == nil)
@@ -445,7 +795,15 @@ func Mkdir(directory *types.Value, args ...*types.Value) *types.Value {
 // rmdir(string $directory): bool
 func Rmdir(directory *types.Value) *types.Value {
 	path := directory.ToString()
-	err := os.Remove(path)
+
+	// Validate path for security
+	validPath, err := validatePath(path)
+	if err != nil {
+		// Security violation - return false
+		return types.NewBool(false)
+	}
+
+	err = os.Remove(validPath)
 	return types.NewBool(err == nil)
 }
 
@@ -454,7 +812,14 @@ func Rmdir(directory *types.Value) *types.Value {
 func Scandir(directory *types.Value, args ...*types.Value) *types.Value {
 	path := directory.ToString()
 
-	entries, err := os.ReadDir(path)
+	// Validate path for security
+	validPath, err := validatePath(path)
+	if err != nil {
+		// Security violation - return false
+		return types.NewBool(false)
+	}
+
+	entries, err := os.ReadDir(validPath)
 	if err != nil {
 		return types.NewBool(false)
 	}
@@ -576,7 +941,14 @@ func Pathinfo(path *types.Value, args ...*types.Value) *types.Value {
 func Realpath(path *types.Value) *types.Value {
 	pathStr := path.ToString()
 
-	abs, err := filepath.Abs(pathStr)
+	// Validate path for security
+	validPath, err := validatePath(pathStr)
+	if err != nil {
+		// Security violation - return false
+		return types.NewBool(false)
+	}
+
+	abs, err := filepath.Abs(validPath)
 	if err != nil {
 		return types.NewBool(false)
 	}
@@ -594,7 +966,15 @@ func Realpath(path *types.Value) *types.Value {
 // unlink(string $filename): bool
 func Unlink(filename *types.Value) *types.Value {
 	path := filename.ToString()
-	err := os.Remove(path)
+
+	// Validate path for security
+	validPath, err := validatePath(path)
+	if err != nil {
+		// Security violation - return false
+		return types.NewBool(false)
+	}
+
+	err = os.Remove(validPath)
 	return types.NewBool(err == nil)
 }
 
@@ -603,7 +983,21 @@ func Unlink(filename *types.Value) *types.Value {
 func Rename(from *types.Value, to *types.Value) *types.Value {
 	fromPath := from.ToString()
 	toPath := to.ToString()
-	err := os.Rename(fromPath, toPath)
+
+	// Validate both paths for security
+	validFrom, err := validatePath(fromPath)
+	if err != nil {
+		// Security violation - return false
+		return types.NewBool(false)
+	}
+
+	validTo, err := validatePath(toPath)
+	if err != nil {
+		// Security violation - return false
+		return types.NewBool(false)
+	}
+
+	err = os.Rename(validFrom, validTo)
 	return types.NewBool(err == nil)
 }
 
@@ -613,18 +1007,109 @@ func Copy(from *types.Value, to *types.Value) *types.Value {
 	fromPath := from.ToString()
 	toPath := to.ToString()
 
-	source, err := os.Open(fromPath)
+	// Validate both paths for security
+	validFrom, err := validatePath(fromPath)
+	if err != nil {
+		// Security violation - return false
+		return types.NewBool(false)
+	}
+
+	validTo, err := validatePath(toPath)
+	if err != nil {
+		// Security violation - return false
+		return types.NewBool(false)
+	}
+
+	source, err := os.Open(validFrom)
 	if err != nil {
 		return types.NewBool(false)
 	}
 	defer source.Close()
 
-	dest, err := os.Create(toPath)
+	dest, err := os.Create(validTo)
 	if err != nil {
 		return types.NewBool(false)
 	}
 	defer dest.Close()
 
 	_, err = io.Copy(dest, source)
+	return types.NewBool(err == nil)
+}
+
+// Filemtime gets file modification time
+// filemtime(string $filename): int|false
+func Filemtime(filename *types.Value) *types.Value {
+	path := filename.ToString()
+
+	// Validate path for security
+	validPath, err := validatePath(path)
+	if err != nil {
+		// Security violation - return false
+		return types.NewBool(false)
+	}
+
+	info, err := os.Stat(validPath)
+	if err != nil {
+		return types.NewBool(false)
+	}
+
+	return types.NewInt(info.ModTime().Unix())
+}
+
+// Touch sets access and modification time of file
+// touch(string $filename, int $mtime = null, int $atime = null): bool
+func Touch(filename *types.Value, args ...*types.Value) *types.Value {
+	path := filename.ToString()
+
+	// Validate path for security
+	validPath, err := validatePath(path)
+	if err != nil {
+		// Security violation - return false
+		return types.NewBool(false)
+	}
+
+	// Check if file exists, create if not
+	_, err = os.Stat(validPath)
+	if os.IsNotExist(err) {
+		file, err := os.Create(validPath)
+		if err != nil {
+			return types.NewBool(false)
+		}
+		file.Close()
+	}
+
+	// Get current time for defaults
+	now := time.Now()
+	mtime := now
+	atime := now
+
+	// Optional mtime parameter
+	if len(args) > 0 && args[0] != nil && args[0].Type() != types.TypeNull {
+		mtime = time.Unix(args[0].ToInt(), 0)
+	}
+
+	// Optional atime parameter
+	if len(args) > 1 && args[1] != nil && args[1].Type() != types.TypeNull {
+		atime = time.Unix(args[1].ToInt(), 0)
+	}
+
+	err = os.Chtimes(validPath, atime, mtime)
+	return types.NewBool(err == nil)
+}
+
+// Chmod changes file mode
+// chmod(string $filename, int $permissions): bool
+func Chmod(filename *types.Value, permissions *types.Value) *types.Value {
+	path := filename.ToString()
+
+	// Validate path for security
+	validPath, err := validatePath(path)
+	if err != nil {
+		// Security violation - return false
+		return types.NewBool(false)
+	}
+
+	mode := os.FileMode(permissions.ToInt())
+	err = os.Chmod(validPath, mode)
 	return types.NewBool(err == nil)
 }

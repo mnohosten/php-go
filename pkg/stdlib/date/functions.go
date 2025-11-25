@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/krizos/php-go/pkg/types"
+	"github.com/krizos/php-go/pkg/util"
 )
 
 // ============================================================================
@@ -237,22 +238,46 @@ func Mktime(args ...*types.Value) *types.Value {
 	year := now.Year()
 
 	if len(args) > 0 {
-		hour = int(args[0].ToInt())
+		hourVal := args[0].ToInt()
+		if err := util.ValidateIntRange(hourVal, -24*365*100, 24*365*100, "hour"); err != nil {
+			return types.NewBool(false)
+		}
+		hour = int(hourVal)
 	}
 	if len(args) > 1 {
-		minute = int(args[1].ToInt())
+		minuteVal := args[1].ToInt()
+		if err := util.ValidateIntRange(minuteVal, -60*24*365*100, 60*24*365*100, "minute"); err != nil {
+			return types.NewBool(false)
+		}
+		minute = int(minuteVal)
 	}
 	if len(args) > 2 {
-		second = int(args[2].ToInt())
+		secondVal := args[2].ToInt()
+		if err := util.ValidateIntRange(secondVal, -60*60*24*365*100, 60*60*24*365*100, "second"); err != nil {
+			return types.NewBool(false)
+		}
+		second = int(secondVal)
 	}
 	if len(args) > 3 {
-		month = int(args[3].ToInt())
+		monthVal := args[3].ToInt()
+		if err := util.ValidateIntRange(monthVal, -12*100, 12*100, "month"); err != nil {
+			return types.NewBool(false)
+		}
+		month = int(monthVal)
 	}
 	if len(args) > 4 {
-		day = int(args[4].ToInt())
+		dayVal := args[4].ToInt()
+		if err := util.ValidateIntRange(dayVal, -365*100, 365*100, "day"); err != nil {
+			return types.NewBool(false)
+		}
+		day = int(dayVal)
 	}
 	if len(args) > 5 {
-		year = int(args[5].ToInt())
+		yearVal := args[5].ToInt()
+		if err := util.ValidateIntRange(yearVal, -10000, 10000, "year"); err != nil {
+			return types.NewBool(false)
+		}
+		year = int(yearVal)
 	}
 
 	// Handle 2-digit years
@@ -279,22 +304,46 @@ func Gmmktime(args ...*types.Value) *types.Value {
 	year := now.Year()
 
 	if len(args) > 0 {
-		hour = int(args[0].ToInt())
+		hourVal := args[0].ToInt()
+		if err := util.ValidateIntRange(hourVal, -24*365*100, 24*365*100, "hour"); err != nil {
+			return types.NewBool(false)
+		}
+		hour = int(hourVal)
 	}
 	if len(args) > 1 {
-		minute = int(args[1].ToInt())
+		minuteVal := args[1].ToInt()
+		if err := util.ValidateIntRange(minuteVal, -60*24*365*100, 60*24*365*100, "minute"); err != nil {
+			return types.NewBool(false)
+		}
+		minute = int(minuteVal)
 	}
 	if len(args) > 2 {
-		second = int(args[2].ToInt())
+		secondVal := args[2].ToInt()
+		if err := util.ValidateIntRange(secondVal, -60*60*24*365*100, 60*60*24*365*100, "second"); err != nil {
+			return types.NewBool(false)
+		}
+		second = int(secondVal)
 	}
 	if len(args) > 3 {
-		month = int(args[3].ToInt())
+		monthVal := args[3].ToInt()
+		if err := util.ValidateIntRange(monthVal, -12*100, 12*100, "month"); err != nil {
+			return types.NewBool(false)
+		}
+		month = int(monthVal)
 	}
 	if len(args) > 4 {
-		day = int(args[4].ToInt())
+		dayVal := args[4].ToInt()
+		if err := util.ValidateIntRange(dayVal, -365*100, 365*100, "day"); err != nil {
+			return types.NewBool(false)
+		}
+		day = int(dayVal)
 	}
 	if len(args) > 5 {
-		year = int(args[5].ToInt())
+		yearVal := args[5].ToInt()
+		if err := util.ValidateIntRange(yearVal, -10000, 10000, "year"); err != nil {
+			return types.NewBool(false)
+		}
+		year = int(yearVal)
 	}
 
 	// Handle 2-digit years

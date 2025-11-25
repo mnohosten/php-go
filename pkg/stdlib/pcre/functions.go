@@ -88,8 +88,12 @@ func PregMatch(pattern *types.Value, subject *types.Value, matches ...*types.Val
 		return types.NewBool(false)
 	}
 
-	// Find first match
-	match := re.FindStringSubmatch(subjectStr)
+	// Find first match with timeout protection
+	match, ok := FindStringSubmatchWithTimeout(re, subjectStr)
+	if !ok {
+		// Timeout occurred - potential ReDoS attack
+		return types.NewBool(false)
+	}
 	if match == nil {
 		// No match found
 		if len(matches) > 0 && matches[0] != nil {
@@ -132,8 +136,12 @@ func PregMatchAll(pattern *types.Value, subject *types.Value, matches ...*types.
 		return types.NewBool(false)
 	}
 
-	// Find all matches
-	allMatches := re.FindAllStringSubmatch(subjectStr, -1)
+	// Find all matches with timeout protection
+	allMatches, ok := FindAllStringSubmatchWithTimeout(re, subjectStr, -1)
+	if !ok {
+		// Timeout occurred - potential ReDoS attack
+		return types.NewBool(false)
+	}
 	if allMatches == nil {
 		// No matches found
 		if len(matches) > 0 && matches[0] != nil {
@@ -203,24 +211,33 @@ func PregReplace(pattern *types.Value, replacement *types.Value, subject *types.
 		return types.NewNull()
 	}
 
-	// Perform replacement
+	// Perform replacement with timeout protection
 	var result string
+	var ok bool
 	if limitNum < 0 {
 		// Replace all
-		result = re.ReplaceAllString(subjectStr, replacementStr)
+		result, ok = ReplaceAllStringWithTimeout(re, subjectStr, replacementStr)
+		if !ok {
+			// Timeout occurred - potential ReDoS attack
+			return types.NewNull()
+		}
 	} else if limitNum == 0 {
 		// No replacements
 		result = subjectStr
 	} else {
 		// Limited replacements
 		count := 0
-		result = re.ReplaceAllStringFunc(subjectStr, func(match string) string {
+		result, ok = ReplaceAllStringFuncWithTimeout(re, subjectStr, func(match string) string {
 			if count < limitNum {
 				count++
 				return re.ReplaceAllString(match, replacementStr)
 			}
 			return match
 		})
+		if !ok {
+			// Timeout occurred - potential ReDoS attack
+			return types.NewNull()
+		}
 	}
 
 	return types.NewString(result)
@@ -252,12 +269,18 @@ func PregSplit(pattern *types.Value, subject *types.Value, limit ...*types.Value
 		return types.NewBool(false)
 	}
 
-	// Split by pattern
+	// Split by pattern with timeout protection
 	var parts []string
+	var ok bool
 	if limitNum < 0 {
-		parts = re.Split(subjectStr, -1)
+		parts, ok = SplitWithTimeout(re, subjectStr, -1)
 	} else {
-		parts = re.Split(subjectStr, limitNum)
+		parts, ok = SplitWithTimeout(re, subjectStr, limitNum)
+	}
+
+	if !ok {
+		// Timeout occurred - potential ReDoS attack
+		return types.NewBool(false)
 	}
 
 	// Convert to array
@@ -296,11 +319,18 @@ func PregGrep(pattern *types.Value, input *types.Value, flags ...*types.Value) *
 		invert = flags[0].ToInt() == 1
 	}
 
-	// Filter array
+	// Filter array with timeout protection
 	result := types.NewEmptyArray()
+	timedOut := false
 	inputArray.Each(func(key, value *types.Value) bool {
 		valueStr := value.ToString()
-		matches := re.MatchString(valueStr)
+		matches, ok := MatchStringWithTimeout(re, valueStr)
+
+		if !ok {
+			// Timeout occurred - potential ReDoS attack
+			timedOut = true
+			return false // Stop iteration
+		}
 
 		// Include if matches (or doesn't match if inverted)
 		if matches != invert {
@@ -308,6 +338,10 @@ func PregGrep(pattern *types.Value, input *types.Value, flags ...*types.Value) *
 		}
 		return true
 	})
+
+	if timedOut {
+		return types.NewBool(false)
+	}
 
 	return types.NewArray(result)
 }

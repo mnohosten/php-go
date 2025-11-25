@@ -336,6 +336,7 @@ func (vm *VM) opUnsetDim(frame *Frame, instr Instruction) error {
 
 // opIssetIsemptyDimObj handles isset/empty check on array element
 // OpIssetIsemptyDimObj - Check isset/empty on array element or object property
+// ExtendedValue: 0 = isset mode, 1 = empty mode
 func (vm *VM) opIssetIsemptyDimObj(frame *Frame, instr Instruction) error {
 	// Get the container (array or object)
 	container, err := vm.getOperandValue(frame, instr.Op1)
@@ -349,6 +350,9 @@ func (vm *VM) opIssetIsemptyDimObj(frame *Frame, instr Instruction) error {
 		return err
 	}
 
+	// Get mode from ExtendedValue: 0 = isset, 1 = empty
+	mode := instr.ExtendedValue
+
 	var result bool
 
 	switch container.Type() {
@@ -356,18 +360,24 @@ func (vm *VM) opIssetIsemptyDimObj(frame *Frame, instr Instruction) error {
 		arr := container.ToArray()
 		val, exists := arr.Get(key)
 
-		// For isset: check if exists and not null
-		// For empty: check if exists and is "empty" (falsy)
-		// TODO: Determine from instruction if this is isset or empty check
-		// For now, implement isset semantics
-		result = exists && !val.IsNull()
+		if mode == 0 {
+			// isset mode: returns true if key exists and value is not null
+			result = exists && !val.IsNull()
+		} else {
+			// empty mode: returns true if key doesn't exist OR value is falsy/null
+			if !exists {
+				result = true
+			} else {
+				result = val.IsFalse() || val.IsNull() || val.IsUndef()
+			}
+		}
 
 	case types.TypeObject:
 		// TODO: Implement object property isset check in Phase 5
-		result = false
+		result = mode != 0 // For empty, return true; for isset, return false
 
 	default:
-		result = false
+		result = mode != 0 // For empty, return true; for isset, return false
 	}
 
 	return vm.setOperandValue(frame, instr.Result, types.NewBool(result))

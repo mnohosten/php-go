@@ -22,6 +22,11 @@ go.work.sum
 /dist/
 /build/
 php-go
+php-go-config
+php-go-migrate
+php-go-migrate-auto
+phpt-runner
+benchmarks.test
 
 # IDE and editor files
 .vscode/
@@ -50,6 +55,8 @@ php-go
 *.pprof
 cpu.out
 mem.out
+benchmarks/profiles/
+benchmarks/results/
 
 # Vendor (if used)
 /vendor/

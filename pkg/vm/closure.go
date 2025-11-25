@@ -94,7 +94,9 @@ func (c *Closure) Call(vm *VM, args []*types.Value, thisObj *types.Object) (*typ
 	// TODO: Integrate with frame variable management
 
 	// Push frame and execute
-	vm.pushFrame(frame)
+	if err := vm.pushFrame(frame); err != nil {
+		return nil, err
+	}
 	err := vm.runFrame(frame)
 	if err != nil {
 		return nil, err

@@ -66,6 +66,7 @@ type Visitor interface {
 	VisitCastExpression(node *CastExpression) bool
 	VisitGroupedExpression(node *GroupedExpression) bool
 	VisitMatchExpression(node *MatchExpression) bool
+	VisitThrowExpression(node *ThrowExpression) bool
 	VisitNullableType(node *NullableType) bool
 	VisitUnionType(node *UnionType) bool
 	VisitIntersectionType(node *IntersectionType) bool
@@ -437,6 +438,10 @@ func Walk(v Visitor, node Node) {
 				Walk(v, arm.Body)
 			}
 		}
+	case *ThrowExpression:
+		if v.VisitThrowExpression(n) {
+			Walk(v, n.Expression)
+		}
 	case *NullableType:
 		if v.VisitNullableType(n) {
 			Walk(v, n.Type)
@@ -527,6 +532,7 @@ func (bv *BaseVisitor) VisitIncludeExpression(node *IncludeExpression) bool     
 func (bv *BaseVisitor) VisitCastExpression(node *CastExpression) bool             { return true }
 func (bv *BaseVisitor) VisitGroupedExpression(node *GroupedExpression) bool       { return true }
 func (bv *BaseVisitor) VisitMatchExpression(node *MatchExpression) bool           { return true }
+func (bv *BaseVisitor) VisitThrowExpression(node *ThrowExpression) bool           { return true }
 func (bv *BaseVisitor) VisitNullableType(node *NullableType) bool                 { return true }
 func (bv *BaseVisitor) VisitUnionType(node *UnionType) bool                       { return true }
 func (bv *BaseVisitor) VisitIntersectionType(node *IntersectionType) bool         { return true }

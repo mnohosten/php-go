@@ -6,6 +6,7 @@ import (
 	"crypto/sha1"
 	"crypto/sha256"
 	"crypto/sha512"
+	"crypto/subtle"
 	"encoding/hex"
 	"hash"
 	"hash/adler32"
@@ -294,22 +295,23 @@ func Sha1File(filename *types.Value, binary ...*types.Value) *types.Value {
 
 // HashEquals performs a timing-safe string comparison
 // hash_equals(string $known_string, string $user_string): bool
+//
+// This function uses constant-time comparison to prevent timing attacks.
+// It compares two strings in a way that takes constant time regardless of
+// whether they match or not, and regardless of their length difference.
 func HashEquals(knownString, userString *types.Value) *types.Value {
 	known := knownString.ToString()
 	user := userString.ToString()
 
-	// Different lengths - definitely not equal
-	if len(known) != len(user) {
-		return types.NewBool(false)
-	}
+	// Use crypto/subtle.ConstantTimeCompare for timing-safe comparison
+	// This function:
+	// 1. Returns 1 if the two byte slices are equal
+	// 2. Returns 0 if they are not equal
+	// 3. Takes constant time regardless of content or length differences
+	// 4. Does NOT leak timing information about length differences
+	result := subtle.ConstantTimeCompare([]byte(known), []byte(user))
 
-	// Timing-safe comparison
-	result := 0
-	for i := 0; i < len(known); i++ {
-		result |= int(known[i]) ^ int(user[i])
-	}
-
-	return types.NewBool(result == 0)
+	return types.NewBool(result == 1)
 }
 
 // ============================================================================

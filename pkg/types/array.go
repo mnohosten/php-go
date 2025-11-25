@@ -1,6 +1,10 @@
 package types
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/krizos/php-go/pkg/util"
+)
 
 // Array represents a PHP array (ordered associative array)
 // PHP arrays are ordered maps that can have both integer and string keys
@@ -361,7 +365,14 @@ func (a *Array) Unshift(values ...*Value) int {
 
 	if a.packed {
 		// Prepend to packed array
-		newData := make([]*Value, len(values)+len(a.packedData))
+		// Security: Check for integer overflow in size calculation
+		totalSize, err := util.SafeAddSize(len(values), len(a.packedData))
+		if err != nil {
+			// Overflow detected - cannot allocate array this large
+			// Return current length without modification
+			return a.Len()
+		}
+		newData := make([]*Value, totalSize)
 		copy(newData, values)
 		copy(newData[len(values):], a.packedData)
 		a.packedData = newData
@@ -372,7 +383,13 @@ func (a *Array) Unshift(values ...*Value) int {
 	a.convertToHash()
 
 	// Prepend to hash table
-	newOrder := make([]interface{}, 0, len(values)+len(a.order))
+	// Security: Check for integer overflow in capacity calculation
+	totalSize, err := util.SafeAddSize(len(values), len(a.order))
+	if err != nil {
+		// Overflow detected - return current length without modification
+		return a.Len()
+	}
+	newOrder := make([]interface{}, 0, totalSize)
 	for i, v := range values {
 		key := int64(i)
 		newOrder = append(newOrder, key)

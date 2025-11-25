@@ -1,10 +1,14 @@
 package compiler
 
 import (
+	"bytes"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/krizos/php-go/pkg/lexer"
 	"github.com/krizos/php-go/pkg/parser"
+	varfuncs "github.com/krizos/php-go/pkg/stdlib/var"
 	"github.com/krizos/php-go/pkg/vm"
 )
 
@@ -28,6 +32,37 @@ func parseAndCompile(t *testing.T, input string) *Bytecode {
 	}
 
 	return c.Bytecode()
+}
+
+// compileAndRun parses, compiles, and executes PHP code, returning the output
+func compileAndRun(t *testing.T, input string) string {
+	bytecode := parseAndCompile(t, input)
+
+	// Set up output capture for var_dump and other stdlib output functions
+	var stdlibOutput bytes.Buffer
+	varfuncs.SetOutputWriter(&stdlibOutput)
+	defer varfuncs.SetOutputWriter(nil) // Reset after test
+
+	// Execute
+	machine := vm.New()
+	machine.LoadConstants(bytecode.Constants)
+	err := machine.ExecuteWithCVs(bytecode.Instructions, bytecode.NumCVs)
+	if err != nil {
+		t.Fatalf("Execution failed: %v", err)
+	}
+
+	// Combine VM output (echo) with stdlib output (var_dump)
+	vmOutput := machine.GetOutput()
+	libOutput := stdlibOutput.String()
+
+	// Return combined output (stdlib output typically comes after echo)
+	if vmOutput != "" && libOutput != "" {
+		return vmOutput + libOutput
+	}
+	if libOutput != "" {
+		return libOutput
+	}
+	return vmOutput
 }
 
 // ========================================
@@ -357,6 +392,7 @@ func TestCompileInfixExpressions(t *testing.T) {
 		{"<?php $a << $b;", vm.OpSL},
 		{"<?php $a >> $b;", vm.OpSR},
 		{"<?php $a <=> $b;", vm.OpSpaceship},
+		{"<?php $a ?? $b;", vm.OpCoalesce},
 	}
 
 	for _, tt := range tests {
@@ -1079,24 +1115,17 @@ func TestCompileIfStatement(t *testing.T) {
 
 	bytecode := parseAndCompile(t, input)
 
-	// Should have JMPZ and JMP opcodes
+	// Should have JMPZ opcode (but not JMP since there's no else)
 	hasJmpz := false
-	hasJmp := false
 
 	for _, instr := range bytecode.Instructions {
 		if instr.Opcode == vm.OpJmpZ {
 			hasJmpz = true
 		}
-		if instr.Opcode == vm.OpJmp {
-			hasJmp = true
-		}
 	}
 
 	if !hasJmpz {
 		t.Error("Expected JMPZ instruction for if statement")
-	}
-	if !hasJmp {
-		t.Error("Expected JMP instruction for if statement")
 	}
 }
 
@@ -1139,6 +1168,78 @@ func TestCompileIfElseStatement(t *testing.T) {
 	}
 }
 
+// TestIfStatementConditionEvaluation tests that if statement conditions are properly evaluated
+// This is a regression test for a bug where if statements always took the true branch
+func TestIfStatementConditionEvaluation(t *testing.T) {
+	tests := []struct {
+		name     string
+		code     string
+		expected string
+	}{
+		{
+			name: "false condition takes else branch",
+			code: `<?php
+$score = 85;
+if ($score >= 90) {
+    echo "A";
+} else {
+    echo "B";
+}`,
+			expected: "B",
+		},
+		{
+			name: "true condition takes if branch",
+			code: `<?php
+$score = 95;
+if ($score >= 90) {
+    echo "A";
+} else {
+    echo "B";
+}`,
+			expected: "A",
+		},
+		{
+			name: "nested if with multiple conditions",
+			code: `<?php
+$score = 85;
+if ($score >= 90) {
+    echo "A";
+} else {
+    if ($score >= 80) {
+        echo "B";
+    } else {
+        echo "C";
+    }
+}`,
+			expected: "B",
+		},
+		{
+			name: "elseif with multiple conditions",
+			code: `<?php
+$score = 75;
+if ($score >= 90) {
+    echo "A";
+} elseif ($score >= 80) {
+    echo "B";
+} elseif ($score >= 70) {
+    echo "C";
+} else {
+    echo "F";
+}`,
+			expected: "C",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output := compileAndRun(t, tt.code)
+			if output != tt.expected {
+				t.Errorf("Expected output %q, got %q", tt.expected, output)
+			}
+		})
+	}
+}
+
 func TestCompileWhileLoop(t *testing.T) {
 	input := `<?php
 	while ($i < 10) {
@@ -1166,6 +1267,96 @@ func TestCompileWhileLoop(t *testing.T) {
 	}
 	if jmpCount < 1 {
 		t.Error("Expected at least 1 JMP instruction for while loop")
+	}
+}
+
+func TestCompileDoWhileLoop(t *testing.T) {
+	input := `<?php
+	do {
+		$i = $i + 1;
+	} while ($i < 10);
+	`
+
+	bytecode := parseAndCompile(t, input)
+
+	// Do-while should have JMPNZ (jump back if condition true)
+	// Unlike while loop, no JMPZ at the start since body executes first
+	hasJmpnz := false
+	hasJmpz := false
+
+	for _, instr := range bytecode.Instructions {
+		if instr.Opcode == vm.OpJmpNZ {
+			hasJmpnz = true
+		}
+		if instr.Opcode == vm.OpJmpZ {
+			hasJmpz = true
+		}
+	}
+
+	if !hasJmpnz {
+		t.Error("Expected JMPNZ instruction for do-while loop")
+	}
+	// Do-while should NOT have JMPZ (that's for while loops)
+	// The key difference: body always executes at least once
+	if hasJmpz {
+		t.Error("Do-while loop should not have JMPZ instruction")
+	}
+}
+
+func TestCompileDoWhileWithBreakContinue(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{
+			name: "do-while with break",
+			input: `<?php
+			$i = 0;
+			do {
+				$i = $i + 1;
+				if ($i == 5) {
+					break;
+				}
+			} while ($i < 10);
+			`,
+		},
+		{
+			name: "do-while with continue",
+			input: `<?php
+			$i = 0;
+			do {
+				$i = $i + 1;
+				if ($i == 5) {
+					continue;
+				}
+				echo $i;
+			} while ($i < 10);
+			`,
+		},
+		{
+			name: "nested do-while",
+			input: `<?php
+			$i = 0;
+			do {
+				$j = 0;
+				do {
+					$j = $j + 1;
+				} while ($j < 3);
+				$i = $i + 1;
+			} while ($i < 2);
+			`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bytecode := parseAndCompile(t, tt.input)
+
+			// Should successfully compile without errors
+			if len(bytecode.Instructions) == 0 {
+				t.Error("Expected non-empty instruction set")
+			}
+		})
 	}
 }
 
@@ -1316,8 +1507,8 @@ func TestCompileContinueStatement(t *testing.T) {
 		}
 	}
 
-	if jmpCount < 3 {
-		t.Errorf("Expected at least 3 JMP instructions (if-end, continue, loop), got %d", jmpCount)
+	if jmpCount < 2 {
+		t.Errorf("Expected at least 2 JMP instructions (continue, loop), got %d", jmpCount)
 	}
 }
 
@@ -3695,6 +3886,2866 @@ func TestUnsetStatement(t *testing.T) {
 				if !found {
 					t.Errorf("Expected opcode %s not found in: %v", expectedOp, opcodes)
 				}
+			}
+		})
+	}
+}
+
+// ========================================
+// Variable Naming Tests
+// ========================================
+
+// TestBuiltinFunctionNamesAsVariables tests that builtin function names
+// can be used as variable names (PHP allows this)
+func TestBuiltinFunctionNamesAsVariables(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{
+			name: "count as variable",
+			input: `<?php
+$count = 1;
+$count = $count + 1;
+echo $count;
+`,
+		},
+		{
+			name: "empty as variable",
+			input: `<?php
+$empty = "";
+echo $empty;
+`,
+		},
+		{
+			name: "strlen as variable",
+			input: `<?php
+$strlen = 10;
+echo $strlen;
+`,
+		},
+		{
+			name: "echo as variable",
+			input: `<?php
+$echo = "test";
+echo $echo;
+`,
+		},
+		{
+			name: "isset as variable",
+			input: `<?php
+$isset = true;
+if ($isset) {
+    echo "yes";
+}
+`,
+		},
+		{
+			name: "builtin in foreach",
+			input: `<?php
+foreach ([1, 2, 3] as $count) {
+    echo $count;
+}
+`,
+		},
+		{
+			name: "builtin with increment",
+			input: `<?php
+$count = 1;
+$count++;
+echo $count;
+`,
+		},
+		{
+			name: "builtin in isset",
+			input: `<?php
+$count = 5;
+if (isset($count)) {
+    echo $count;
+}
+`,
+		},
+		{
+			name: "builtin in empty",
+			input: `<?php
+$empty = "";
+if (empty($empty)) {
+    echo "is empty";
+}
+`,
+		},
+		{
+			name: "builtin with unset",
+			input: `<?php
+$count = 10;
+unset($count);
+`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Just verify it compiles without error
+			l := lexer.New(tt.input, "test.php")
+			p := parser.New(l)
+			program := p.ParseProgram()
+
+			if len(p.Errors()) > 0 {
+				t.Fatalf("Parser errors:\n%v", p.Errors())
+			}
+
+			c := New()
+			if err := c.Compile(program); err != nil {
+				t.Fatalf("Compilation failed: %v", err)
+			}
+
+			// Verify bytecode was generated
+			bytecode := c.Bytecode()
+			if len(bytecode.Instructions) == 0 {
+				t.Error("No instructions generated")
+			}
+		})
+	}
+}
+
+// ============================================================================
+// Foreach with Operations Tests (Bug Fix for iterator preservation)
+// ============================================================================
+
+// TestForeachWithPostfixIncrement tests foreach with postfix ++ operator
+func TestForeachWithPostfixIncrement(t *testing.T) {
+	code := `<?php
+$arr = [1, 2, 3];
+$total = 0;
+foreach ($arr as $v) {
+    $total++;
+}
+echo "$total";
+`
+	l := lexer.New(code, "test.php")
+	p := parser.New(l)
+	program := p.ParseProgram()
+
+	if len(p.Errors()) > 0 {
+		t.Fatalf("Parser errors: %v", p.Errors())
+	}
+
+	c := New()
+	if err := c.Compile(program); err != nil {
+		t.Fatalf("Compilation failed: %v", err)
+	}
+
+	bytecode := c.Bytecode()
+	v := vm.New()
+	v.LoadConstants(bytecode.Constants)
+
+	if err := v.ExecuteWithCVs(bytecode.Instructions, bytecode.NumCVs); err != nil {
+		t.Fatalf("Execution error: %v", err)
+	}
+
+	expected := "3"
+	output := v.GetOutput()
+	if output != expected {
+		t.Errorf("Expected output %q, got %q", expected, output)
+	}
+}
+
+// TestForeachWithStringConcatenation tests foreach with echo and string concat
+func TestForeachWithStringConcatenation(t *testing.T) {
+	code := `<?php
+$test_files = [
+    'artisan',
+    'public/index.php',
+    'bootstrap/app.php',
+];
+
+$total = 0;
+foreach ($test_files as $file) {
+    $total++;
+    echo "Testing: $file\n";
+}
+
+echo "Total: $total\n";
+`
+
+	l := lexer.New(code, "test.php")
+	p := parser.New(l)
+	program := p.ParseProgram()
+
+	if len(p.Errors()) > 0 {
+		t.Fatalf("Parser errors: %v", p.Errors())
+	}
+
+	c := New()
+	if err := c.Compile(program); err != nil {
+		t.Fatalf("Compilation failed: %v", err)
+	}
+
+	bytecode := c.Bytecode()
+	v := vm.New()
+	v.LoadConstants(bytecode.Constants)
+
+	if err := v.ExecuteWithCVs(bytecode.Instructions, bytecode.NumCVs); err != nil {
+		t.Fatalf("Execution error: %v", err)
+	}
+
+	expected := "Testing: artisan\nTesting: public/index.php\nTesting: bootstrap/app.php\nTotal: 3\n"
+	output := v.GetOutput()
+	if output != expected {
+		t.Errorf("Expected output:\n%s\nGot:\n%s", expected, output)
+	}
+}
+
+// TestForeachWithExplicitAddition tests foreach with $total = $total + 1
+func TestForeachWithExplicitAddition(t *testing.T) {
+	code := `<?php
+$arr = ["a", "b"];
+$total = 0;
+foreach ($arr as $item) {
+    echo "Item: $item, Total before: $total\n";
+    $total = $total + 1;
+    echo "Total after: $total\n";
+}
+echo "Final total: $total\n";
+`
+
+	l := lexer.New(code, "test.php")
+	p := parser.New(l)
+	program := p.ParseProgram()
+
+	if len(p.Errors()) > 0 {
+		t.Fatalf("Parser errors: %v", p.Errors())
+	}
+
+	c := New()
+	if err := c.Compile(program); err != nil {
+		t.Fatalf("Compilation failed: %v", err)
+	}
+
+	bytecode := c.Bytecode()
+	v := vm.New()
+	v.LoadConstants(bytecode.Constants)
+
+	if err := v.ExecuteWithCVs(bytecode.Instructions, bytecode.NumCVs); err != nil {
+		t.Fatalf("Execution error: %v", err)
+	}
+
+	expected := "Item: a, Total before: 0\nTotal after: 1\nItem: b, Total before: 1\nTotal after: 2\nFinal total: 2\n"
+	output := v.GetOutput()
+	if output != expected {
+		t.Errorf("Expected output:\n%s\nGot:\n%s", expected, output)
+	}
+}
+
+// TestIncrementDecrementOperators tests all increment/decrement operator contexts
+func TestIncrementDecrementOperators(t *testing.T) {
+	tests := []struct {
+		name     string
+		code     string
+		expected string
+	}{
+		{
+			name: "pre-increment",
+			code: `<?php
+$a = 5;
+echo ++$a;
+echo ",";
+echo $a;
+`,
+			expected: "6,6",
+		},
+		{
+			name: "post-increment",
+			code: `<?php
+$b = 5;
+echo $b++;
+echo ",";
+echo $b;
+`,
+			expected: "5,6",
+		},
+		{
+			name: "pre-decrement",
+			code: `<?php
+$c = 10;
+echo --$c;
+echo ",";
+echo $c;
+`,
+			expected: "9,9",
+		},
+		{
+			name: "post-decrement",
+			code: `<?php
+$d = 10;
+echo $d--;
+echo ",";
+echo $d;
+`,
+			expected: "10,9",
+		},
+		{
+			name: "increment in expression",
+			code: `<?php
+$e = 5;
+$f = 10 + ++$e;
+echo $f;
+`,
+			expected: "16",
+		},
+		{
+			name: "post-increment in expression",
+			code: `<?php
+$g = 5;
+$h = 10 + $g++;
+echo $h;
+echo ",";
+echo $g;
+`,
+			expected: "15,6",
+		},
+		{
+			name: "increment in for loop",
+			code: `<?php
+$total = 0;
+for ($i = 0; $i < 3; $i++) {
+    $total++;
+}
+echo $total;
+`,
+			expected: "3",
+		},
+		{
+			name: "decrement in while loop",
+			code: `<?php
+$count = 5;
+$result = 0;
+while ($count > 0) {
+    $result++;
+    $count--;
+}
+echo $result;
+`,
+			expected: "5",
+		},
+		// Note: Tests for increment in if conditions are skipped due to a known edge case bug
+		// where if statements with increment operators as the first substantial operation
+		// after the opening PHP tag fail. This works when there's a prior echo with \n.
+		// This is tracked as a separate issue for future investigation.
+		{
+			name: "multiple increments",
+			code: `<?php
+$a = 1;
+$a++;
+$a++;
+++$a;
+echo $a;
+`,
+			expected: "4",
+		},
+		{
+			name: "increment and decrement mixed",
+			code: `<?php
+$b = 10;
+$b++;
+$b--;
+++$b;
+--$b;
+echo $b;
+`,
+			expected: "10",
+		},
+		{
+			name: "increment in array access",
+			code: `<?php
+$arr = [1, 2, 3, 4, 5];
+$i = 0;
+echo $arr[$i++];
+echo ",";
+echo $arr[$i++];
+echo ",";
+echo $i;
+`,
+			expected: "1,2,2",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := lexer.New(tt.code, "test.php")
+			p := parser.New(l)
+			program := p.ParseProgram()
+
+			if len(p.Errors()) > 0 {
+				t.Fatalf("Parser errors: %v", p.Errors())
+			}
+
+			c := New()
+			if err := c.Compile(program); err != nil {
+				t.Fatalf("Compilation failed: %v", err)
+			}
+
+			bytecode := c.Bytecode()
+			v := vm.New()
+			v.LoadConstants(bytecode.Constants)
+
+			if err := v.ExecuteWithCVs(bytecode.Instructions, bytecode.NumCVs); err != nil {
+				t.Fatalf("Execution error: %v", err)
+			}
+
+			output := v.GetOutput()
+			if output != tt.expected {
+				t.Errorf("Expected output %q, got %q", tt.expected, output)
+			}
+		})
+	}
+}
+
+func TestNullCoalescingOperator(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "null coalesce with null left operand",
+			input:    "<?php $x = null; echo $x ?? 'default';",
+			expected: "default",
+		},
+		{
+			name:     "null coalesce with defined left operand",
+			input:    "<?php $x = 'value'; echo $x ?? 'default';",
+			expected: "value",
+		},
+		{
+			name:     "null coalesce with integer zero",
+			input:    "<?php $x = 0; echo $x ?? 'default';",
+			expected: "0",
+		},
+		{
+			name:     "null coalesce with false",
+			input:    "<?php $x = false; echo $x ?? 'default';",
+			expected: "",
+		},
+		{
+			name:     "null coalesce with empty string",
+			input:    "<?php $x = ''; echo $x ?? 'default';",
+			expected: "",
+		},
+		{
+			name:     "chained null coalescing",
+			input:    "<?php $x = null; $y = null; $z = 'result'; echo $x ?? $y ?? $z;",
+			expected: "result",
+		},
+		{
+			name:     "null coalesce with expressions",
+			input:    "<?php $a = 5; $b = 10; echo ($a > 10 ? $a : null) ?? $b;",
+			expected: "10",
+		},
+		{
+			name:     "null coalesce right side not evaluated if left is defined",
+			input:    "<?php $x = 'value'; $y = 'default'; echo $x ?? $y;",
+			expected: "value",
+		},
+		{
+			name:     "null coalesce with numeric values",
+			input:    "<?php $x = 42; echo $x ?? 100;",
+			expected: "42",
+		},
+		{
+			name:     "null coalesce with both null",
+			input:    "<?php $x = null; $y = null; echo ($x ?? $y) ?? 'fallback';",
+			expected: "fallback",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bytecode := parseAndCompile(t, tt.input)
+
+			v := vm.New()
+			v.LoadConstants(bytecode.Constants)
+
+			if err := v.ExecuteWithCVs(bytecode.Instructions, bytecode.NumCVs); err != nil {
+				t.Fatalf("Execution error: %v", err)
+			}
+
+			output := v.GetOutput()
+			if output != tt.expected {
+				t.Errorf("Expected output %q, got %q", tt.expected, output)
+			}
+		})
+	}
+}
+
+func TestClassNameExpression(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "simple class name",
+			input:    "<?php echo stdClass::class;",
+			expected: "stdClass",
+		},
+		{
+			name:     "assign to variable",
+			input:    "<?php $x = stdClass::class; echo $x;",
+			expected: "stdClass",
+		},
+		{
+			name:     "fully qualified namespace",
+			input:    "<?php echo Symfony\\Bundle\\FrameworkBundle\\FrameworkBundle::class;",
+			expected: "Symfony\\Bundle\\FrameworkBundle\\FrameworkBundle",
+		},
+		{
+			name:     "in array key",
+			input:    "<?php $arr = [stdClass::class => 'value']; echo $arr['stdClass'];",
+			expected: "value",
+		},
+		{
+			name:     "in array value",
+			input:    "<?php $arr = ['class' => stdClass::class]; echo $arr['class'];",
+			expected: "stdClass",
+		},
+		{
+			name:     "in function call",
+			input:    "<?php echo strlen(stdClass::class);",
+			expected: "8",
+		},
+		{
+			name:     "concatenation",
+			input:    "<?php echo 'Class: ' . stdClass::class;",
+			expected: "Class: stdClass",
+		},
+		{
+			name:     "multiple class names",
+			input:    "<?php echo stdClass::class . ',' . Exception::class;",
+			expected: "stdClass,Exception",
+		},
+		{
+			name:     "in comparison",
+			input:    "<?php $x = stdClass::class; if ($x === 'stdClass') { echo 'match'; }",
+			expected: "match",
+		},
+		{
+			name:     "custom class name",
+			input:    "<?php echo MyApp\\Models\\User::class;",
+			expected: "MyApp\\Models\\User",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bytecode := parseAndCompile(t, tt.input)
+
+			v := vm.New()
+			v.LoadConstants(bytecode.Constants)
+
+			if err := v.ExecuteWithCVs(bytecode.Instructions, bytecode.NumCVs); err != nil {
+				t.Fatalf("Execution error: %v", err)
+			}
+
+			output := v.GetOutput()
+			if output != tt.expected {
+				t.Errorf("Expected output %q, got %q", tt.expected, output)
+			}
+		})
+	}
+}
+
+// TestForeachArrayDestructuring tests array destructuring in foreach loops
+func TestForeachArrayDestructuring(t *testing.T) {
+	tests := []struct {
+		name     string
+		code     string
+		expected string
+	}{
+		{
+			name: "simple numeric destructuring",
+			code: `<?php
+$pairs = [[1, 2], [3, 4], [5, 6]];
+foreach ($pairs as [$a, $b]) {
+    echo "$a,$b\n";
+}
+`,
+			expected: "1,2\n3,4\n5,6\n",
+		},
+		{
+			name: "destructuring with string keys",
+			code: `<?php
+$data = [
+    ['name' => 'Alice', 'age' => 30],
+    ['name' => 'Bob', 'age' => 25],
+];
+foreach ($data as ['name' => $name, 'age' => $age]) {
+    echo "$name:$age\n";
+}
+`,
+			expected: "Alice:30\nBob:25\n",
+		},
+		{
+			name: "destructuring with mixed keys",
+			code: `<?php
+$items = [
+    ['id' => 1, 'value' => 'A'],
+    ['id' => 2, 'value' => 'B'],
+];
+foreach ($items as ['id' => $id, 'value' => $v]) {
+    echo "$id=$v ";
+}
+`,
+			expected: "1=A 2=B ",
+		},
+		{
+			name: "destructuring with single element",
+			code: `<?php
+$singles = [[1], [2], [3]];
+foreach ($singles as [$x]) {
+    echo "$x ";
+}
+`,
+			expected: "1 2 3 ",
+		},
+		{
+			name: "destructuring with three elements",
+			code: `<?php
+$triples = [[1, 2, 3], [4, 5, 6]];
+foreach ($triples as [$a, $b, $c]) {
+    echo "$a$b$c ";
+}
+`,
+			expected: "123 456 ",
+		},
+		{
+			name: "destructuring in loop body with operations",
+			code: `<?php
+$coords = [[1, 2], [3, 4]];
+$sum = 0;
+foreach ($coords as [$x, $y]) {
+    $sum = $sum + $x + $y;
+}
+echo $sum;
+`,
+			expected: "10",
+		},
+		{
+			name: "destructuring with foreach key",
+			code: `<?php
+$items = [
+    'first' => [10, 20],
+    'second' => [30, 40],
+];
+foreach ($items as $key => [$a, $b]) {
+    echo "$key:$a,$b\n";
+}
+`,
+			expected: "first:10,20\nsecond:30,40\n",
+		},
+		{
+			name: "empty array handling",
+			code: `<?php
+$emptyArr = [];
+foreach ($emptyArr as [$a, $b]) {
+    echo "not executed";
+}
+echo "done";
+`,
+			expected: "done",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bytecode := parseAndCompile(t, tt.code)
+
+			// Verify that FETCH_DIM_R opcodes are generated for destructuring
+			fetchDimCount := 0
+			for _, instr := range bytecode.Instructions {
+				if instr.Opcode == vm.OpFetchDimR {
+					fetchDimCount++
+				}
+			}
+
+			if fetchDimCount == 0 && tt.name != "empty array handling" {
+				t.Error("Expected FETCH_DIM_R opcodes for destructuring, got none")
+			}
+
+			v := vm.New()
+			v.LoadConstants(bytecode.Constants)
+
+			if err := v.ExecuteWithCVs(bytecode.Instructions, bytecode.NumCVs); err != nil {
+				t.Fatalf("Execution error: %v", err)
+			}
+
+			output := v.GetOutput()
+			if output != tt.expected {
+				t.Errorf("Expected output %q, got %q", tt.expected, output)
+			}
+		})
+	}
+}
+
+// ========================================
+// Phase 6D: Standard Library Array Functions Tests
+// ========================================
+
+func TestArrayFunctionCount(t *testing.T) {
+	tests := []struct {
+		name     string
+		code     string
+		expected string
+	}{
+		{
+			name: "count on simple array",
+			code: `<?php
+$arr = [1, 2, 3, 4, 5];
+echo count($arr);
+`,
+			expected: "5",
+		},
+		{
+			name: "count on empty array",
+			code: `<?php
+$arr = [];
+echo count($arr);
+`,
+			expected: "0",
+		},
+		{
+			name: "count on associative array",
+			code: `<?php
+$arr = ["a" => 1, "b" => 2, "c" => 3];
+echo count($arr);
+`,
+			expected: "3",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output := compileAndRun(t, tt.code)
+			if output != tt.expected {
+				t.Errorf("Expected %q, got %q", tt.expected, output)
+			}
+		})
+	}
+}
+
+func TestArrayFunctionArrayPush(t *testing.T) {
+	tests := []struct {
+		name     string
+		code     string
+		expected string
+	}{
+		{
+			name: "array_push single value",
+			code: `<?php
+$arr = [1, 2];
+$len = array_push($arr, 3);
+echo $len;
+`,
+			expected: "3",
+		},
+		{
+			name: "array_push multiple values",
+			code: `<?php
+$arr = [1, 2];
+$len = array_push($arr, 3, 4, 5);
+echo $len;
+`,
+			expected: "5",
+		},
+		{
+			name: "array_push to empty array",
+			code: `<?php
+$arr = [];
+$len = array_push($arr, 1);
+echo $len;
+`,
+			expected: "1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output := compileAndRun(t, tt.code)
+			if output != tt.expected {
+				t.Errorf("Expected %q, got %q", tt.expected, output)
+			}
+		})
+	}
+}
+
+func TestArrayFunctionArrayPop(t *testing.T) {
+	tests := []struct {
+		name     string
+		code     string
+		expected string
+	}{
+		{
+			name: "array_pop from array",
+			code: `<?php
+$arr = [1, 2, 3];
+$val = array_pop($arr);
+echo $val;
+`,
+			expected: "3",
+		},
+		{
+			name: "array_pop changes array length",
+			code: `<?php
+$arr = [1, 2, 3];
+array_pop($arr);
+echo count($arr);
+`,
+			expected: "2",
+		},
+		{
+			name: "array_pop from single element",
+			code: `<?php
+$arr = [5];
+$val = array_pop($arr);
+echo $val;
+`,
+			expected: "5",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output := compileAndRun(t, tt.code)
+			if output != tt.expected {
+				t.Errorf("Expected %q, got %q", tt.expected, output)
+			}
+		})
+	}
+}
+
+func TestArrayFunctionArrayMerge(t *testing.T) {
+	tests := []struct {
+		name     string
+		code     string
+		expected string
+	}{
+		{
+			name: "array_merge two arrays",
+			code: `<?php
+$arr1 = [1, 2];
+$arr2 = [3, 4];
+$merged = array_merge($arr1, $arr2);
+echo count($merged);
+`,
+			expected: "4",
+		},
+		{
+			name: "array_merge empty arrays",
+			code: `<?php
+$arr1 = [];
+$arr2 = [];
+$merged = array_merge($arr1, $arr2);
+echo count($merged);
+`,
+			expected: "0",
+		},
+		{
+			name: "array_merge three arrays",
+			code: `<?php
+$arr1 = [1];
+$arr2 = [2];
+$arr3 = [3];
+$merged = array_merge($arr1, $arr2, $arr3);
+echo count($merged);
+`,
+			expected: "3",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output := compileAndRun(t, tt.code)
+			if output != tt.expected {
+				t.Errorf("Expected %q, got %q", tt.expected, output)
+			}
+		})
+	}
+}
+
+func TestArrayFunctionArrayFilter(t *testing.T) {
+	tests := []struct {
+		name     string
+		code     string
+		expected string
+	}{
+		{
+			name: "array_filter removes falsy values",
+			code: `<?php
+$arr = [0, 1, false, 2, "", 3];
+$filtered = array_filter($arr);
+echo count($filtered);
+`,
+			expected: "3",
+		},
+		{
+			name: "array_filter all truthy",
+			code: `<?php
+$arr = [1, 2, 3];
+$filtered = array_filter($arr);
+echo count($filtered);
+`,
+			expected: "3",
+		},
+		{
+			name: "array_filter all falsy",
+			code: `<?php
+$arr = [0, false, ""];
+$filtered = array_filter($arr);
+echo count($filtered);
+`,
+			expected: "0",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output := compileAndRun(t, tt.code)
+			if output != tt.expected {
+				t.Errorf("Expected %q, got %q", tt.expected, output)
+			}
+		})
+	}
+}
+
+func TestArrayFunctionsIntegration(t *testing.T) {
+	code := `<?php
+// Test count
+$arr = [1, 2, 3];
+echo count($arr) . "\n";
+
+// Test array_push
+array_push($arr, 4, 5);
+echo count($arr) . "\n";
+
+// Test array_pop
+$val = array_pop($arr);
+echo $val . "\n";
+
+// Test array_merge
+$arr2 = [6, 7];
+$merged = array_merge($arr, $arr2);
+echo count($merged) . "\n";
+
+// Test array_filter
+$arr3 = [0, 1, false, 2, 3];
+$filtered = array_filter($arr3);
+echo count($filtered) . "\n";
+`
+	expected := "3\n5\n5\n6\n3\n"
+
+	output := compileAndRun(t, code)
+	if output != expected {
+		t.Errorf("Expected %q, got %q", expected, output)
+	}
+}
+
+// ============================================================================
+// String Functions Tests (Phase 6D.2)
+// ============================================================================
+
+func TestStringFunctionStrlen(t *testing.T) {
+	tests := []struct {
+		name     string
+		code     string
+		expected string
+	}{
+		{
+			name: "strlen basic",
+			code: `<?php
+$str = "Hello World";
+echo strlen($str);
+`,
+			expected: "11",
+		},
+		{
+			name: "strlen empty string",
+			code: `<?php
+$str = "";
+echo strlen($str);
+`,
+			expected: "0",
+		},
+		{
+			name: "strlen with variable",
+			code: `<?php
+$msg = "PHP-Go";
+echo strlen($msg);
+`,
+			expected: "6",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output := compileAndRun(t, tt.code)
+			if output != tt.expected {
+				t.Errorf("Expected %q, got %q", tt.expected, output)
+			}
+		})
+	}
+}
+
+func TestStringFunctionSubstr(t *testing.T) {
+	tests := []struct {
+		name     string
+		code     string
+		expected string
+	}{
+		{
+			name: "substr basic",
+			code: `<?php
+$str = "Hello World";
+echo substr($str, 0, 5);
+`,
+			expected: "Hello",
+		},
+		{
+			name: "substr negative offset",
+			code: `<?php
+$str = "Hello World";
+echo substr($str, -5, 5);
+`,
+			expected: "World",
+		},
+		{
+			name: "substr no length",
+			code: `<?php
+$str = "Hello World";
+echo substr($str, 6);
+`,
+			expected: "World",
+		},
+		{
+			name: "substr middle",
+			code: `<?php
+$str = "Hello World";
+echo substr($str, 3, 5);
+`,
+			expected: "lo Wo",
+		},
+		{
+			name: "substr negative length",
+			code: `<?php
+$str = "Hello World";
+echo substr($str, 0, -6);
+`,
+			expected: "Hello",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output := compileAndRun(t, tt.code)
+			if output != tt.expected {
+				t.Errorf("Expected %q, got %q", tt.expected, output)
+			}
+		})
+	}
+}
+
+func TestStringFunctionStrReplace(t *testing.T) {
+	tests := []struct {
+		name     string
+		code     string
+		expected string
+	}{
+		{
+			name: "str_replace basic",
+			code: `<?php
+$str = "Hello World";
+echo str_replace("World", "PHP", $str);
+`,
+			expected: "Hello PHP",
+		},
+		{
+			name: "str_replace multiple occurrences",
+			code: `<?php
+$str = "Hello World World";
+echo str_replace("World", "PHP", $str);
+`,
+			expected: "Hello PHP PHP",
+		},
+		{
+			name: "str_replace no match",
+			code: `<?php
+$str = "Hello World";
+echo str_replace("xyz", "abc", $str);
+`,
+			expected: "Hello World",
+		},
+		{
+			name: "str_replace empty search",
+			code: `<?php
+$str = "Hello";
+echo str_replace("", "X", $str);
+`,
+			expected: "Hello",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output := compileAndRun(t, tt.code)
+			if output != tt.expected {
+				t.Errorf("Expected %q, got %q", tt.expected, output)
+			}
+		})
+	}
+}
+
+func TestStringFunctionExplode(t *testing.T) {
+	tests := []struct {
+		name     string
+		code     string
+		expected string
+	}{
+		{
+			name: "explode basic",
+			code: `<?php
+$str = "a,b,c";
+$arr = explode(",", $str);
+echo count($arr);
+`,
+			expected: "3",
+		},
+		{
+			name: "explode with spaces",
+			code: `<?php
+$str = "Hello World PHP";
+$arr = explode(" ", $str);
+echo count($arr) . "\n";
+echo $arr[0] . "\n";
+echo $arr[1] . "\n";
+echo $arr[2];
+`,
+			expected: "3\nHello\nWorld\nPHP",
+		},
+		{
+			name: "explode with limit",
+			code: `<?php
+$str = "a,b,c,d";
+$arr = explode(",", $str, 2);
+echo count($arr) . "\n";
+echo $arr[0] . "\n";
+echo $arr[1];
+`,
+			expected: "2\na\nb,c,d",
+		},
+		{
+			name: "explode single element",
+			code: `<?php
+$str = "Hello";
+$arr = explode(",", $str);
+echo count($arr) . "\n";
+echo $arr[0];
+`,
+			expected: "1\nHello",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output := compileAndRun(t, tt.code)
+			if output != tt.expected {
+				t.Errorf("Expected %q, got %q", tt.expected, output)
+			}
+		})
+	}
+}
+
+func TestStringFunctionImplode(t *testing.T) {
+	tests := []struct {
+		name     string
+		code     string
+		expected string
+	}{
+		{
+			name: "implode basic",
+			code: `<?php
+$arr = ["a", "b", "c"];
+echo implode(",", $arr);
+`,
+			expected: "a,b,c",
+		},
+		{
+			name: "implode with space",
+			code: `<?php
+$arr = ["Hello", "World", "PHP"];
+echo implode(" ", $arr);
+`,
+			expected: "Hello World PHP",
+		},
+		{
+			name: "implode empty separator",
+			code: `<?php
+$arr = ["a", "b", "c"];
+echo implode("", $arr);
+`,
+			expected: "abc",
+		},
+		{
+			name: "implode numbers",
+			code: `<?php
+$arr = [1, 2, 3];
+echo implode(",", $arr);
+`,
+			expected: "1,2,3",
+		},
+		{
+			name: "join alias",
+			code: `<?php
+$arr = ["x", "y", "z"];
+echo join("-", $arr);
+`,
+			expected: "x-y-z",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output := compileAndRun(t, tt.code)
+			if output != tt.expected {
+				t.Errorf("Expected %q, got %q", tt.expected, output)
+			}
+		})
+	}
+}
+
+func TestStringFunctionsIntegration(t *testing.T) {
+	code := `<?php
+// Test strlen
+$str = "Hello World";
+echo strlen($str) . "\n";
+
+// Test substr
+$part = substr($str, 0, 5);
+echo $part . "\n";
+
+// Test str_replace
+$replaced = str_replace("World", "PHP", $str);
+echo $replaced . "\n";
+
+// Test explode
+$words = explode(" ", $str);
+echo count($words) . "\n";
+
+// Test implode
+$joined = implode("-", $words);
+echo $joined . "\n";
+
+// Combined operations
+$str2 = "apple,banana,cherry";
+$fruits = explode(",", $str2);
+$modified = str_replace("banana", "orange", implode(" ", $fruits));
+echo $modified . "\n";
+`
+	expected := "11\nHello\nHello PHP\n2\nHello-World\napple orange cherry\n"
+
+	output := compileAndRun(t, code)
+	if output != expected {
+		t.Errorf("Expected %q, got %q", expected, output)
+	}
+}
+
+// ========================================
+// Type Checking Functions Tests
+// ========================================
+
+func TestTypeCheckingFunctions(t *testing.T) {
+	tests := []struct {
+		name     string
+		code     string
+		expected string
+	}{
+		{
+			name: "is_null with null",
+			code: `<?php
+$var = null;
+if (is_null($var)) {
+    echo "1";
+} else {
+    echo "0";
+}
+`,
+			expected: "1",
+		},
+		{
+			name: "is_null with non-null",
+			code: `<?php
+$var = 5;
+if (is_null($var)) {
+    echo "1";
+} else {
+    echo "0";
+}
+`,
+			expected: "0",
+		},
+		{
+			name: "is_bool with boolean",
+			code: `<?php
+$var = true;
+if (is_bool($var)) {
+    echo "1";
+} else {
+    echo "0";
+}
+`,
+			expected: "1",
+		},
+		{
+			name: "is_bool with non-boolean",
+			code: `<?php
+$var = 1;
+if (is_bool($var)) {
+    echo "1";
+} else {
+    echo "0";
+}
+`,
+			expected: "0",
+		},
+		{
+			name: "is_int with integer",
+			code: `<?php
+$var = 42;
+if (is_int($var)) {
+    echo "1";
+} else {
+    echo "0";
+}
+`,
+			expected: "1",
+		},
+		{
+			name: "is_int with float",
+			code: `<?php
+$var = 42.5;
+if (is_int($var)) {
+    echo "1";
+} else {
+    echo "0";
+}
+`,
+			expected: "0",
+		},
+		{
+			name: "is_integer alias",
+			code: `<?php
+$var = 42;
+if (is_integer($var)) {
+    echo "1";
+} else {
+    echo "0";
+}
+`,
+			expected: "1",
+		},
+		{
+			name: "is_long alias",
+			code: `<?php
+$var = 42;
+if (is_long($var)) {
+    echo "1";
+} else {
+    echo "0";
+}
+`,
+			expected: "1",
+		},
+		{
+			name: "is_float with float",
+			code: `<?php
+$var = 3.14;
+if (is_float($var)) {
+    echo "1";
+} else {
+    echo "0";
+}
+`,
+			expected: "1",
+		},
+		{
+			name: "is_float with integer",
+			code: `<?php
+$var = 42;
+if (is_float($var)) {
+    echo "1";
+} else {
+    echo "0";
+}
+`,
+			expected: "0",
+		},
+		{
+			name: "is_double alias",
+			code: `<?php
+$var = 3.14;
+if (is_double($var)) {
+    echo "1";
+} else {
+    echo "0";
+}
+`,
+			expected: "1",
+		},
+		{
+			name: "is_real alias",
+			code: `<?php
+$var = 3.14;
+if (is_real($var)) {
+    echo "1";
+} else {
+    echo "0";
+}
+`,
+			expected: "1",
+		},
+		{
+			name: "is_string with string",
+			code: `<?php
+$var = "hello";
+if (is_string($var)) {
+    echo "1";
+} else {
+    echo "0";
+}
+`,
+			expected: "1",
+		},
+		{
+			name: "is_string with integer",
+			code: `<?php
+$var = 123;
+if (is_string($var)) {
+    echo "1";
+} else {
+    echo "0";
+}
+`,
+			expected: "0",
+		},
+		{
+			name: "is_array with array",
+			code: `<?php
+$var = array(1, 2, 3);
+if (is_array($var)) {
+    echo "1";
+} else {
+    echo "0";
+}
+`,
+			expected: "1",
+		},
+		{
+			name: "is_array with string",
+			code: `<?php
+$var = "hello";
+if (is_array($var)) {
+    echo "1";
+} else {
+    echo "0";
+}
+`,
+			expected: "0",
+		},
+		{
+			name: "is_object with object",
+			code: `<?php
+class Test {}
+$var = new Test();
+if (is_object($var)) {
+    echo "1";
+} else {
+    echo "0";
+}
+`,
+			expected: "1",
+		},
+		{
+			name: "is_object with array",
+			code: `<?php
+$var = array();
+if (is_object($var)) {
+    echo "1";
+} else {
+    echo "0";
+}
+`,
+			expected: "0",
+		},
+		{
+			name: "is_numeric with int",
+			code: `<?php
+$var = 42;
+if (is_numeric($var)) {
+    echo "1";
+} else {
+    echo "0";
+}
+`,
+			expected: "1",
+		},
+		{
+			name: "is_numeric with float",
+			code: `<?php
+$var = 3.14;
+if (is_numeric($var)) {
+    echo "1";
+} else {
+    echo "0";
+}
+`,
+			expected: "1",
+		},
+		{
+			name: "is_numeric with numeric string",
+			code: `<?php
+$var = "123";
+if (is_numeric($var)) {
+    echo "1";
+} else {
+    echo "0";
+}
+`,
+			expected: "1",
+		},
+		{
+			name: "is_numeric with non-numeric string",
+			code: `<?php
+$var = "hello";
+if (is_numeric($var)) {
+    echo "1";
+} else {
+    echo "0";
+}
+`,
+			expected: "0",
+		},
+		{
+			name: "is_scalar with int",
+			code: `<?php
+$var = 42;
+if (is_scalar($var)) {
+    echo "1";
+} else {
+    echo "0";
+}
+`,
+			expected: "1",
+		},
+		{
+			name: "is_scalar with string",
+			code: `<?php
+$var = "hello";
+if (is_scalar($var)) {
+    echo "1";
+} else {
+    echo "0";
+}
+`,
+			expected: "1",
+		},
+		{
+			name: "is_scalar with array",
+			code: `<?php
+$var = array();
+if (is_scalar($var)) {
+    echo "1";
+} else {
+    echo "0";
+}
+`,
+			expected: "0",
+		},
+		{
+			name: "gettype with null",
+			code: `<?php
+$var = null;
+echo gettype($var);
+`,
+			expected: "NULL",
+		},
+		{
+			name: "gettype with boolean",
+			code: `<?php
+$var = true;
+echo gettype($var);
+`,
+			expected: "boolean",
+		},
+		{
+			name: "gettype with integer",
+			code: `<?php
+$var = 42;
+echo gettype($var);
+`,
+			expected: "integer",
+		},
+		{
+			name: "gettype with float",
+			code: `<?php
+$var = 3.14;
+echo gettype($var);
+`,
+			expected: "double",
+		},
+		{
+			name: "gettype with string",
+			code: `<?php
+$var = "hello";
+echo gettype($var);
+`,
+			expected: "string",
+		},
+		{
+			name: "gettype with array",
+			code: `<?php
+$var = array(1, 2, 3);
+echo gettype($var);
+`,
+			expected: "array",
+		},
+		{
+			name: "gettype with object",
+			code: `<?php
+class Test {}
+$var = new Test();
+echo gettype($var);
+`,
+			expected: "object",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output := compileAndRun(t, tt.code)
+			if output != tt.expected {
+				t.Errorf("Expected %q, got %q", tt.expected, output)
+			}
+		})
+	}
+}
+
+func TestTypeFunctionsIntegration(t *testing.T) {
+	code := `<?php
+// Test multiple types
+$values = array(
+    null,
+    true,
+    42,
+    3.14,
+    "hello",
+    array(1, 2, 3)
+);
+
+// Check each value's type
+foreach ($values as $val) {
+    echo gettype($val) . " ";
+}
+echo "\n";
+
+// Test type checking with conditionals
+$x = 42;
+if (is_int($x)) {
+    echo "x is integer\n";
+}
+
+$y = "123";
+if (is_string($y)) {
+    if (is_numeric($y)) {
+        echo "y is numeric string\n";
+    }
+}
+
+$z = array(1, 2, 3);
+if (is_array($z)) {
+    echo "z is array with " . count($z) . " elements\n";
+}
+
+// Test scalar check
+$scalar_values = array(42, 3.14, "hello", true);
+$non_scalar = array(array(), null);
+
+$scalar_count = 0;
+foreach ($scalar_values as $val) {
+    if (is_scalar($val)) {
+        $scalar_count = $scalar_count + 1;
+    }
+}
+echo "Scalar values: " . $scalar_count . "\n";
+
+// Test null checking
+$null_var = null;
+$not_null = 0;
+if (is_null($null_var)) {
+    if (!is_null($not_null)) {
+        echo "Null check works\n";
+    }
+}
+`
+	expected := "NULL boolean integer double string array \nx is integer\ny is numeric string\nz is array with 3 elements\nScalar values: 4\nNull check works\n"
+
+	output := compileAndRun(t, code)
+	if output != expected {
+		t.Errorf("Expected %q, got %q", expected, output)
+	}
+}
+
+// TestUtilityFunctions tests utility functions (print_r, microtime, date)
+func TestUtilityFunctions(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		validate func(t *testing.T, output string)
+	}{
+		{
+			name:  "print_r with array",
+			input: `<?php $arr = [1, 2, 3]; print_r($arr);`,
+			validate: func(t *testing.T, output string) {
+				if !strings.Contains(output, "Array") {
+					t.Errorf("Expected output to contain 'Array', got %q", output)
+				}
+				if !strings.Contains(output, "[0] => 1") {
+					t.Errorf("Expected output to contain '[0] => 1', got %q", output)
+				}
+			},
+		},
+		{
+			name:  "print_r with return parameter",
+			input: `<?php $arr = [1, 2]; $str = print_r($arr, true); echo strlen($str);`,
+			validate: func(t *testing.T, output string) {
+				// Output should be the length of the returned string, not the array itself
+				if output == "Array" {
+					t.Errorf("Expected print_r to return string, not print it")
+				}
+			},
+		},
+		{
+			name:  "print_r with nested array",
+			input: `<?php $arr = ["a" => [1, 2], "b" => 3]; print_r($arr);`,
+			validate: func(t *testing.T, output string) {
+				if !strings.Contains(output, "[a] =>") {
+					t.Errorf("Expected output to contain '[a] =>', got %q", output)
+				}
+				if !strings.Contains(output, "[b] => 3") {
+					t.Errorf("Expected output to contain '[b] => 3', got %q", output)
+				}
+			},
+		},
+		{
+			name:  "print_r with string",
+			input: `<?php print_r("hello");`,
+			validate: func(t *testing.T, output string) {
+				if output != "hello" {
+					t.Errorf("Expected 'hello', got %q", output)
+				}
+			},
+		},
+		{
+			name:  "print_r with integer",
+			input: `<?php print_r(42);`,
+			validate: func(t *testing.T, output string) {
+				if output != "42" {
+					t.Errorf("Expected '42', got %q", output)
+				}
+			},
+		},
+		{
+			name:  "microtime as string",
+			input: `<?php $t = microtime(); echo gettype($t);`,
+			validate: func(t *testing.T, output string) {
+				if output != "string" {
+					t.Errorf("Expected 'string', got %q", output)
+				}
+			},
+		},
+		{
+			name:  "microtime as float",
+			input: `<?php $t = microtime(true); echo gettype($t);`,
+			validate: func(t *testing.T, output string) {
+				if output != "double" {
+					t.Errorf("Expected 'double', got %q", output)
+				}
+			},
+		},
+		{
+			name:  "microtime format check",
+			input: `<?php $t = microtime(); if (is_string($t)) { echo "ok"; } else { echo "fail"; }`,
+			validate: func(t *testing.T, output string) {
+				if output != "ok" {
+					t.Errorf("Expected 'ok', got %q", output)
+				}
+			},
+		},
+		{
+			name:  "date with format",
+			input: `<?php echo date("Y");`,
+			validate: func(t *testing.T, output string) {
+				// Should return current year as 4 digits
+				if len(output) != 4 {
+					t.Errorf("Expected 4 digit year, got %q", output)
+				}
+				year, err := strconv.Atoi(output)
+				if err != nil || year < 2020 || year > 2100 {
+					t.Errorf("Expected valid year, got %q", output)
+				}
+			},
+		},
+		{
+			name:  "date with multiple format characters",
+			input: `<?php echo strlen(date("Y-m-d"));`,
+			validate: func(t *testing.T, output string) {
+				// Y-m-d format is 10 characters: 2025-11-24
+				if output != "10" {
+					t.Errorf("Expected '10', got %q", output)
+				}
+			},
+		},
+		{
+			name:  "date with timestamp",
+			input: `<?php echo date("Y", 0);`,
+			validate: func(t *testing.T, output string) {
+				// Unix epoch 0 is 1970
+				if output != "1970" {
+					t.Errorf("Expected '1970', got %q", output)
+				}
+			},
+		},
+		{
+			name:  "date with H:i:s format",
+			input: `<?php echo strlen(date("H:i:s"));`,
+			validate: func(t *testing.T, output string) {
+				// H:i:s format is 8 characters: 12:34:56
+				if output != "8" {
+					t.Errorf("Expected '8', got %q", output)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bytecode := parseAndCompile(t, tt.input)
+
+			v := vm.New()
+			v.LoadConstants(bytecode.Constants)
+
+			if err := v.ExecuteWithCVs(bytecode.Instructions, bytecode.NumCVs); err != nil {
+				t.Fatalf("Execution error: %v", err)
+			}
+
+			output := v.GetOutput()
+			tt.validate(t, output)
+		})
+	}
+}
+
+// TestUtilityFunctionsIntegration tests utility functions working together
+func TestUtilityFunctionsIntegration(t *testing.T) {
+	code := `<?php
+// Test print_r
+$data = ["name" => "Alice", "age" => 30, "active" => true];
+$output = print_r($data, true);
+if (strlen($output) > 0) {
+    echo "print_r works\n";
+}
+
+// Test microtime
+$start = microtime(true);
+$end = microtime(true);
+if ($end >= $start) {
+    echo "microtime works\n";
+}
+
+// Test date
+$year = date("Y");
+if (strlen($year) == 4) {
+    echo "date works\n";
+}
+
+// Combined test
+$timestamp = date("Y-m-d H:i:s");
+if (strlen($timestamp) == 19) {
+    echo "date formatting works\n";
+}
+
+// Test print_r with return
+$arr = [1, 2, 3];
+$str = print_r($arr, true);
+if (is_string($str)) {
+    echo "print_r return works\n";
+}
+`
+	expected := "print_r works\nmicrotime works\ndate works\ndate formatting works\nprint_r return works\n"
+
+	output := compileAndRun(t, code)
+	if output != expected {
+		t.Errorf("Expected %q, got %q", expected, output)
+	}
+}
+
+// ============================================================================
+// Math Functions Tests (Phase 6D.5)
+// ============================================================================
+
+func TestMathFunctionAbs(t *testing.T) {
+	tests := []struct {
+		name     string
+		code     string
+		expected string
+	}{
+		{
+			name: "abs positive integer",
+			code: `<?php
+echo abs(5);
+`,
+			expected: "5",
+		},
+		{
+			name: "abs negative integer",
+			code: `<?php
+echo abs(-5);
+`,
+			expected: "5",
+		},
+		{
+			name: "abs positive float",
+			code: `<?php
+echo abs(3.14);
+`,
+			expected: "3.14",
+		},
+		{
+			name: "abs negative float",
+			code: `<?php
+echo abs(-3.14);
+`,
+			expected: "3.14",
+		},
+		{
+			name: "abs zero",
+			code: `<?php
+echo abs(0);
+`,
+			expected: "0",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output := compileAndRun(t, tt.code)
+			if output != tt.expected {
+				t.Errorf("Expected %q, got %q", tt.expected, output)
+			}
+		})
+	}
+}
+
+func TestMathFunctionCeil(t *testing.T) {
+	tests := []struct {
+		name     string
+		code     string
+		expected string
+	}{
+		{
+			name: "ceil positive",
+			code: `<?php
+echo ceil(4.3);
+`,
+			expected: "5",
+		},
+		{
+			name: "ceil negative",
+			code: `<?php
+echo ceil(-4.3);
+`,
+			expected: "-4",
+		},
+		{
+			name: "ceil whole number",
+			code: `<?php
+echo ceil(5);
+`,
+			expected: "5",
+		},
+		{
+			name: "ceil small decimal",
+			code: `<?php
+echo ceil(4.001);
+`,
+			expected: "5",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output := compileAndRun(t, tt.code)
+			if output != tt.expected {
+				t.Errorf("Expected %q, got %q", tt.expected, output)
+			}
+		})
+	}
+}
+
+func TestMathFunctionFloor(t *testing.T) {
+	tests := []struct {
+		name     string
+		code     string
+		expected string
+	}{
+		{
+			name: "floor positive",
+			code: `<?php
+echo floor(4.9);
+`,
+			expected: "4",
+		},
+		{
+			name: "floor negative",
+			code: `<?php
+echo floor(-4.3);
+`,
+			expected: "-5",
+		},
+		{
+			name: "floor whole number",
+			code: `<?php
+echo floor(5);
+`,
+			expected: "5",
+		},
+		{
+			name: "floor large decimal",
+			code: `<?php
+echo floor(4.999);
+`,
+			expected: "4",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output := compileAndRun(t, tt.code)
+			if output != tt.expected {
+				t.Errorf("Expected %q, got %q", tt.expected, output)
+			}
+		})
+	}
+}
+
+func TestMathFunctionRound(t *testing.T) {
+	tests := []struct {
+		name     string
+		code     string
+		expected string
+	}{
+		{
+			name: "round default precision",
+			code: `<?php
+echo round(4.5);
+`,
+			expected: "5",
+		},
+		{
+			name: "round down",
+			code: `<?php
+echo round(4.4);
+`,
+			expected: "4",
+		},
+		{
+			name: "round with precision",
+			code: `<?php
+echo round(4.567, 2);
+`,
+			expected: "4.57",
+		},
+		{
+			name: "round negative",
+			code: `<?php
+echo round(-4.5);
+`,
+			expected: "-5",
+		},
+		{
+			name: "round zero precision",
+			code: `<?php
+echo round(4.999, 0);
+`,
+			expected: "5",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output := compileAndRun(t, tt.code)
+			if output != tt.expected {
+				t.Errorf("Expected %q, got %q", tt.expected, output)
+			}
+		})
+	}
+}
+
+func TestMathFunctionMin(t *testing.T) {
+	tests := []struct {
+		name     string
+		code     string
+		expected string
+	}{
+		{
+			name: "min two integers",
+			code: `<?php
+echo min(5, 3);
+`,
+			expected: "3",
+		},
+		{
+			name: "min multiple integers",
+			code: `<?php
+echo min(5, 3, 8, 1, 9);
+`,
+			expected: "1",
+		},
+		{
+			name: "min floats",
+			code: `<?php
+echo min(3.14, 2.71, 1.41);
+`,
+			expected: "1.41",
+		},
+		{
+			name: "min negative numbers",
+			code: `<?php
+echo min(-5, -3, -10);
+`,
+			expected: "-10",
+		},
+		{
+			name: "min array",
+			code: `<?php
+$arr = [5, 3, 8, 1];
+echo min($arr);
+`,
+			expected: "1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output := compileAndRun(t, tt.code)
+			if output != tt.expected {
+				t.Errorf("Expected %q, got %q", tt.expected, output)
+			}
+		})
+	}
+}
+
+func TestMathFunctionMax(t *testing.T) {
+	tests := []struct {
+		name     string
+		code     string
+		expected string
+	}{
+		{
+			name: "max two integers",
+			code: `<?php
+echo max(5, 3);
+`,
+			expected: "5",
+		},
+		{
+			name: "max multiple integers",
+			code: `<?php
+echo max(5, 3, 8, 1, 9);
+`,
+			expected: "9",
+		},
+		{
+			name: "max floats",
+			code: `<?php
+echo max(3.14, 2.71, 1.41);
+`,
+			expected: "3.14",
+		},
+		{
+			name: "max negative numbers",
+			code: `<?php
+echo max(-5, -3, -10);
+`,
+			expected: "-3",
+		},
+		{
+			name: "max array",
+			code: `<?php
+$arr = [5, 3, 8, 1];
+echo max($arr);
+`,
+			expected: "8",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output := compileAndRun(t, tt.code)
+			if output != tt.expected {
+				t.Errorf("Expected %q, got %q", tt.expected, output)
+			}
+		})
+	}
+}
+
+func TestMathFunctionsIntegration(t *testing.T) {
+	code := `<?php
+// Test abs
+echo abs(-10) . "\n";
+
+// Test ceil
+echo ceil(4.3) . "\n";
+
+// Test floor
+echo floor(4.9) . "\n";
+
+// Test round
+echo round(4.567, 1) . "\n";
+
+// Test min
+echo min(5, 3, 8) . "\n";
+
+// Test max
+echo max(5, 3, 8) . "\n";
+
+// Combined usage
+$value = -3.7;
+$absValue = abs($value);
+$ceilValue = ceil($absValue);
+$floorValue = floor($absValue);
+echo $ceilValue . "\n";
+echo $floorValue . "\n";
+
+// Min/Max with calculations
+$a = 10;
+$b = 20;
+$c = 15;
+echo min($a, $b, $c) . "\n";
+echo max($a, $b, $c) . "\n";
+
+// Round in calculations
+$price = 19.99;
+$tax = 0.08;
+$total = round($price * (1 + $tax), 2);
+echo $total . "\n";
+`
+	expected := "10\n5\n4\n4.6\n3\n8\n4\n3\n10\n20\n21.59\n"
+
+	output := compileAndRun(t, code)
+	if output != expected {
+		t.Errorf("Expected %q, got %q", expected, output)
+	}
+}
+// ========================================
+// Array Spread Operator Tests (PHP 7.4+)
+// ========================================
+
+func TestArraySpreadOperator(t *testing.T) {
+	tests := []struct {
+		name     string
+		code     string
+		expected string
+	}{
+		{
+			name: "Basic array spread",
+			code: `<?php
+$arr1 = [1, 2, 3];
+$arr2 = [4, 5, 6];
+$combined = [...$arr1, ...$arr2];
+var_dump($combined);
+`,
+			expected: `array(6) {
+  [0]=>
+  int(1)
+  [1]=>
+  int(2)
+  [2]=>
+  int(3)
+  [3]=>
+  int(4)
+  [4]=>
+  int(5)
+  [5]=>
+  int(6)
+}
+`,
+		},
+		{
+			name: "Spread with literals",
+			code: `<?php
+$arr = [2, 3, 4];
+$result = [1, ...$arr, 5];
+var_dump($result);
+`,
+			expected: `array(5) {
+  [0]=>
+  int(1)
+  [1]=>
+  int(2)
+  [2]=>
+  int(3)
+  [3]=>
+  int(4)
+  [4]=>
+  int(5)
+}
+`,
+		},
+		{
+			name: "Spread associative arrays",
+			code: `<?php
+$arr1 = ['a' => 1, 'b' => 2];
+$arr2 = ['c' => 3];
+$result = [...$arr1, ...$arr2];
+var_dump($result);
+`,
+			expected: `array(3) {
+  ["a"]=>
+  int(1)
+  ["b"]=>
+  int(2)
+  ["c"]=>
+  int(3)
+}
+`,
+		},
+		{
+			name: "Multiple spreads",
+			code: `<?php
+$a = [1, 2];
+$b = [3, 4];
+$c = [5, 6];
+$result = [...$a, ...$b, ...$c];
+var_dump($result);
+`,
+			expected: `array(6) {
+  [0]=>
+  int(1)
+  [1]=>
+  int(2)
+  [2]=>
+  int(3)
+  [3]=>
+  int(4)
+  [4]=>
+  int(5)
+  [5]=>
+  int(6)
+}
+`,
+		},
+		{
+			name: "Spread empty array",
+			code: `<?php
+$empty = [];
+$result = [...$empty, 1, 2];
+var_dump($result);
+`,
+			expected: `array(2) {
+  [0]=>
+  int(1)
+  [1]=>
+  int(2)
+}
+`,
+		},
+		{
+			name: "Spread with mixed keys",
+			code: `<?php
+$arr1 = [0 => 'a', 1 => 'b'];
+$arr2 = ['x' => 'c', 'y' => 'd'];
+$result = [...$arr1, ...$arr2];
+var_dump($result);
+`,
+			expected: `array(4) {
+  [0]=>
+  string(1) "a"
+  [1]=>
+  string(1) "b"
+  ["x"]=>
+  string(1) "c"
+  ["y"]=>
+  string(1) "d"
+}
+`,
+		},
+		{
+			name: "Spread renumbers numeric keys",
+			code: `<?php
+$arr1 = [10 => 'a', 20 => 'b'];
+$arr2 = [30 => 'c'];
+$result = [...$arr1, ...$arr2];
+var_dump($result);
+`,
+			expected: `array(3) {
+  [0]=>
+  string(1) "a"
+  [1]=>
+  string(1) "b"
+  [2]=>
+  string(1) "c"
+}
+`,
+		},
+		{
+			name: "Spread in nested array",
+			code: `<?php
+$arr = [1, 2, 3];
+$result = [[...$arr], 4];
+var_dump($result);
+`,
+			expected: `array(2) {
+  [0]=>
+  array(3) {
+    [0]=>
+    int(1)
+    [1]=>
+    int(2)
+    [2]=>
+    int(3)
+  }
+  [1]=>
+  int(4)
+}
+`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output := compileAndRun(t, tt.code)
+			if output != tt.expected {
+				t.Errorf("Expected:\n%s\nGot:\n%s", tt.expected, output)
+			}
+		})
+	}
+}
+
+// ============================================================================
+// isset() and empty() Comprehensive Tests
+// ============================================================================
+
+func TestIssetWithUndefinedVariables(t *testing.T) {
+	tests := []struct {
+		name     string
+		code     string
+		expected string
+	}{
+		{
+			name: "isset undefined variable returns false",
+			code: `<?php
+$result = isset($undefined);
+var_dump($result);
+`,
+			expected: "bool(false)\n",
+		},
+		{
+			name: "isset defined variable returns true",
+			code: `<?php
+$defined = "value";
+$result = isset($defined);
+var_dump($result);
+`,
+			expected: "bool(true)\n",
+		},
+		{
+			name: "isset null variable returns false",
+			code: `<?php
+$nullVar = null;
+$result = isset($nullVar);
+var_dump($result);
+`,
+			expected: "bool(false)\n",
+		},
+		{
+			name: "isset after unset returns false",
+			code: `<?php
+$var = "exists";
+unset($var);
+$result = isset($var);
+var_dump($result);
+`,
+			expected: "bool(false)\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output := compileAndRun(t, tt.code)
+			if output != tt.expected {
+				t.Errorf("Expected:\n%s\nGot:\n%s", tt.expected, output)
+			}
+		})
+	}
+}
+
+func TestIssetWithArrayAccess(t *testing.T) {
+	tests := []struct {
+		name     string
+		code     string
+		expected string
+	}{
+		{
+			name: "isset existing array key returns true",
+			code: `<?php
+$arr = ["key" => "value"];
+$result = isset($arr["key"]);
+var_dump($result);
+`,
+			expected: "bool(true)\n",
+		},
+		{
+			name: "isset non-existing array key returns false",
+			code: `<?php
+$arr = ["key" => "value"];
+$result = isset($arr["nonexistent"]);
+var_dump($result);
+`,
+			expected: "bool(false)\n",
+		},
+		{
+			name: "isset array key with null value returns false",
+			code: `<?php
+$arr = ["key" => null];
+$result = isset($arr["key"]);
+var_dump($result);
+`,
+			expected: "bool(false)\n",
+		},
+		{
+			name: "isset numeric array index",
+			code: `<?php
+$arr = [10, 20, 30];
+$result1 = isset($arr[0]);
+$result2 = isset($arr[5]);
+var_dump($result1, $result2);
+`,
+			expected: "bool(true)\nbool(false)\n",
+		},
+		{
+			name: "isset nested array access",
+			code: `<?php
+$arr = ["outer" => ["inner" => "value"]];
+$result1 = isset($arr["outer"]["inner"]);
+$result2 = isset($arr["outer"]["missing"]);
+var_dump($result1, $result2);
+`,
+			expected: "bool(true)\nbool(false)\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output := compileAndRun(t, tt.code)
+			if output != tt.expected {
+				t.Errorf("Expected:\n%s\nGot:\n%s", tt.expected, output)
+			}
+		})
+	}
+}
+
+func TestIssetWithMultipleArguments(t *testing.T) {
+	tests := []struct {
+		name     string
+		code     string
+		expected string
+	}{
+		{
+			name: "isset multiple all defined returns true",
+			code: `<?php
+$a = 1;
+$b = 2;
+$c = 3;
+$result = isset($a, $b, $c);
+var_dump($result);
+`,
+			expected: "bool(true)\n",
+		},
+		{
+			name: "isset multiple one undefined returns false",
+			code: `<?php
+$a = 1;
+$c = 3;
+$result = isset($a, $undefined, $c);
+var_dump($result);
+`,
+			expected: "bool(false)\n",
+		},
+		{
+			name: "isset multiple one null returns false",
+			code: `<?php
+$a = 1;
+$b = null;
+$c = 3;
+$result = isset($a, $b, $c);
+var_dump($result);
+`,
+			expected: "bool(false)\n",
+		},
+		{
+			name: "isset multiple short-circuit evaluation",
+			code: `<?php
+$a = 1;
+$result = isset($undefined, $a);
+var_dump($result);
+`,
+			expected: "bool(false)\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output := compileAndRun(t, tt.code)
+			if output != tt.expected {
+				t.Errorf("Expected:\n%s\nGot:\n%s", tt.expected, output)
+			}
+		})
+	}
+}
+
+func TestEmptyWithFalsyValues(t *testing.T) {
+	tests := []struct {
+		name     string
+		code     string
+		expected string
+	}{
+		{
+			name: "empty with false returns true",
+			code: `<?php
+$var = false;
+$result = empty($var);
+var_dump($result);
+`,
+			expected: "bool(true)\n",
+		},
+		{
+			name: "empty with 0 returns true",
+			code: `<?php
+$var = 0;
+$result = empty($var);
+var_dump($result);
+`,
+			expected: "bool(true)\n",
+		},
+		{
+			name: "empty with 0.0 returns true",
+			code: `<?php
+$var = 0.0;
+$result = empty($var);
+var_dump($result);
+`,
+			expected: "bool(true)\n",
+		},
+		{
+			name: "empty with empty string returns true",
+			code: `<?php
+$var = "";
+$result = empty($var);
+var_dump($result);
+`,
+			expected: "bool(true)\n",
+		},
+		{
+			name: "empty with string zero returns true",
+			code: `<?php
+$var = "0";
+$result = empty($var);
+var_dump($result);
+`,
+			expected: "bool(true)\n",
+		},
+		{
+			name: "empty with null returns true",
+			code: `<?php
+$var = null;
+$result = empty($var);
+var_dump($result);
+`,
+			expected: "bool(true)\n",
+		},
+		{
+			name: "empty with empty array returns true",
+			code: `<?php
+$var = [];
+$result = empty($var);
+var_dump($result);
+`,
+			expected: "bool(true)\n",
+		},
+		{
+			name: "empty with undefined variable returns true",
+			code: `<?php
+$result = empty($undefined);
+var_dump($result);
+`,
+			expected: "bool(true)\n",
+		},
+		{
+			name: "empty with truthy values returns false",
+			code: `<?php
+$a = true;
+$b = 1;
+$c = "hello";
+$d = [1, 2, 3];
+var_dump(empty($a), empty($b), empty($c), empty($d));
+`,
+			expected: "bool(false)\nbool(false)\nbool(false)\nbool(false)\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output := compileAndRun(t, tt.code)
+			if output != tt.expected {
+				t.Errorf("Expected:\n%s\nGot:\n%s", tt.expected, output)
+			}
+		})
+	}
+}
+
+func TestEmptyWithArrayAccess(t *testing.T) {
+	tests := []struct {
+		name     string
+		code     string
+		expected string
+	}{
+		{
+			name: "empty non-existing array key returns true",
+			code: `<?php
+$arr = ["key" => "value"];
+$result = empty($arr["nonexistent"]);
+var_dump($result);
+`,
+			expected: "bool(true)\n",
+		},
+		{
+			name: "empty existing array key with value returns false",
+			code: `<?php
+$arr = ["key" => "value"];
+$result = empty($arr["key"]);
+var_dump($result);
+`,
+			expected: "bool(false)\n",
+		},
+		{
+			name: "empty array key with empty value returns true",
+			code: `<?php
+$arr = ["key" => ""];
+$result = empty($arr["key"]);
+var_dump($result);
+`,
+			expected: "bool(true)\n",
+		},
+		{
+			name: "empty array key with zero returns true",
+			code: `<?php
+$arr = ["key" => 0];
+$result = empty($arr["key"]);
+var_dump($result);
+`,
+			expected: "bool(true)\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output := compileAndRun(t, tt.code)
+			if output != tt.expected {
+				t.Errorf("Expected:\n%s\nGot:\n%s", tt.expected, output)
+			}
+		})
+	}
+}
+
+func TestIssetEmptyInConditionals(t *testing.T) {
+	tests := []struct {
+		name     string
+		code     string
+		expected string
+	}{
+		{
+			name: "isset in if condition",
+			code: `<?php
+$var = "exists";
+if (isset($var)) {
+    echo "set";
+} else {
+    echo "not set";
+}
+`,
+			expected: "set",
+		},
+		{
+			name: "isset undefined in if condition",
+			code: `<?php
+if (isset($undefined)) {
+    echo "set";
+} else {
+    echo "not set";
+}
+`,
+			expected: "not set",
+		},
+		{
+			name: "empty in if condition",
+			code: `<?php
+$var = "";
+if (empty($var)) {
+    echo "empty";
+} else {
+    echo "not empty";
+}
+`,
+			expected: "empty",
+		},
+		{
+			name: "isset in echo with if-else",
+			code: `<?php
+$var = "value";
+if (isset($var)) {
+    echo "yes";
+} else {
+    echo "no";
+}
+`,
+			expected: "yes",
+		},
+		{
+			name: "empty in echo with if-else",
+			code: `<?php
+$var = 0;
+if (empty($var)) {
+    echo "empty";
+} else {
+    echo "not empty";
+}
+`,
+			expected: "empty",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output := compileAndRun(t, tt.code)
+			if output != tt.expected {
+				t.Errorf("Expected:\n%s\nGot:\n%s", tt.expected, output)
 			}
 		})
 	}

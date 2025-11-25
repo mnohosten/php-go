@@ -83,6 +83,7 @@ type ClassEntry struct {
 	IsReadOnly bool // readonly class (PHP 8.2+) - all properties are readonly
 
 	// Inheritance and composition
+	ParentClassName string               // Parent class name (for deferred resolution)
 	ParentClass  *ClassEntry            // Parent class (null if no parent)
 	Interfaces   []*InterfaceEntry      // Implemented interfaces
 	Traits       []*TraitEntry          // Used traits
@@ -329,6 +330,23 @@ func (o *Object) SetProperty(name string, value *Value, accessContext *ClassEntr
 
 	prop.Value = value
 	return true
+}
+
+// SetPropertyDirect sets a property value bypassing visibility checks
+// Used for internal/native operations like exception constructors
+func (o *Object) SetPropertyDirect(name string, value *Value) {
+	prop, exists := o.Properties[name]
+	if !exists {
+		// Create the property
+		prop = &Property{
+			Value:      value,
+			Visibility: VisibilityPublic,
+			IsStatic:   false,
+		}
+		o.Properties[name] = prop
+	} else {
+		prop.Value = value
+	}
 }
 
 // canAccessProperty checks if a property can be accessed from a given context

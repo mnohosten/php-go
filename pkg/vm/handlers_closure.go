@@ -12,47 +12,103 @@ import (
 
 // opDeclareLambdaFunction handles OpDeclareLambdaFunction
 // Creates an anonymous function/closure
-// Op1: function name (or unique identifier)
-// Result: closure object
+// ExtendedValue: number of parameters
+// Op1: closure name (unique identifier from constants)
+// Op2: closure start position
+// Result: closure end position (also stores the closure object)
 func (vm *VM) opDeclareLambdaFunction(frame *Frame, instr Instruction) error {
-	// Get function name/identifier
+	// Get closure name
 	funcNameVal, err := vm.getOperandValue(frame, instr.Op1)
 	if err != nil {
 		return err
 	}
 	funcName := funcNameVal.ToString()
 
-	// Look up the compiled function
-	fn, ok := vm.functions[funcName]
-	if !ok {
-		return fmt.Errorf("Lambda function '%s' not found", funcName)
+	// Get closure start and end positions
+	funcStartVal, err := vm.getOperandValue(frame, instr.Op2)
+	if err != nil {
+		return err
+	}
+	funcStart := int(funcStartVal.ToInt())
+
+	funcEndVal, err := vm.getOperandValue(frame, instr.Result)
+	if err != nil {
+		return err
+	}
+	funcEnd := int(funcEndVal.ToInt())
+
+	// Extract closure instructions from the main instruction stream
+	if funcStart < 0 || funcEnd > len(frame.fn.Instructions) || funcStart >= funcEnd {
+		return fmt.Errorf("Invalid closure bounds: start=%d, end=%d", funcStart, funcEnd)
 	}
 
-	// Check if this should be a static closure (from ExtendedValue flag)
-	isStatic := (instr.ExtendedValue & 1) != 0
+	closureInstructions := make(Instructions, funcEnd-funcStart)
+	copy(closureInstructions, frame.fn.Instructions[funcStart:funcEnd])
 
-	// Create closure
+	// CRITICAL: Adjust jump targets to be relative to closure start
+	for i := range closureInstructions {
+		instr := &closureInstructions[i]
+
+		// Check if this is a jump instruction
+		if instr.Opcode == OpJmp || instr.Opcode == OpJmpZ || instr.Opcode == OpJmpNZ {
+			var targetOperand *Operand
+			if instr.Opcode == OpJmp {
+				targetOperand = &instr.Op1
+			} else {
+				targetOperand = &instr.Op2
+			}
+
+			// If it's a constant operand with absolute position
+			if targetOperand.Type == OpConst {
+				if int(targetOperand.Value) < len(vm.constants) {
+					if targetVal, ok := vm.constants[targetOperand.Value].(int64); ok {
+						absoluteTarget := int(targetVal)
+						// Convert to relative position
+						relativeTarget := absoluteTarget - funcStart
+						// Store relative target back in constants
+						vm.constants[targetOperand.Value] = int64(relativeTarget)
+					}
+				}
+			}
+		}
+	}
+
+	// Create CompiledFunction for the closure
+	numParams := int(instr.ExtendedValue)
+	compiledFunc := &CompiledFunction{
+		Name:         funcName,
+		Instructions: closureInstructions,
+		NumParams:    numParams,
+		NumLocals:    numParams + 10, // Parameters + space for locals/temps
+	}
+
+	// Register the closure function
+	vm.RegisterFunction(funcName, compiledFunc)
+
+	// Check if this should be a static closure
+	// We can infer from the context or add flags if needed
+	isStatic := false // For now, closures default to non-static
+
+	// Create closure object
 	var closure *Closure
 	if isStatic {
-		closure = NewStaticClosure(fn)
+		closure = NewStaticClosure(compiledFunc)
 	} else {
-		closure = NewClosure(fn)
+		closure = NewClosure(compiledFunc)
 
 		// If not static, inherit $this from current frame
 		if frame.thisObject != nil {
 			// The closure captures the current $this
-			// This will be available when the closure is called
-			// We store it as a special captured variable
 			closure.BindVariable("this", types.NewObject(frame.thisObject), false)
 		}
 	}
 
-	// Wrap closure in a value
-	// For now, we'll use a resource to store the closure
+	// Wrap closure in a resource value
 	resource := types.NewResourceHandle("Closure", closure)
 	closureVal := types.NewResource(resource)
 
-	return vm.setOperandValue(frame, instr.Result, closureVal)
+	// Store the closure object in temp 0 for OpBindLexical to use
+	return vm.setOperandValue(frame, Operand{Type: OpTmpVar, Value: 0}, closureVal)
 }
 
 // opBindLexical handles OpBindLexical
@@ -160,6 +216,37 @@ func (vm *VM) opDeclareFunction(frame *Frame, instr Instruction) error {
 	funcInstructions := make(Instructions, funcEnd-funcStart)
 	copy(funcInstructions, frame.fn.Instructions[funcStart:funcEnd])
 
+	// CRITICAL FIX: Adjust jump targets to be relative to function start
+	// When instructions are extracted, absolute positions need to be converted to relative positions
+	for i := range funcInstructions {
+		instr := &funcInstructions[i]
+
+		// Check if this is a jump instruction (JMP, JMPZ, JMPNZ)
+		if instr.Opcode == OpJmp || instr.Opcode == OpJmpZ || instr.Opcode == OpJmpNZ {
+			// Get the jump target from the appropriate operand
+			var targetOperand *Operand
+			if instr.Opcode == OpJmp {
+				targetOperand = &instr.Op1 // JMP uses Op1 for target
+			} else {
+				targetOperand = &instr.Op2 // JMPZ/JMPNZ use Op2 for target
+			}
+
+			// If it's a constant operand, it contains an absolute position
+			if targetOperand.Type == OpConst {
+				// Get the absolute target from constants
+				if int(targetOperand.Value) < len(vm.constants) {
+					if targetVal, ok := vm.constants[targetOperand.Value].(int64); ok {
+						absoluteTarget := int(targetVal)
+						// Convert to relative position
+						relativeTarget := absoluteTarget - funcStart
+						// Store the relative target back in constants
+						vm.constants[targetOperand.Value] = int64(relativeTarget)
+					}
+				}
+			}
+		}
+	}
+
 	// Create CompiledFunction
 	numParams := int(instr.ExtendedValue)
 	compiledFunc := &CompiledFunction{
@@ -210,7 +297,9 @@ func (vm *VM) invokeClosure(closure *Closure, args []*types.Value, thisObj *type
 	// TODO: Integrate with compiler's variable allocation
 
 	// Push frame and execute
-	vm.pushFrame(frame)
+	if err := vm.pushFrame(frame); err != nil {
+		return nil, err
+	}
 	err := vm.runFrame(frame)
 	if err != nil {
 		vm.popFrame()

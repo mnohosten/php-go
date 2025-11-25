@@ -239,6 +239,12 @@ func (p *Parser) parseClassDeclaration() *ast.ClassDeclaration {
 
 // parseClassMember parses a class member (property, method, constant, trait use)
 func (p *Parser) parseClassMember() ast.Stmt {
+	// Check for attributes first
+	var attrs []*ast.AttributeGroup
+	if p.curTokenIs(lexer.ATTRIBUTE_START) {
+		attrs = p.parseAttributeGroups()
+	}
+
 	// Check for use statement (traits)
 	if p.curTokenIs(lexer.USE) {
 		return p.parseTraitUse()
@@ -289,17 +295,29 @@ endModifiers:
 
 	// Now we should have either 'function' or 'var' or a type hint or variable
 	if p.curTokenIs(lexer.FUNCTION) {
-		return p.parseMethodDeclaration(visibility, modifiers)
+		method := p.parseMethodDeclaration(visibility, modifiers)
+		if method != nil && len(attrs) > 0 {
+			method.Attributes = attrs
+		}
+		return method
 	}
 
 	// Check for VAR keyword (old style)
 	if p.curTokenIs(lexer.VAR) {
 		p.nextToken() // consume 'var'
-		return p.parsePropertyDeclaration("public", []string{})
+		prop := p.parsePropertyDeclaration("public", []string{})
+		if prop != nil && len(attrs) > 0 {
+			prop.Attributes = attrs
+		}
+		return prop
 	}
 
 	// Otherwise, it's a property declaration (with or without type hint)
-	return p.parsePropertyDeclaration(visibility, modifiers)
+	prop := p.parsePropertyDeclaration(visibility, modifiers)
+	if prop != nil && len(attrs) > 0 {
+		prop.Attributes = attrs
+	}
+	return prop
 }
 
 // parseMethodDeclaration parses a method declaration

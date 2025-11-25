@@ -1,0 +1,8 @@
+Integer: 42
+String: Hello, PHP-Go!
+Float: 3.14159
+Boolean true: 1
+Boolean false: 
+Initial value: 5
+After reassignment: 10
+Multiple variables: 1, 2, 3

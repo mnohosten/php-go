@@ -11,6 +11,9 @@ type VM struct {
 	// Constants pool from compilation
 	constants []interface{}
 
+	// User-defined constants (from define())
+	userConstants map[string]*types.Value
+
 	// Global variables ($_GET, $_POST, user globals, etc.)
 	globals map[string]*types.Value
 
@@ -59,8 +62,9 @@ type CompiledClass = types.ClassEntry
 
 // New creates a new virtual machine
 func New() *VM {
-	return &VM{
+	vm := &VM{
 		constants:     make([]interface{}, 0),
+		userConstants: make(map[string]*types.Value),
 		globals:       make(map[string]*types.Value),
 		functions:     make(map[string]*CompiledFunction),
 		classes:       make(map[string]*CompiledClass),
@@ -69,6 +73,127 @@ func New() *VM {
 		output:        make([]byte, 0),
 		maxStackDepth: 1000,
 	}
+	// Register built-in exception classes
+	vm.registerBuiltinClasses()
+	// Initialize built-in constants
+	vm.initBuiltinConstants()
+	return vm
+}
+
+// registerBuiltinClasses registers PHP's built-in exception classes
+func (vm *VM) registerBuiltinClasses() {
+	// Exception - base exception class
+	exceptionClass := &types.ClassEntry{
+		Name:       "Exception",
+		Properties: make(map[string]*types.PropertyDef),
+		Methods:    make(map[string]*types.MethodDef),
+	}
+	// Add exception properties
+	exceptionClass.Properties["message"] = &types.PropertyDef{
+		Name:       "message",
+		Visibility: types.VisibilityProtected,
+		HasDefault: true,
+		Default:    types.NewString(""),
+	}
+	exceptionClass.Properties["code"] = &types.PropertyDef{
+		Name:       "code",
+		Visibility: types.VisibilityProtected,
+		HasDefault: true,
+		Default:    types.NewInt(0),
+	}
+	exceptionClass.Properties["file"] = &types.PropertyDef{
+		Name:       "file",
+		Visibility: types.VisibilityProtected,
+		HasDefault: true,
+		Default:    types.NewString(""),
+	}
+	exceptionClass.Properties["line"] = &types.PropertyDef{
+		Name:       "line",
+		Visibility: types.VisibilityProtected,
+		HasDefault: true,
+		Default:    types.NewInt(0),
+	}
+	exceptionClass.Properties["previous"] = &types.PropertyDef{
+		Name:       "previous",
+		Visibility: types.VisibilityPrivate,
+		HasDefault: true,
+		Default:    types.NewNull(),
+	}
+	vm.classes["Exception"] = exceptionClass
+
+	// Error - base error class (PHP 7+)
+	errorClass := &types.ClassEntry{
+		Name:       "Error",
+		Properties: make(map[string]*types.PropertyDef),
+		Methods:    make(map[string]*types.MethodDef),
+	}
+	errorClass.Properties["message"] = &types.PropertyDef{
+		Name:       "message",
+		Visibility: types.VisibilityProtected,
+		HasDefault: true,
+		Default:    types.NewString(""),
+	}
+	errorClass.Properties["code"] = &types.PropertyDef{
+		Name:       "code",
+		Visibility: types.VisibilityProtected,
+		HasDefault: true,
+		Default:    types.NewInt(0),
+	}
+	vm.classes["Error"] = errorClass
+
+	// RuntimeException extends Exception
+	runtimeExceptionClass := &types.ClassEntry{
+		Name:        "RuntimeException",
+		ParentClass: exceptionClass,
+		Properties:  make(map[string]*types.PropertyDef),
+		Methods:     make(map[string]*types.MethodDef),
+	}
+	vm.classes["RuntimeException"] = runtimeExceptionClass
+
+	// LogicException extends Exception
+	logicExceptionClass := &types.ClassEntry{
+		Name:        "LogicException",
+		ParentClass: exceptionClass,
+		Properties:  make(map[string]*types.PropertyDef),
+		Methods:     make(map[string]*types.MethodDef),
+	}
+	vm.classes["LogicException"] = logicExceptionClass
+
+	// InvalidArgumentException extends LogicException
+	invalidArgExceptionClass := &types.ClassEntry{
+		Name:        "InvalidArgumentException",
+		ParentClass: logicExceptionClass,
+		Properties:  make(map[string]*types.PropertyDef),
+		Methods:     make(map[string]*types.MethodDef),
+	}
+	vm.classes["InvalidArgumentException"] = invalidArgExceptionClass
+
+	// OutOfBoundsException extends LogicException
+	outOfBoundsExceptionClass := &types.ClassEntry{
+		Name:        "OutOfBoundsException",
+		ParentClass: logicExceptionClass,
+		Properties:  make(map[string]*types.PropertyDef),
+		Methods:     make(map[string]*types.MethodDef),
+	}
+	vm.classes["OutOfBoundsException"] = outOfBoundsExceptionClass
+
+	// TypeError extends Error
+	typeErrorClass := &types.ClassEntry{
+		Name:        "TypeError",
+		ParentClass: errorClass,
+		Properties:  make(map[string]*types.PropertyDef),
+		Methods:     make(map[string]*types.MethodDef),
+	}
+	vm.classes["TypeError"] = typeErrorClass
+
+	// ArgumentCountError extends TypeError
+	argumentCountErrorClass := &types.ClassEntry{
+		Name:        "ArgumentCountError",
+		ParentClass: typeErrorClass,
+		Properties:  make(map[string]*types.PropertyDef),
+		Methods:     make(map[string]*types.MethodDef),
+	}
+	vm.classes["ArgumentCountError"] = argumentCountErrorClass
 }
 
 // NewWithBytecode creates a new VM and loads the bytecode
@@ -85,7 +210,11 @@ func NewWithBytecode(instructions Instructions, constants []interface{}) *VM {
 	}
 
 	// Push main frame
-	vm.pushFrame(NewFrame(mainFunc))
+	// Safety: This is the first frame (frameIndex == -1), so it will never exceed maxStackDepth
+	// If this somehow fails, it's a programming error and we should panic
+	if err := vm.pushFrame(NewFrame(mainFunc)); err != nil {
+		panic(fmt.Sprintf("failed to push initial frame: %v", err))
+	}
 
 	return vm
 }
@@ -113,7 +242,9 @@ func (vm *VM) ExecuteWithCVs(instructions Instructions, numCVs int) error {
 
 	// Push main frame
 	frame := NewFrame(mainFunc)
-	vm.pushFrame(frame)
+	if err := vm.pushFrame(frame); err != nil {
+		return err
+	}
 
 	// Run the execution loop
 	return vm.run()
@@ -277,6 +408,8 @@ func (vm *VM) dispatch(frame *Frame, instr Instruction) error {
 		return vm.opInitFcallByName(frame, instr)
 	case OpSendVal:
 		return vm.opSendVal(frame, instr)
+	case OpSendRef:
+		return vm.opSendRef(frame, instr)
 	case OpDoFcall:
 		return vm.opDoFcall(frame, instr)
 	case OpDoUcall:
@@ -389,6 +522,10 @@ func (vm *VM) dispatch(frame *Frame, instr Instruction) error {
 		return vm.opFetchClassName(frame, instr)
 	case OpFetchThis:
 		return vm.opFetchThis(frame, instr)
+	case OpDeclareClass:
+		return vm.opDeclareClass(frame, instr)
+	case OpFetchClassConstant:
+		return vm.opFetchClassConstant(frame, instr)
 
 	// Generator operations
 	case OpGeneratorCreate:
@@ -405,6 +542,10 @@ func (vm *VM) dispatch(frame *Frame, instr Instruction) error {
 		return vm.opThrow(frame, instr)
 	case OpCatch:
 		return vm.opCatch(frame, instr)
+	case OpFastCall:
+		return vm.opFastCall(frame, instr)
+	case OpFastRet:
+		return vm.opFastRet(frame, instr)
 
 	// Exit operations
 	case OpExit:
@@ -504,9 +645,85 @@ func (vm *VM) GetConstant(index int) (*types.Value, error) {
 		return types.NewBool(v), nil
 	case nil:
 		return types.NewNull(), nil
+	case *types.ClassEntry:
+		// ClassEntry constants are stored as-is for use by DECLARE_CLASS
+		// They are not converted to Values - just kept as metadata
+		return nil, nil // Return nil Value, will be accessed directly from constants
 	default:
 		return nil, fmt.Errorf("unsupported constant type: %T", c)
 	}
+}
+
+// ============================================================================
+// User-Defined Constants
+// ============================================================================
+
+// DefineUserConstant defines a user constant (from define())
+func (vm *VM) DefineUserConstant(name string, value *types.Value) bool {
+	// Check if already defined (case-sensitive)
+	if _, exists := vm.userConstants[name]; exists {
+		return false // Already defined
+	}
+	vm.userConstants[name] = value
+	return true
+}
+
+// GetUserConstant retrieves a user-defined constant
+func (vm *VM) GetUserConstant(name string) (*types.Value, bool) {
+	val, ok := vm.userConstants[name]
+	return val, ok
+}
+
+// UserConstantExists checks if a user constant exists
+func (vm *VM) UserConstantExists(name string) bool {
+	_, exists := vm.userConstants[name]
+	return exists
+}
+
+// initBuiltinConstants initializes PHP built-in constants
+func (vm *VM) initBuiltinConstants() {
+	// Boolean constants
+	vm.userConstants["true"] = types.NewBool(true)
+	vm.userConstants["TRUE"] = types.NewBool(true)
+	vm.userConstants["false"] = types.NewBool(false)
+	vm.userConstants["FALSE"] = types.NewBool(false)
+	vm.userConstants["null"] = types.NewNull()
+	vm.userConstants["NULL"] = types.NewNull()
+
+	// PHP version constants
+	vm.userConstants["PHP_VERSION"] = types.NewString("8.4.0")
+	vm.userConstants["PHP_MAJOR_VERSION"] = types.NewInt(8)
+	vm.userConstants["PHP_MINOR_VERSION"] = types.NewInt(4)
+	vm.userConstants["PHP_RELEASE_VERSION"] = types.NewInt(0)
+
+	// System constants
+	vm.userConstants["PHP_EOL"] = types.NewString("\n")
+	vm.userConstants["PHP_INT_MAX"] = types.NewInt(9223372036854775807)
+	vm.userConstants["PHP_INT_MIN"] = types.NewInt(-9223372036854775808)
+
+	// Common constants
+	vm.userConstants["DIRECTORY_SEPARATOR"] = types.NewString("/")
+	vm.userConstants["PATH_SEPARATOR"] = types.NewString(":")
+
+	// Sort constants for array functions
+	vm.userConstants["SORT_REGULAR"] = types.NewInt(0)
+	vm.userConstants["SORT_NUMERIC"] = types.NewInt(1)
+	vm.userConstants["SORT_STRING"] = types.NewInt(2)
+	vm.userConstants["SORT_LOCALE_STRING"] = types.NewInt(5)
+	vm.userConstants["SORT_NATURAL"] = types.NewInt(6)
+	vm.userConstants["SORT_FLAG_CASE"] = types.NewInt(8)
+
+	// Case constants
+	vm.userConstants["CASE_LOWER"] = types.NewInt(0)
+	vm.userConstants["CASE_UPPER"] = types.NewInt(1)
+
+	// JSON constants
+	vm.userConstants["JSON_ERROR_NONE"] = types.NewInt(0)
+	vm.userConstants["JSON_ERROR_DEPTH"] = types.NewInt(1)
+	vm.userConstants["JSON_ERROR_STATE_MISMATCH"] = types.NewInt(2)
+	vm.userConstants["JSON_ERROR_CTRL_CHAR"] = types.NewInt(3)
+	vm.userConstants["JSON_ERROR_SYNTAX"] = types.NewInt(4)
+	vm.userConstants["JSON_ERROR_UTF8"] = types.NewInt(5)
 }
 
 // ============================================================================
@@ -554,7 +771,18 @@ func (vm *VM) getOperandValue(frame *Frame, op Operand) (*types.Value, error) {
 	case OpVar, OpCV:
 		// Compiled variable (parameters and user variables)
 		// CVs start at index 0 (or after params in functions)
-		return frame.getLocal(int(op.Value)), nil
+		idx := int(op.Value)
+		// Check if this variable is bound to a global
+		if frame.globalBindings != nil {
+			if globalName, bound := frame.globalBindings[idx]; bound {
+				// Return value from globals instead of locals
+				if val, exists := vm.globals[globalName]; exists {
+					return val, nil
+				}
+				return types.NewNull(), nil
+			}
+		}
+		return frame.getLocal(idx), nil
 	case OpTmpVar:
 		// Temporary variable (offset to avoid conflicts with CVs)
 		// TMPVARs start after all compiled variables
@@ -577,7 +805,16 @@ func (vm *VM) setOperandValue(frame *Frame, op Operand, value *types.Value) erro
 	switch op.Type {
 	case OpVar, OpCV:
 		// Compiled variable (parameters and user variables)
-		frame.setLocal(int(op.Value), value)
+		idx := int(op.Value)
+		// Check if this variable is bound to a global
+		if frame.globalBindings != nil {
+			if globalName, bound := frame.globalBindings[idx]; bound {
+				// Write to globals instead of locals
+				vm.globals[globalName] = value
+				return nil
+			}
+		}
+		frame.setLocal(idx, value)
 		return nil
 	case OpTmpVar:
 		// Temporary variable (offset to avoid conflicts with CVs)

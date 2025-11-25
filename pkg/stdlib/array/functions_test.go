@@ -977,3 +977,749 @@ func TestArrayMapEmpty(t *testing.T) {
 		t.Error("Expected empty array for map with no arrays")
 	}
 }
+
+// ============================================================================
+// ArrayPad Tests
+// ============================================================================
+
+func TestArrayPad(t *testing.T) {
+	arr := types.NewEmptyArray()
+	arr.Push(types.NewInt(1), types.NewInt(2), types.NewInt(3))
+	arrVal := types.NewArray(arr)
+
+	// Pad to end (positive length)
+	result := ArrayPad(arrVal, types.NewInt(5), types.NewInt(0))
+	resultArray := result.ToArray()
+
+	if resultArray.Len() != 5 {
+		t.Errorf("Expected length 5, got %d", resultArray.Len())
+	}
+
+	// Last element should be padding value
+	val, _ := resultArray.Get(types.NewInt(4))
+	if val.ToInt() != 0 {
+		t.Errorf("Expected padding value 0, got %d", val.ToInt())
+	}
+}
+
+func TestArrayPadNegative(t *testing.T) {
+	arr := types.NewEmptyArray()
+	arr.Push(types.NewInt(1), types.NewInt(2), types.NewInt(3))
+	arrVal := types.NewArray(arr)
+
+	// Pad to beginning (negative length)
+	result := ArrayPad(arrVal, types.NewInt(-5), types.NewInt(0))
+	resultArray := result.ToArray()
+
+	if resultArray.Len() != 5 {
+		t.Errorf("Expected length 5, got %d", resultArray.Len())
+	}
+
+	// First element should be padding value
+	val, _ := resultArray.Get(types.NewInt(0))
+	if val.ToInt() != 0 {
+		t.Errorf("Expected padding value 0, got %d", val.ToInt())
+	}
+
+	// Original first element should now be at index 2
+	val, _ = resultArray.Get(types.NewInt(2))
+	if val.ToInt() != 1 {
+		t.Errorf("Expected original value 1 at index 2, got %d", val.ToInt())
+	}
+}
+
+func TestArrayPadNoChange(t *testing.T) {
+	arr := types.NewEmptyArray()
+	arr.Push(types.NewInt(1), types.NewInt(2), types.NewInt(3))
+	arrVal := types.NewArray(arr)
+
+	// Length smaller than array size - no change
+	result := ArrayPad(arrVal, types.NewInt(2), types.NewInt(0))
+	resultArray := result.ToArray()
+
+	if resultArray.Len() != 3 {
+		t.Errorf("Expected length 3 (no change), got %d", resultArray.Len())
+	}
+}
+
+// ============================================================================
+// ArraySum Tests
+// ============================================================================
+
+func TestArraySum(t *testing.T) {
+	arr := types.NewEmptyArray()
+	arr.Push(types.NewInt(1), types.NewInt(2), types.NewInt(3), types.NewInt(4))
+	arrVal := types.NewArray(arr)
+
+	result := ArraySum(arrVal)
+	if result.ToInt() != 10 {
+		t.Errorf("Expected sum 10, got %d", result.ToInt())
+	}
+}
+
+func TestArraySumFloat(t *testing.T) {
+	arr := types.NewEmptyArray()
+	arr.Push(types.NewFloat(1.5), types.NewFloat(2.5), types.NewFloat(3.0))
+	arrVal := types.NewArray(arr)
+
+	result := ArraySum(arrVal)
+	if result.Type() != types.TypeFloat {
+		t.Error("Expected float result")
+	}
+	if result.ToFloat() != 7.0 {
+		t.Errorf("Expected sum 7.0, got %f", result.ToFloat())
+	}
+}
+
+func TestArraySumEmpty(t *testing.T) {
+	arr := types.NewEmptyArray()
+	arrVal := types.NewArray(arr)
+
+	result := ArraySum(arrVal)
+	if result.ToInt() != 0 {
+		t.Errorf("Expected sum 0 for empty array, got %d", result.ToInt())
+	}
+}
+
+func TestArraySumMixed(t *testing.T) {
+	arr := types.NewEmptyArray()
+	arr.Push(types.NewInt(1), types.NewFloat(2.5), types.NewInt(3))
+	arrVal := types.NewArray(arr)
+
+	result := ArraySum(arrVal)
+	if result.Type() != types.TypeFloat {
+		t.Error("Expected float result for mixed array")
+	}
+	if result.ToFloat() != 6.5 {
+		t.Errorf("Expected sum 6.5, got %f", result.ToFloat())
+	}
+}
+
+// ============================================================================
+// ArrayProduct Tests
+// ============================================================================
+
+func TestArrayProduct(t *testing.T) {
+	arr := types.NewEmptyArray()
+	arr.Push(types.NewInt(1), types.NewInt(2), types.NewInt(3), types.NewInt(4))
+	arrVal := types.NewArray(arr)
+
+	result := ArrayProduct(arrVal)
+	if result.ToInt() != 24 {
+		t.Errorf("Expected product 24, got %d", result.ToInt())
+	}
+}
+
+func TestArrayProductWithZero(t *testing.T) {
+	arr := types.NewEmptyArray()
+	arr.Push(types.NewInt(1), types.NewInt(2), types.NewInt(0), types.NewInt(4))
+	arrVal := types.NewArray(arr)
+
+	result := ArrayProduct(arrVal)
+	if result.ToInt() != 0 {
+		t.Errorf("Expected product 0, got %d", result.ToInt())
+	}
+}
+
+func TestArrayProductEmpty(t *testing.T) {
+	arr := types.NewEmptyArray()
+	arrVal := types.NewArray(arr)
+
+	result := ArrayProduct(arrVal)
+	if result.ToInt() != 1 {
+		t.Errorf("Expected product 1 for empty array (PHP behavior), got %d", result.ToInt())
+	}
+}
+
+func TestArrayProductFloat(t *testing.T) {
+	arr := types.NewEmptyArray()
+	arr.Push(types.NewFloat(1.5), types.NewFloat(2.0))
+	arrVal := types.NewArray(arr)
+
+	result := ArrayProduct(arrVal)
+	if result.Type() != types.TypeFloat {
+		t.Error("Expected float result")
+	}
+	if result.ToFloat() != 3.0 {
+		t.Errorf("Expected product 3.0, got %f", result.ToFloat())
+	}
+}
+
+// ============================================================================
+// ArrayColumn Tests
+// ============================================================================
+
+func TestArrayColumn(t *testing.T) {
+	// Create rows
+	row1 := types.NewEmptyArray()
+	row1.Set(types.NewString("id"), types.NewInt(1))
+	row1.Set(types.NewString("name"), types.NewString("Alice"))
+
+	row2 := types.NewEmptyArray()
+	row2.Set(types.NewString("id"), types.NewInt(2))
+	row2.Set(types.NewString("name"), types.NewString("Bob"))
+
+	arr := types.NewEmptyArray()
+	arr.Append(types.NewArray(row1))
+	arr.Append(types.NewArray(row2))
+	arrVal := types.NewArray(arr)
+
+	result := ArrayColumn(arrVal, types.NewString("name"))
+	resultArray := result.ToArray()
+
+	if resultArray.Len() != 2 {
+		t.Errorf("Expected length 2, got %d", resultArray.Len())
+	}
+
+	val, _ := resultArray.Get(types.NewInt(0))
+	if val.ToString() != "Alice" {
+		t.Errorf("Expected 'Alice', got '%s'", val.ToString())
+	}
+}
+
+func TestArrayColumnWithIndexKey(t *testing.T) {
+	row1 := types.NewEmptyArray()
+	row1.Set(types.NewString("id"), types.NewInt(1))
+	row1.Set(types.NewString("name"), types.NewString("Alice"))
+
+	row2 := types.NewEmptyArray()
+	row2.Set(types.NewString("id"), types.NewInt(2))
+	row2.Set(types.NewString("name"), types.NewString("Bob"))
+
+	arr := types.NewEmptyArray()
+	arr.Append(types.NewArray(row1))
+	arr.Append(types.NewArray(row2))
+	arrVal := types.NewArray(arr)
+
+	result := ArrayColumn(arrVal, types.NewString("name"), types.NewString("id"))
+	resultArray := result.ToArray()
+
+	val, exists := resultArray.Get(types.NewInt(1))
+	if !exists || val.ToString() != "Alice" {
+		t.Errorf("Expected 'Alice' at key 1, got '%v'", val)
+	}
+
+	val, exists = resultArray.Get(types.NewInt(2))
+	if !exists || val.ToString() != "Bob" {
+		t.Errorf("Expected 'Bob' at key 2, got '%v'", val)
+	}
+}
+
+func TestArrayColumnNullColumnKey(t *testing.T) {
+	row1 := types.NewEmptyArray()
+	row1.Set(types.NewString("id"), types.NewInt(1))
+	row1.Set(types.NewString("name"), types.NewString("Alice"))
+
+	arr := types.NewEmptyArray()
+	arr.Append(types.NewArray(row1))
+	arrVal := types.NewArray(arr)
+
+	// null column key means return entire row
+	result := ArrayColumn(arrVal, types.NewNull(), types.NewString("id"))
+	resultArray := result.ToArray()
+
+	val, exists := resultArray.Get(types.NewInt(1))
+	if !exists || val.Type() != types.TypeArray {
+		t.Error("Expected row array at key 1")
+	}
+}
+
+// ============================================================================
+// ArrayChangeKeyCase Tests
+// ============================================================================
+
+func TestArrayChangeKeyCase(t *testing.T) {
+	arr := types.NewEmptyArray()
+	arr.Set(types.NewString("Hello"), types.NewInt(1))
+	arr.Set(types.NewString("WORLD"), types.NewInt(2))
+	arrVal := types.NewArray(arr)
+
+	// Default is lowercase
+	result := ArrayChangeKeyCase(arrVal)
+	resultArray := result.ToArray()
+
+	val, exists := resultArray.Get(types.NewString("hello"))
+	if !exists || val.ToInt() != 1 {
+		t.Error("Expected key 'hello' with value 1")
+	}
+
+	val, exists = resultArray.Get(types.NewString("world"))
+	if !exists || val.ToInt() != 2 {
+		t.Error("Expected key 'world' with value 2")
+	}
+}
+
+func TestArrayChangeKeyCaseUpper(t *testing.T) {
+	arr := types.NewEmptyArray()
+	arr.Set(types.NewString("Hello"), types.NewInt(1))
+	arr.Set(types.NewString("world"), types.NewInt(2))
+	arrVal := types.NewArray(arr)
+
+	result := ArrayChangeKeyCase(arrVal, types.NewInt(CASE_UPPER))
+	resultArray := result.ToArray()
+
+	val, exists := resultArray.Get(types.NewString("HELLO"))
+	if !exists || val.ToInt() != 1 {
+		t.Error("Expected key 'HELLO' with value 1")
+	}
+
+	val, exists = resultArray.Get(types.NewString("WORLD"))
+	if !exists || val.ToInt() != 2 {
+		t.Error("Expected key 'WORLD' with value 2")
+	}
+}
+
+func TestArrayChangeKeyCaseIntegerKeys(t *testing.T) {
+	arr := types.NewEmptyArray()
+	arr.Set(types.NewString("Hello"), types.NewInt(1))
+	arr.Set(types.NewInt(0), types.NewInt(2))
+	arrVal := types.NewArray(arr)
+
+	result := ArrayChangeKeyCase(arrVal)
+	resultArray := result.ToArray()
+
+	// Integer keys should be unchanged
+	val, exists := resultArray.Get(types.NewInt(0))
+	if !exists || val.ToInt() != 2 {
+		t.Error("Expected integer key 0 with value 2 to be unchanged")
+	}
+}
+
+// ============================================================================
+// ArrayReplace Tests
+// ============================================================================
+
+func TestArrayReplace(t *testing.T) {
+	base := types.NewEmptyArray()
+	base.Set(types.NewString("a"), types.NewInt(1))
+	base.Set(types.NewString("b"), types.NewInt(2))
+	baseVal := types.NewArray(base)
+
+	replacement := types.NewEmptyArray()
+	replacement.Set(types.NewString("b"), types.NewInt(20))
+	replacement.Set(types.NewString("c"), types.NewInt(3))
+	replacementVal := types.NewArray(replacement)
+
+	result := ArrayReplace(baseVal, replacementVal)
+	resultArray := result.ToArray()
+
+	// 'a' should be unchanged
+	val, _ := resultArray.Get(types.NewString("a"))
+	if val.ToInt() != 1 {
+		t.Errorf("Expected 'a' = 1, got %d", val.ToInt())
+	}
+
+	// 'b' should be replaced
+	val, _ = resultArray.Get(types.NewString("b"))
+	if val.ToInt() != 20 {
+		t.Errorf("Expected 'b' = 20, got %d", val.ToInt())
+	}
+
+	// 'c' should be added
+	val, _ = resultArray.Get(types.NewString("c"))
+	if val.ToInt() != 3 {
+		t.Errorf("Expected 'c' = 3, got %d", val.ToInt())
+	}
+}
+
+func TestArrayReplaceMultiple(t *testing.T) {
+	base := types.NewEmptyArray()
+	base.Push(types.NewInt(1), types.NewInt(2), types.NewInt(3))
+	baseVal := types.NewArray(base)
+
+	repl1 := types.NewEmptyArray()
+	repl1.Set(types.NewInt(0), types.NewInt(10))
+	repl1Val := types.NewArray(repl1)
+
+	repl2 := types.NewEmptyArray()
+	repl2.Set(types.NewInt(1), types.NewInt(20))
+	repl2Val := types.NewArray(repl2)
+
+	result := ArrayReplace(baseVal, repl1Val, repl2Val)
+	resultArray := result.ToArray()
+
+	val, _ := resultArray.Get(types.NewInt(0))
+	if val.ToInt() != 10 {
+		t.Errorf("Expected index 0 = 10, got %d", val.ToInt())
+	}
+
+	val, _ = resultArray.Get(types.NewInt(1))
+	if val.ToInt() != 20 {
+		t.Errorf("Expected index 1 = 20, got %d", val.ToInt())
+	}
+
+	val, _ = resultArray.Get(types.NewInt(2))
+	if val.ToInt() != 3 {
+		t.Errorf("Expected index 2 = 3 (unchanged), got %d", val.ToInt())
+	}
+}
+
+// ============================================================================
+// ArrayReplaceRecursive Tests
+// ============================================================================
+
+func TestArrayReplaceRecursive(t *testing.T) {
+	// Base: ["colors" => ["red", "green"]]
+	baseColors := types.NewEmptyArray()
+	baseColors.Push(types.NewString("red"), types.NewString("green"))
+
+	base := types.NewEmptyArray()
+	base.Set(types.NewString("colors"), types.NewArray(baseColors))
+	baseVal := types.NewArray(base)
+
+	// Replacement: ["colors" => ["blue"]]
+	replColors := types.NewEmptyArray()
+	replColors.Set(types.NewInt(0), types.NewString("blue"))
+
+	repl := types.NewEmptyArray()
+	repl.Set(types.NewString("colors"), types.NewArray(replColors))
+	replVal := types.NewArray(repl)
+
+	result := ArrayReplaceRecursive(baseVal, replVal)
+	resultArray := result.ToArray()
+
+	colors, exists := resultArray.Get(types.NewString("colors"))
+	if !exists || colors.Type() != types.TypeArray {
+		t.Fatal("Expected 'colors' array")
+	}
+
+	colorsArray := colors.ToArray()
+
+	// Index 0 should be replaced
+	val, _ := colorsArray.Get(types.NewInt(0))
+	if val.ToString() != "blue" {
+		t.Errorf("Expected 'blue', got '%s'", val.ToString())
+	}
+
+	// Index 1 should be unchanged
+	val, _ = colorsArray.Get(types.NewInt(1))
+	if val.ToString() != "green" {
+		t.Errorf("Expected 'green', got '%s'", val.ToString())
+	}
+}
+
+func TestArrayReplaceRecursiveDeep(t *testing.T) {
+	// Test deeper nesting
+	inner := types.NewEmptyArray()
+	inner.Set(types.NewString("x"), types.NewInt(1))
+	inner.Set(types.NewString("y"), types.NewInt(2))
+
+	middle := types.NewEmptyArray()
+	middle.Set(types.NewString("data"), types.NewArray(inner))
+
+	base := types.NewEmptyArray()
+	base.Set(types.NewString("nested"), types.NewArray(middle))
+	baseVal := types.NewArray(base)
+
+	// Replace only x
+	replInner := types.NewEmptyArray()
+	replInner.Set(types.NewString("x"), types.NewInt(10))
+
+	replMiddle := types.NewEmptyArray()
+	replMiddle.Set(types.NewString("data"), types.NewArray(replInner))
+
+	repl := types.NewEmptyArray()
+	repl.Set(types.NewString("nested"), types.NewArray(replMiddle))
+	replVal := types.NewArray(repl)
+
+	result := ArrayReplaceRecursive(baseVal, replVal)
+	resultArray := result.ToArray()
+
+	nested, _ := resultArray.Get(types.NewString("nested"))
+	nestedArray := nested.ToArray()
+	data, _ := nestedArray.Get(types.NewString("data"))
+	dataArray := data.ToArray()
+
+	// x should be replaced
+	val, _ := dataArray.Get(types.NewString("x"))
+	if val.ToInt() != 10 {
+		t.Errorf("Expected x = 10, got %d", val.ToInt())
+	}
+
+	// y should be unchanged
+	val, _ = dataArray.Get(types.NewString("y"))
+	if val.ToInt() != 2 {
+		t.Errorf("Expected y = 2, got %d", val.ToInt())
+	}
+}
+
+// ============================================================================
+// Array Search/Filter Tests
+// ============================================================================
+
+func TestArrayKeyExists(t *testing.T) {
+	arr := types.NewEmptyArray()
+	arr.Set(types.NewString("a"), types.NewInt(1))
+	arr.Set(types.NewString("b"), types.NewInt(2))
+	arr.Set(types.NewInt(0), types.NewInt(3))
+	arrVal := types.NewArray(arr)
+
+	// Test existing string key
+	result := ArrayKeyExists(types.NewString("a"), arrVal)
+	if !result.ToBool() {
+		t.Error("Expected key 'a' to exist")
+	}
+
+	// Test existing int key
+	result = ArrayKeyExists(types.NewInt(0), arrVal)
+	if !result.ToBool() {
+		t.Error("Expected key 0 to exist")
+	}
+
+	// Test non-existing key
+	result = ArrayKeyExists(types.NewString("c"), arrVal)
+	if result.ToBool() {
+		t.Error("Expected key 'c' to not exist")
+	}
+
+	// Test nil array
+	result = ArrayKeyExists(types.NewString("a"), nil)
+	if result.ToBool() {
+		t.Error("Expected false for nil array")
+	}
+}
+
+func TestKeyExists(t *testing.T) {
+	arr := types.NewEmptyArray()
+	arr.Set(types.NewString("test"), types.NewInt(42))
+	arrVal := types.NewArray(arr)
+
+	// key_exists is an alias for array_key_exists
+	result := KeyExists(types.NewString("test"), arrVal)
+	if !result.ToBool() {
+		t.Error("Expected key 'test' to exist")
+	}
+}
+
+func TestArrayDiffKey(t *testing.T) {
+	// Base array
+	arr1 := types.NewEmptyArray()
+	arr1.Set(types.NewString("a"), types.NewInt(1))
+	arr1.Set(types.NewString("b"), types.NewInt(2))
+	arr1.Set(types.NewString("c"), types.NewInt(3))
+
+	// Comparison array
+	arr2 := types.NewEmptyArray()
+	arr2.Set(types.NewString("a"), types.NewInt(10))
+	arr2.Set(types.NewString("c"), types.NewInt(30))
+
+	result := ArrayDiffKey(types.NewArray(arr1), types.NewArray(arr2))
+	resultArr := result.ToArray()
+
+	// Only 'b' should remain (keys 'a' and 'c' are in arr2)
+	if resultArr.Len() != 1 {
+		t.Errorf("Expected 1 element, got %d", resultArr.Len())
+	}
+
+	val, exists := resultArr.Get(types.NewString("b"))
+	if !exists {
+		t.Error("Expected key 'b' to exist in result")
+	}
+	if val.ToInt() != 2 {
+		t.Errorf("Expected value 2, got %d", val.ToInt())
+	}
+}
+
+func TestArrayIntersectKey(t *testing.T) {
+	// Base array
+	arr1 := types.NewEmptyArray()
+	arr1.Set(types.NewString("a"), types.NewInt(1))
+	arr1.Set(types.NewString("b"), types.NewInt(2))
+	arr1.Set(types.NewString("c"), types.NewInt(3))
+
+	// Comparison array
+	arr2 := types.NewEmptyArray()
+	arr2.Set(types.NewString("a"), types.NewInt(10))
+	arr2.Set(types.NewString("c"), types.NewInt(30))
+	arr2.Set(types.NewString("d"), types.NewInt(40))
+
+	result := ArrayIntersectKey(types.NewArray(arr1), types.NewArray(arr2))
+	resultArr := result.ToArray()
+
+	// Only 'a' and 'c' should remain (common keys)
+	if resultArr.Len() != 2 {
+		t.Errorf("Expected 2 elements, got %d", resultArr.Len())
+	}
+
+	// Values should come from first array
+	val, exists := resultArr.Get(types.NewString("a"))
+	if !exists {
+		t.Error("Expected key 'a' to exist in result")
+	}
+	if val.ToInt() != 1 {
+		t.Errorf("Expected value 1, got %d", val.ToInt())
+	}
+
+	val, exists = resultArr.Get(types.NewString("c"))
+	if !exists {
+		t.Error("Expected key 'c' to exist in result")
+	}
+	if val.ToInt() != 3 {
+		t.Errorf("Expected value 3, got %d", val.ToInt())
+	}
+}
+
+func TestArrayDiffAssoc(t *testing.T) {
+	// Base array
+	arr1 := types.NewEmptyArray()
+	arr1.Set(types.NewString("a"), types.NewInt(1))
+	arr1.Set(types.NewString("b"), types.NewInt(2))
+	arr1.Set(types.NewString("c"), types.NewInt(3))
+
+	// Comparison array with same key but different value for 'a'
+	arr2 := types.NewEmptyArray()
+	arr2.Set(types.NewString("a"), types.NewInt(10)) // different value
+	arr2.Set(types.NewString("b"), types.NewInt(2))  // same key and value
+
+	result := ArrayDiffAssoc(types.NewArray(arr1), types.NewArray(arr2))
+	resultArr := result.ToArray()
+
+	// 'a' and 'c' should remain ('b' has same key AND value in arr2)
+	if resultArr.Len() != 2 {
+		t.Errorf("Expected 2 elements, got %d", resultArr.Len())
+	}
+
+	_, exists := resultArr.Get(types.NewString("a"))
+	if !exists {
+		t.Error("Expected key 'a' to exist in result (value differs)")
+	}
+
+	_, exists = resultArr.Get(types.NewString("c"))
+	if !exists {
+		t.Error("Expected key 'c' to exist in result (not in arr2)")
+	}
+
+	_, exists = resultArr.Get(types.NewString("b"))
+	if exists {
+		t.Error("Key 'b' should not exist in result (same key and value in arr2)")
+	}
+}
+
+func TestArrayIntersectAssoc(t *testing.T) {
+	// Base array
+	arr1 := types.NewEmptyArray()
+	arr1.Set(types.NewString("a"), types.NewInt(1))
+	arr1.Set(types.NewString("b"), types.NewInt(2))
+	arr1.Set(types.NewString("c"), types.NewInt(3))
+
+	// Comparison array
+	arr2 := types.NewEmptyArray()
+	arr2.Set(types.NewString("a"), types.NewInt(1))  // same key and value
+	arr2.Set(types.NewString("b"), types.NewInt(20)) // different value
+	arr2.Set(types.NewString("d"), types.NewInt(4))
+
+	result := ArrayIntersectAssoc(types.NewArray(arr1), types.NewArray(arr2))
+	resultArr := result.ToArray()
+
+	// Only 'a' should remain (same key AND value)
+	if resultArr.Len() != 1 {
+		t.Errorf("Expected 1 element, got %d", resultArr.Len())
+	}
+
+	val, exists := resultArr.Get(types.NewString("a"))
+	if !exists {
+		t.Error("Expected key 'a' to exist in result")
+	}
+	if val.ToInt() != 1 {
+		t.Errorf("Expected value 1, got %d", val.ToInt())
+	}
+}
+
+func TestArrayKeyFirst(t *testing.T) {
+	arr := types.NewEmptyArray()
+	arr.Set(types.NewString("first"), types.NewInt(1))
+	arr.Set(types.NewString("second"), types.NewInt(2))
+	arr.Set(types.NewString("third"), types.NewInt(3))
+	arrVal := types.NewArray(arr)
+
+	result := ArrayKeyFirst(arrVal)
+	if result.ToString() != "first" {
+		t.Errorf("Expected 'first', got '%s'", result.ToString())
+	}
+}
+
+func TestArrayKeyFirstEmpty(t *testing.T) {
+	arr := types.NewEmptyArray()
+	arrVal := types.NewArray(arr)
+
+	result := ArrayKeyFirst(arrVal)
+	if result.Type() != types.TypeNull {
+		t.Error("Expected null for empty array")
+	}
+}
+
+func TestArrayKeyLast(t *testing.T) {
+	arr := types.NewEmptyArray()
+	arr.Set(types.NewString("first"), types.NewInt(1))
+	arr.Set(types.NewString("second"), types.NewInt(2))
+	arr.Set(types.NewString("third"), types.NewInt(3))
+	arrVal := types.NewArray(arr)
+
+	result := ArrayKeyLast(arrVal)
+	if result.ToString() != "third" {
+		t.Errorf("Expected 'third', got '%s'", result.ToString())
+	}
+}
+
+func TestArrayKeyLastEmpty(t *testing.T) {
+	arr := types.NewEmptyArray()
+	arrVal := types.NewArray(arr)
+
+	result := ArrayKeyLast(arrVal)
+	if result.Type() != types.TypeNull {
+		t.Error("Expected null for empty array")
+	}
+}
+
+func TestArrayCountValues(t *testing.T) {
+	arr := types.NewEmptyArray()
+	arr.Append(types.NewString("apple"))
+	arr.Append(types.NewString("banana"))
+	arr.Append(types.NewString("apple"))
+	arr.Append(types.NewInt(1))
+	arr.Append(types.NewInt(1))
+	arr.Append(types.NewInt(1))
+	arrVal := types.NewArray(arr)
+
+	result := ArrayCountValues(arrVal)
+	resultArr := result.ToArray()
+
+	// "apple" appears 2 times
+	val, exists := resultArr.Get(types.NewString("apple"))
+	if !exists {
+		t.Error("Expected 'apple' key to exist")
+	}
+	if val.ToInt() != 2 {
+		t.Errorf("Expected apple count 2, got %d", val.ToInt())
+	}
+
+	// "banana" appears 1 time
+	val, exists = resultArr.Get(types.NewString("banana"))
+	if !exists {
+		t.Error("Expected 'banana' key to exist")
+	}
+	if val.ToInt() != 1 {
+		t.Errorf("Expected banana count 1, got %d", val.ToInt())
+	}
+
+	// 1 appears 3 times (stored as string key "1")
+	val, exists = resultArr.Get(types.NewInt(1))
+	if !exists {
+		t.Error("Expected key 1 to exist")
+	}
+	if val.ToInt() != 3 {
+		t.Errorf("Expected count 3 for value 1, got %d", val.ToInt())
+	}
+}
+
+func TestArrayCountValuesEmpty(t *testing.T) {
+	arr := types.NewEmptyArray()
+	arrVal := types.NewArray(arr)
+
+	result := ArrayCountValues(arrVal)
+	resultArr := result.ToArray()
+
+	if resultArr.Len() != 0 {
+		t.Errorf("Expected empty result, got %d elements", resultArr.Len())
+	}
+}

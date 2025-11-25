@@ -205,10 +205,52 @@ func (c *Compiler) InitSymbolTable() {
 		"echo",
 		"print",
 		"var_dump",
+		"print_r",
 		"isset",
 		"empty",
+		// Date/Time functions
+		"microtime",
+		"date",
+		// Array functions
 		"count",
+		// String functions
 		"strlen",
+		"substr",
+		"str_replace",
+		"explode",
+		"implode",
+		"join",
+		"array_push",
+		"array_pop",
+		"array_map",
+		"array_filter",
+		"array_merge",
+		// Type checking functions
+		"is_null",
+		"is_bool",
+		"is_int",
+		"is_long",
+		"is_integer",
+		"is_float",
+		"is_double",
+		"is_real",
+		"is_string",
+		"is_array",
+		"is_object",
+		"is_resource",
+		"is_numeric",
+		"is_scalar",
+		"is_callable",
+		"is_iterable",
+		"is_countable",
+		"gettype",
+		// Math functions
+		"abs",
+		"ceil",
+		"floor",
+		"round",
+		"min",
+		"max",
 		// More built-ins will be added in Phase 6
 	}
 
@@ -242,4 +284,151 @@ func (c *Compiler) ResolveVariable(name string) (Symbol, bool) {
 // IsVariableDefined checks if a variable is defined in the current scope
 func (c *Compiler) IsVariableDefined(name string) bool {
 	return c.symbolTable.IsDefined(name)
+}
+
+// ========================================
+// Namespace Resolution
+// ========================================
+
+// ResolveClassName resolves a class name to its fully qualified name (FQN)
+// based on the current namespace context and use imports.
+//
+// Resolution rules (PHP semantics):
+// 1. If name starts with \, it's already fully qualified (remove leading \)
+// 2. If name is in use imports, use the imported FQN
+// 3. If name is unqualified (no \), prepend current namespace
+// 4. If name is qualified (has \ but doesn't start with \), prepend current namespace
+func (c *Compiler) ResolveClassName(name string) string {
+	if name == "" {
+		return ""
+	}
+
+	// Rule 1: Fully qualified name (starts with \)
+	if name[0] == '\\' {
+		return name[1:] // Remove leading backslash
+	}
+
+	// Check if name contains a backslash (qualified name)
+	hasBackslash := false
+	for i := 0; i < len(name); i++ {
+		if name[i] == '\\' {
+			hasBackslash = true
+			break
+		}
+	}
+
+	if !hasBackslash {
+		// Rule 2: Unqualified name - check use imports first
+		if fqn, ok := c.useImports[name]; ok {
+			return fqn
+		}
+
+		// Rule 3: Prepend current namespace (if any)
+		if c.currentNamespace != "" {
+			return c.currentNamespace + "\\" + name
+		}
+		return name
+	}
+
+	// Qualified name (has \ but doesn't start with \)
+	// Get the first part before the first backslash
+	firstPart := ""
+	restPart := ""
+	for i := 0; i < len(name); i++ {
+		if name[i] == '\\' {
+			firstPart = name[:i]
+			restPart = name[i+1:]
+			break
+		}
+	}
+
+	// Check if first part is in use imports
+	if fqn, ok := c.useImports[firstPart]; ok {
+		return fqn + "\\" + restPart
+	}
+
+	// Rule 4: Prepend current namespace
+	if c.currentNamespace != "" {
+		return c.currentNamespace + "\\" + name
+	}
+	return name
+}
+
+// ResolveFunctionName resolves a function name to its FQN
+// Functions follow different resolution rules than classes:
+// 1. Check use function imports
+// 2. Check current namespace
+// 3. Fall back to global namespace
+func (c *Compiler) ResolveFunctionName(name string) string {
+	if name == "" {
+		return ""
+	}
+
+	// Fully qualified name
+	if name[0] == '\\' {
+		return name[1:]
+	}
+
+	// Check use function imports
+	if fqn, ok := c.useFunctionImports[name]; ok {
+		return fqn
+	}
+
+	// For unqualified names, PHP looks in current namespace first,
+	// then falls back to global namespace (for functions)
+	// We return the namespaced version; runtime handles fallback
+	if c.currentNamespace != "" {
+		// Check if it contains backslash (qualified)
+		for i := 0; i < len(name); i++ {
+			if name[i] == '\\' {
+				return c.currentNamespace + "\\" + name
+			}
+		}
+		return c.currentNamespace + "\\" + name
+	}
+	return name
+}
+
+// ResolveConstantName resolves a constant name to its FQN
+// Constants follow similar rules to functions
+func (c *Compiler) ResolveConstantName(name string) string {
+	if name == "" {
+		return ""
+	}
+
+	// Fully qualified name
+	if name[0] == '\\' {
+		return name[1:]
+	}
+
+	// Check use const imports
+	if fqn, ok := c.useConstImports[name]; ok {
+		return fqn
+	}
+
+	// For unqualified names in a namespace, prepend namespace
+	if c.currentNamespace != "" {
+		return c.currentNamespace + "\\" + name
+	}
+	return name
+}
+
+// GetCurrentNamespace returns the current namespace context
+func (c *Compiler) GetCurrentNamespace() string {
+	return c.currentNamespace
+}
+
+// GetUseImports returns the current class use imports
+func (c *Compiler) GetUseImports() map[string]string {
+	return c.useImports
+}
+
+// GetUseFunctionImports returns the current function use imports
+func (c *Compiler) GetUseFunctionImports() map[string]string {
+	return c.useFunctionImports
+}
+
+// GetUseConstImports returns the current constant use imports
+func (c *Compiler) GetUseConstImports() map[string]string {
+	return c.useConstImports
 }

@@ -2,6 +2,7 @@ package array
 
 import (
 	"github.com/krizos/php-go/pkg/types"
+	"github.com/krizos/php-go/pkg/util"
 )
 
 // ============================================================================
@@ -188,11 +189,22 @@ func ArraySlice(arr *types.Value, offset *types.Value, length ...*types.Value) *
 	}
 
 	arrayData := arr.ToArray()
-	offsetInt := int(offset.ToInt())
+
+	// Security: Safe conversion from int64 to int
+	offsetInt, err := util.SafeConvertToInt(offset.ToInt(), "offset")
+	if err != nil {
+		// Invalid offset - return empty array
+		return types.NewArray(types.NewEmptyArray())
+	}
 
 	var lengthInt int
 	if len(length) > 0 && length[0] != nil {
-		lengthInt = int(length[0].ToInt())
+		// Security: Safe conversion from int64 to int
+		lengthInt, err = util.SafeConvertToInt(length[0].ToInt(), "length")
+		if err != nil {
+			// Invalid length - use remaining length
+			lengthInt = arrayData.Len()
+		}
 	} else {
 		// No length specified, go to end
 		lengthInt = arrayData.Len()
@@ -210,8 +222,19 @@ func ArraySplice(arr *types.Value, offset *types.Value, length *types.Value, rep
 	}
 
 	arrayData := arr.ToArray()
-	offsetInt := int(offset.ToInt())
-	lengthInt := int(length.ToInt())
+
+	// Security: Safe conversion from int64 to int
+	offsetInt, err := util.SafeConvertToInt(offset.ToInt(), "offset")
+	if err != nil {
+		// Invalid offset - return empty array
+		return types.NewArray(types.NewEmptyArray())
+	}
+
+	lengthInt, err := util.SafeConvertToInt(length.ToInt(), "length")
+	if err != nil {
+		// Invalid length - use remaining length
+		lengthInt = arrayData.Len()
+	}
 
 	// Extract the portion to be removed
 	removed := arrayData.Slice(offsetInt, lengthInt)
@@ -400,8 +423,9 @@ func ArrayChunk(arr *types.Value, length *types.Value, preserveKeys ...*types.Va
 		return types.NewArray(types.NewEmptyArray())
 	}
 
-	chunkSize := int(length.ToInt())
-	if chunkSize < 1 {
+	// Security: Safe conversion from int64 to int
+	chunkSize, err := util.SafeConvertToInt(length.ToInt(), "chunk_size")
+	if err != nil || chunkSize < 1 {
 		return types.NewBool(false)
 	}
 
@@ -688,6 +712,19 @@ func ArrayWalk(arr *types.Value, callback *types.Value, arg ...*types.Value) *ty
 	}
 
 	// TODO: Implement callback invocation when we have callable support
+	// For now, just return true
+	return types.NewBool(true)
+}
+
+// ArrayWalkRecursive applies a user function recursively to every member of an array
+// array_walk_recursive(array &$array, callable $callback, mixed $arg = null): true
+func ArrayWalkRecursive(arr *types.Value, callback *types.Value, arg ...*types.Value) *types.Value {
+	if arr == nil || arr.Type() != types.TypeArray {
+		return types.NewBool(false)
+	}
+
+	// TODO: Implement callback invocation when we have callable support
+	// This function differs from array_walk by recursively descending into nested arrays
 	// For now, just return true
 	return types.NewBool(true)
 }
@@ -986,4 +1023,649 @@ func compareValues(a, b *types.Value, reverse bool) bool {
 		return aStr < bStr
 	}
 	return aStr > bStr
+}
+
+// ============================================================================
+// Array Padding and Computation Functions
+// ============================================================================
+
+// ArrayPad pads an array to the specified length with a value
+// array_pad(array $array, int $length, mixed $value): array
+func ArrayPad(arr *types.Value, length *types.Value, value *types.Value) *types.Value {
+	if arr == nil || arr.Type() != types.TypeArray {
+		return types.NewArray(types.NewEmptyArray())
+	}
+
+	arrayData := arr.ToArray()
+	padSize, err := util.SafeConvertToInt(length.ToInt(), "length")
+	if err != nil {
+		return types.NewArray(types.NewEmptyArray())
+	}
+
+	currentLen := arrayData.Len()
+
+	// If the absolute value of padSize is less than or equal to current length,
+	// no padding is done
+	absSize := padSize
+	if absSize < 0 {
+		absSize = -absSize
+	}
+	if absSize <= currentLen {
+		// Return a copy of the original array
+		result := types.NewEmptyArray()
+		arrayData.Each(func(key, val *types.Value) bool {
+			result.Set(key, val)
+			return true
+		})
+		return types.NewArray(result)
+	}
+
+	padCount := absSize - currentLen
+	result := types.NewEmptyArray()
+
+	if padSize < 0 {
+		// Pad at the beginning
+		for i := 0; i < padCount; i++ {
+			result.Append(value)
+		}
+		arrayData.Each(func(_, val *types.Value) bool {
+			result.Append(val)
+			return true
+		})
+	} else {
+		// Pad at the end
+		arrayData.Each(func(_, val *types.Value) bool {
+			result.Append(val)
+			return true
+		})
+		for i := 0; i < padCount; i++ {
+			result.Append(value)
+		}
+	}
+
+	return types.NewArray(result)
+}
+
+// ArraySum calculates the sum of values in an array
+// array_sum(array $array): int|float
+func ArraySum(arr *types.Value) *types.Value {
+	if arr == nil || arr.Type() != types.TypeArray {
+		return types.NewInt(0)
+	}
+
+	arrayData := arr.ToArray()
+	var intSum int64 = 0
+	var floatSum float64 = 0
+	hasFloat := false
+
+	arrayData.Each(func(_, value *types.Value) bool {
+		if value == nil {
+			return true
+		}
+
+		switch value.Type() {
+		case types.TypeInt:
+			intSum += value.ToInt()
+		case types.TypeFloat:
+			hasFloat = true
+			floatSum += value.ToFloat()
+		case types.TypeString:
+			// PHP converts strings to numbers using ToInt/ToFloat
+			// which already handles numeric string detection
+			floatVal := value.ToFloat()
+			if floatVal != float64(int64(floatVal)) {
+				hasFloat = true
+				floatSum += floatVal
+			} else {
+				intSum += value.ToInt()
+			}
+		case types.TypeBool:
+			if value.ToBool() {
+				intSum += 1
+			}
+		}
+		return true
+	})
+
+	if hasFloat {
+		return types.NewFloat(float64(intSum) + floatSum)
+	}
+	return types.NewInt(intSum)
+}
+
+// ArrayProduct calculates the product of values in an array
+// array_product(array $array): int|float
+func ArrayProduct(arr *types.Value) *types.Value {
+	if arr == nil || arr.Type() != types.TypeArray {
+		return types.NewInt(0)
+	}
+
+	arrayData := arr.ToArray()
+	if arrayData.Len() == 0 {
+		return types.NewInt(1) // PHP returns 1 for empty array
+	}
+
+	var intProduct int64 = 1
+	var floatProduct float64 = 1
+	hasFloat := false
+
+	arrayData.Each(func(_, value *types.Value) bool {
+		if value == nil {
+			return true
+		}
+
+		switch value.Type() {
+		case types.TypeInt:
+			intProduct *= value.ToInt()
+		case types.TypeFloat:
+			hasFloat = true
+			floatProduct *= value.ToFloat()
+		case types.TypeString:
+			// PHP converts strings to numbers using ToInt/ToFloat
+			floatVal := value.ToFloat()
+			if floatVal != float64(int64(floatVal)) {
+				hasFloat = true
+				floatProduct *= floatVal
+			} else {
+				intVal := value.ToInt()
+				if intVal == 0 && value.ToString() != "0" {
+					// Non-numeric strings are treated as 0
+					intProduct = 0
+				} else {
+					intProduct *= intVal
+				}
+			}
+		case types.TypeBool:
+			if value.ToBool() {
+				// true = 1, doesn't change product
+			} else {
+				intProduct = 0
+			}
+		default:
+			// Other types treated as 0
+			intProduct = 0
+		}
+		return true
+	})
+
+	if hasFloat {
+		return types.NewFloat(float64(intProduct) * floatProduct)
+	}
+	return types.NewInt(intProduct)
+}
+
+// ArrayColumn returns the values from a single column in a multi-dimensional array
+// array_column(array $array, int|string|null $column_key, int|string|null $index_key = null): array
+func ArrayColumn(arr *types.Value, columnKey *types.Value, indexKey ...*types.Value) *types.Value {
+	if arr == nil || arr.Type() != types.TypeArray {
+		return types.NewArray(types.NewEmptyArray())
+	}
+
+	arrayData := arr.ToArray()
+	result := types.NewEmptyArray()
+
+	var idxKey *types.Value
+	if len(indexKey) > 0 && indexKey[0] != nil && indexKey[0].Type() != types.TypeNull {
+		idxKey = indexKey[0]
+	}
+
+	arrayData.Each(func(_, row *types.Value) bool {
+		if row == nil || row.Type() != types.TypeArray {
+			return true // Skip non-array rows
+		}
+
+		rowArray := row.ToArray()
+
+		// Get the value for this row
+		var value *types.Value
+		if columnKey == nil || columnKey.Type() == types.TypeNull {
+			// If column_key is null, return the entire row
+			value = row
+		} else {
+			// Get the specific column
+			value, _ = rowArray.Get(columnKey)
+			if value == nil {
+				return true // Skip if column doesn't exist
+			}
+		}
+
+		// Determine the key for the result
+		if idxKey != nil {
+			// Use a specific column as the index
+			keyValue, exists := rowArray.Get(idxKey)
+			if exists && keyValue != nil {
+				result.Set(keyValue, value)
+			}
+		} else {
+			// Use sequential numeric keys
+			result.Append(value)
+		}
+
+		return true
+	})
+
+	return types.NewArray(result)
+}
+
+// CASE_LOWER and CASE_UPPER constants for array_change_key_case
+const (
+	CASE_LOWER = 0
+	CASE_UPPER = 1
+)
+
+// ArrayChangeKeyCase changes the case of all keys in an array
+// array_change_key_case(array $array, int $case = CASE_LOWER): array
+func ArrayChangeKeyCase(arr *types.Value, caseType ...*types.Value) *types.Value {
+	if arr == nil || arr.Type() != types.TypeArray {
+		return types.NewArray(types.NewEmptyArray())
+	}
+
+	toUpper := false
+	if len(caseType) > 0 && caseType[0] != nil {
+		toUpper = caseType[0].ToInt() == CASE_UPPER
+	}
+
+	arrayData := arr.ToArray()
+	result := types.NewEmptyArray()
+
+	arrayData.Each(func(key, value *types.Value) bool {
+		if key.Type() == types.TypeString {
+			keyStr := key.ToString()
+			if toUpper {
+				keyStr = toUpperString(keyStr)
+			} else {
+				keyStr = toLowerString(keyStr)
+			}
+			result.Set(types.NewString(keyStr), value)
+		} else {
+			// Non-string keys (integers) are kept as-is
+			result.Set(key, value)
+		}
+		return true
+	})
+
+	return types.NewArray(result)
+}
+
+// ArrayReplace replaces elements from passed arrays into the first array
+// array_replace(array $array, array ...$replacements): array
+func ArrayReplace(arrays ...*types.Value) *types.Value {
+	if len(arrays) == 0 {
+		return types.NewArray(types.NewEmptyArray())
+	}
+
+	// Start with a copy of the first array
+	var result *types.Array
+	if arrays[0] != nil && arrays[0].Type() == types.TypeArray {
+		result = arrays[0].ToArray().DeepCopy()
+	} else {
+		result = types.NewEmptyArray()
+	}
+
+	// Replace with subsequent arrays
+	for i := 1; i < len(arrays); i++ {
+		if arrays[i] != nil && arrays[i].Type() == types.TypeArray {
+			replacement := arrays[i].ToArray()
+			replacement.Each(func(key, value *types.Value) bool {
+				result.Set(key, value)
+				return true
+			})
+		}
+	}
+
+	return types.NewArray(result)
+}
+
+// ArrayReplaceRecursive replaces elements from passed arrays into the first array recursively
+// array_replace_recursive(array $array, array ...$replacements): array
+func ArrayReplaceRecursive(arrays ...*types.Value) *types.Value {
+	if len(arrays) == 0 {
+		return types.NewArray(types.NewEmptyArray())
+	}
+
+	// Start with a deep copy of the first array
+	var result *types.Array
+	if arrays[0] != nil && arrays[0].Type() == types.TypeArray {
+		result = arrays[0].ToArray().DeepCopy()
+	} else {
+		result = types.NewEmptyArray()
+	}
+
+	// Replace with subsequent arrays recursively
+	for i := 1; i < len(arrays); i++ {
+		if arrays[i] != nil && arrays[i].Type() == types.TypeArray {
+			replacement := arrays[i].ToArray()
+			result = arrayReplaceRecursiveHelper(result, replacement)
+		}
+	}
+
+	return types.NewArray(result)
+}
+
+// arrayReplaceRecursiveHelper merges arrays recursively
+func arrayReplaceRecursiveHelper(base, replacement *types.Array) *types.Array {
+	replacement.Each(func(key, value *types.Value) bool {
+		existingValue, exists := base.Get(key)
+
+		if exists && existingValue != nil &&
+			existingValue.Type() == types.TypeArray &&
+			value != nil && value.Type() == types.TypeArray {
+			// Both are arrays, recurse
+			merged := arrayReplaceRecursiveHelper(
+				existingValue.ToArray().DeepCopy(),
+				value.ToArray(),
+			)
+			base.Set(key, types.NewArray(merged))
+		} else {
+			// Replace the value
+			base.Set(key, value)
+		}
+		return true
+	})
+
+	return base
+}
+
+// ============================================================================
+// String Case Helpers
+// ============================================================================
+
+// toLowerString converts a string to lowercase
+func toLowerString(s string) string {
+	result := make([]byte, len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c >= 'A' && c <= 'Z' {
+			result[i] = c + 32
+		} else {
+			result[i] = c
+		}
+	}
+	return string(result)
+}
+
+// toUpperString converts a string to uppercase
+func toUpperString(s string) string {
+	result := make([]byte, len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c >= 'a' && c <= 'z' {
+			result[i] = c - 32
+		} else {
+			result[i] = c
+		}
+	}
+	return string(result)
+}
+
+// ============================================================================
+// Array Search/Filter Functions
+// ============================================================================
+
+// ArrayKeyExists checks if the given key or index exists in the array
+// array_key_exists(int|string $key, array $array): bool
+func ArrayKeyExists(key *types.Value, arr *types.Value) *types.Value {
+	if arr == nil || arr.Type() != types.TypeArray {
+		return types.NewBool(false)
+	}
+
+	if key == nil {
+		return types.NewBool(false)
+	}
+
+	arrayData := arr.ToArray()
+	_, exists := arrayData.Get(key)
+	return types.NewBool(exists)
+}
+
+// KeyExists is an alias for ArrayKeyExists
+// key_exists(int|string $key, array $array): bool
+func KeyExists(key *types.Value, arr *types.Value) *types.Value {
+	return ArrayKeyExists(key, arr)
+}
+
+// ArrayDiffKey computes the difference of arrays using keys for comparison
+// array_diff_key(array $array, array ...$arrays): array
+func ArrayDiffKey(arrays ...*types.Value) *types.Value {
+	if len(arrays) == 0 {
+		return types.NewArray(types.NewEmptyArray())
+	}
+
+	if arrays[0] == nil || arrays[0].Type() != types.TypeArray {
+		return types.NewArray(types.NewEmptyArray())
+	}
+
+	base := arrays[0].ToArray()
+	result := types.NewEmptyArray()
+
+	// Add key-value pairs from base whose keys don't appear in other arrays
+	base.Each(func(key, value *types.Value) bool {
+		found := false
+
+		// Check if key exists in any of the other arrays
+		for i := 1; i < len(arrays); i++ {
+			if arrays[i] != nil && arrays[i].Type() == types.TypeArray {
+				other := arrays[i].ToArray()
+				_, exists := other.Get(key)
+				if exists {
+					found = true
+					break
+				}
+			}
+		}
+
+		if !found {
+			result.Set(key, value)
+		}
+		return true
+	})
+
+	return types.NewArray(result)
+}
+
+// ArrayIntersectKey computes the intersection of arrays using keys for comparison
+// array_intersect_key(array $array, array ...$arrays): array
+func ArrayIntersectKey(arrays ...*types.Value) *types.Value {
+	if len(arrays) == 0 {
+		return types.NewArray(types.NewEmptyArray())
+	}
+
+	if arrays[0] == nil || arrays[0].Type() != types.TypeArray {
+		return types.NewArray(types.NewEmptyArray())
+	}
+
+	base := arrays[0].ToArray()
+	result := types.NewEmptyArray()
+
+	// Add key-value pairs from base whose keys appear in all other arrays
+	base.Each(func(key, value *types.Value) bool {
+		inAll := true
+
+		// Check if key exists in all other arrays
+		for i := 1; i < len(arrays); i++ {
+			if arrays[i] == nil || arrays[i].Type() != types.TypeArray {
+				inAll = false
+				break
+			}
+
+			other := arrays[i].ToArray()
+			_, exists := other.Get(key)
+			if !exists {
+				inAll = false
+				break
+			}
+		}
+
+		if inAll {
+			result.Set(key, value)
+		}
+		return true
+	})
+
+	return types.NewArray(result)
+}
+
+// ArrayDiffAssoc computes the difference of arrays with additional index check
+// array_diff_assoc(array $array, array ...$arrays): array
+func ArrayDiffAssoc(arrays ...*types.Value) *types.Value {
+	if len(arrays) == 0 {
+		return types.NewArray(types.NewEmptyArray())
+	}
+
+	if arrays[0] == nil || arrays[0].Type() != types.TypeArray {
+		return types.NewArray(types.NewEmptyArray())
+	}
+
+	base := arrays[0].ToArray()
+	result := types.NewEmptyArray()
+
+	// Add key-value pairs from base where key=>value doesn't appear in other arrays
+	base.Each(func(key, value *types.Value) bool {
+		found := false
+
+		// Check if key=>value exists in any of the other arrays
+		for i := 1; i < len(arrays); i++ {
+			if arrays[i] != nil && arrays[i].Type() == types.TypeArray {
+				other := arrays[i].ToArray()
+				otherValue, exists := other.Get(key)
+				// Both key must exist and values must be equal
+				if exists && otherValue != nil && value.Equals(otherValue) {
+					found = true
+					break
+				}
+			}
+		}
+
+		if !found {
+			result.Set(key, value)
+		}
+		return true
+	})
+
+	return types.NewArray(result)
+}
+
+// ArrayIntersectAssoc computes the intersection of arrays with additional index check
+// array_intersect_assoc(array $array, array ...$arrays): array
+func ArrayIntersectAssoc(arrays ...*types.Value) *types.Value {
+	if len(arrays) == 0 {
+		return types.NewArray(types.NewEmptyArray())
+	}
+
+	if arrays[0] == nil || arrays[0].Type() != types.TypeArray {
+		return types.NewArray(types.NewEmptyArray())
+	}
+
+	base := arrays[0].ToArray()
+	result := types.NewEmptyArray()
+
+	// Add key-value pairs from base where key=>value appears in all other arrays
+	base.Each(func(key, value *types.Value) bool {
+		inAll := true
+
+		// Check if key=>value exists in all other arrays
+		for i := 1; i < len(arrays); i++ {
+			if arrays[i] == nil || arrays[i].Type() != types.TypeArray {
+				inAll = false
+				break
+			}
+
+			other := arrays[i].ToArray()
+			otherValue, exists := other.Get(key)
+			// Both key must exist and values must be equal
+			if !exists || otherValue == nil || !value.Equals(otherValue) {
+				inAll = false
+				break
+			}
+		}
+
+		if inAll {
+			result.Set(key, value)
+		}
+		return true
+	})
+
+	return types.NewArray(result)
+}
+
+// ArrayKeyFirst gets the first key of an array
+// array_key_first(array $array): int|string|null
+func ArrayKeyFirst(arr *types.Value) *types.Value {
+	if arr == nil || arr.Type() != types.TypeArray {
+		return types.NewNull()
+	}
+
+	arrayData := arr.ToArray()
+	if arrayData.Len() == 0 {
+		return types.NewNull()
+	}
+
+	var firstKey *types.Value
+	arrayData.Each(func(key, _ *types.Value) bool {
+		firstKey = key
+		return false // Stop after first
+	})
+
+	if firstKey == nil {
+		return types.NewNull()
+	}
+	return firstKey
+}
+
+// ArrayKeyLast gets the last key of an array
+// array_key_last(array $array): int|string|null
+func ArrayKeyLast(arr *types.Value) *types.Value {
+	if arr == nil || arr.Type() != types.TypeArray {
+		return types.NewNull()
+	}
+
+	arrayData := arr.ToArray()
+	if arrayData.Len() == 0 {
+		return types.NewNull()
+	}
+
+	var lastKey *types.Value
+	arrayData.Each(func(key, _ *types.Value) bool {
+		lastKey = key
+		return true // Continue to get last
+	})
+
+	if lastKey == nil {
+		return types.NewNull()
+	}
+	return lastKey
+}
+
+// ArrayCountValues counts all the values of an array
+// array_count_values(array $array): array
+func ArrayCountValues(arr *types.Value) *types.Value {
+	if arr == nil || arr.Type() != types.TypeArray {
+		return types.NewArray(types.NewEmptyArray())
+	}
+
+	arrayData := arr.ToArray()
+	result := types.NewEmptyArray()
+
+	arrayData.Each(func(_, value *types.Value) bool {
+		if value == nil {
+			return true
+		}
+
+		// Only count string and integer values (PHP behavior)
+		if value.Type() != types.TypeString && value.Type() != types.TypeInt {
+			return true
+		}
+
+		// Get current count for this value
+		currentCount, exists := result.Get(value)
+		if exists {
+			result.Set(value, types.NewInt(currentCount.ToInt()+1))
+		} else {
+			result.Set(value, types.NewInt(1))
+		}
+
+		return true
+	})
+
+	return types.NewArray(result)
 }

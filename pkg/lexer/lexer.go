@@ -30,10 +30,11 @@ func New(input, filename string) *Lexer {
 	l.readChar() // Initialize first character
 
 	// Determine initial mode based on file content
-	// If file starts with HTML (< but not <?), start in HTML mode
+	// If file starts with HTML (< but not <? and not <<<), start in HTML mode
 	// Otherwise, start in PHP mode for backward compatibility
-	if len(input) >= 2 && input[0] == '<' && input[1] != '?' {
+	if len(input) >= 2 && input[0] == '<' && input[1] != '?' && input[1] != '<' {
 		// Starts with HTML tag (e.g., <html, <div, etc.)
+		// But not heredoc/nowdoc (<<<) which is PHP
 		l.inPHP = false
 	}
 	// All other cases: start in PHP mode
@@ -821,6 +822,22 @@ func isOctalDigit(ch byte) bool {
 
 // scanInlineHTML scans HTML content between ?> and <?php
 func (l *Lexer) scanInlineHTML() Token {
+	// PHP behavior: A single newline immediately following ?> is consumed
+	// This prevents extra blank lines when alternating between PHP and HTML
+	if l.ch == '\n' {
+		l.line++
+		l.column = 0
+		l.lineStart = l.readPos
+		l.readChar()
+	} else if l.ch == '\r' && l.peekChar() == '\n' {
+		// Handle Windows line endings \r\n
+		l.readChar() // skip \r
+		l.line++
+		l.column = 0
+		l.lineStart = l.readPos
+		l.readChar() // skip \n
+	}
+
 	pos := l.currentPosition()
 	startPos := l.pos
 

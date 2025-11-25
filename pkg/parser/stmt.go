@@ -192,7 +192,7 @@ func (p *Parser) parseIfStatement() *ast.IfStatement {
 		return nil
 	}
 
-	// Check for alternative syntax (colon) or regular syntax (brace)
+	// Check for alternative syntax (colon), regular syntax (brace), or single statement
 	p.nextToken()
 	useAlternativeSyntax := false
 
@@ -205,8 +205,8 @@ func (p *Parser) parseIfStatement() *ast.IfStatement {
 		// Regular syntax: if (...) { ... }
 		stmt.Consequence = p.parseBlockStatement()
 	} else {
-		p.peekError(lexer.LBRACE)
-		return nil
+		// Single statement without braces: if (...) statement;
+		stmt.Consequence = p.parseSingleStatement()
 	}
 
 	// Parse elseif clauses
@@ -240,12 +240,12 @@ func (p *Parser) parseIfStatement() *ast.IfStatement {
 			}
 			elseIfClause.Consequence = p.parseAlternativeBlockStatement(lexer.ENDIF, lexer.ELSEIF, lexer.ELSE)
 			// After parseAlternativeBlockStatement, curToken is at the terminator
-		} else {
-			if !p.curTokenIs(lexer.LBRACE) {
-				p.peekError(lexer.LBRACE)
-				return nil
-			}
+		} else if p.curTokenIs(lexer.LBRACE) {
+			// Regular syntax with braces: elseif (...) { ... }
 			elseIfClause.Consequence = p.parseBlockStatement()
+		} else {
+			// Single statement without braces: elseif (...) statement;
+			elseIfClause.Consequence = p.parseSingleStatement()
 		}
 
 		stmt.ElseIfs = append(stmt.ElseIfs, elseIfClause)
@@ -264,10 +264,14 @@ func (p *Parser) parseIfStatement() *ast.IfStatement {
 			stmt.Alternative = p.parseAlternativeBlockStatement(lexer.ENDIF)
 			// After parseAlternativeBlockStatement, curToken is at endif
 		} else {
-			if !p.expectPeek(lexer.LBRACE) {
-				return nil
+			p.nextToken() // move past else
+			if p.curTokenIs(lexer.LBRACE) {
+				// Regular syntax with braces: else { ... }
+				stmt.Alternative = p.parseBlockStatement()
+			} else {
+				// Single statement without braces: else statement;
+				stmt.Alternative = p.parseSingleStatement()
 			}
-			stmt.Alternative = p.parseBlockStatement()
 		}
 	}
 
@@ -303,7 +307,7 @@ func (p *Parser) parseWhileStatement() *ast.WhileStatement {
 		return nil
 	}
 
-	// Check for alternative syntax (colon) or regular syntax (brace)
+	// Check for alternative syntax (colon), regular syntax (brace), or single statement
 	p.nextToken()
 
 	if p.curTokenIs(lexer.COLON) {
@@ -321,8 +325,8 @@ func (p *Parser) parseWhileStatement() *ast.WhileStatement {
 		// Regular syntax: while (...) { ... }
 		stmt.Body = p.parseBlockStatement()
 	} else {
-		p.peekError(lexer.LBRACE)
-		return nil
+		// Single statement without braces: while (...) statement;
+		stmt.Body = p.parseSingleStatement()
 	}
 
 	return stmt
@@ -424,7 +428,7 @@ func (p *Parser) parseForStatement() *ast.ForStatement {
 		return nil
 	}
 
-	// Check for alternative syntax (colon) or regular syntax (brace)
+	// Check for alternative syntax (colon), regular syntax (brace), or single statement
 	p.nextToken()
 
 	if p.curTokenIs(lexer.COLON) {
@@ -442,8 +446,8 @@ func (p *Parser) parseForStatement() *ast.ForStatement {
 		// Regular syntax: for (...) { ... }
 		stmt.Body = p.parseBlockStatement()
 	} else {
-		p.peekError(lexer.LBRACE)
-		return nil
+		// Single statement without braces: for (...) statement;
+		stmt.Body = p.parseSingleStatement()
 	}
 
 	return stmt
@@ -494,7 +498,7 @@ func (p *Parser) parseForeachStatement() *ast.ForeachStatement {
 		return nil
 	}
 
-	// Check for alternative syntax (colon) or regular syntax (brace)
+	// Check for alternative syntax (colon), regular syntax (brace), or single statement
 	p.nextToken()
 
 	if p.curTokenIs(lexer.COLON) {
@@ -512,8 +516,8 @@ func (p *Parser) parseForeachStatement() *ast.ForeachStatement {
 		// Regular syntax: foreach (...) { ... }
 		stmt.Body = p.parseBlockStatement()
 	} else {
-		p.peekError(lexer.LBRACE)
-		return nil
+		// Single statement without braces: foreach (...) statement;
+		stmt.Body = p.parseSingleStatement()
 	}
 
 	return stmt
@@ -671,6 +675,11 @@ func (p *Parser) parseMatchExpression() ast.Expr {
 			for p.peekTokenIs(lexer.COMMA) {
 				p.nextToken() // consume comma
 
+				// Check if next is => (comma was just before the arrow)
+				if p.peekTokenIs(lexer.DOUBLE_ARROW) {
+					break
+				}
+
 				// Check if this is the end (trailing comma) or another condition
 				if p.peekTokenIs(lexer.RBRACE) || p.peekTokenIs(lexer.DEFAULT) {
 					break
@@ -695,9 +704,10 @@ func (p *Parser) parseMatchExpression() ast.Expr {
 			p.nextToken() // consume comma
 
 			// Check if there's another arm or just trailing comma
-			if !p.peekTokenIs(lexer.RBRACE) {
-				p.nextToken() // move to next arm
+			if p.peekTokenIs(lexer.RBRACE) {
+				break // Trailing comma before closing brace
 			}
+			p.nextToken() // move to next arm
 		} else if p.peekTokenIs(lexer.RBRACE) {
 			break
 		}
@@ -800,6 +810,23 @@ func (p *Parser) parseThrowStatement() *ast.ThrowStatement {
 }
 
 // parseBlockStatement parses a block of statements { ... }
+// parseSingleStatement parses a single statement and wraps it in a BlockStatement
+// This is used for single-line if/else/while/for bodies without braces
+func (p *Parser) parseSingleStatement() *ast.BlockStatement {
+	block := &ast.BlockStatement{
+		Token:      p.curToken,
+		Statements: []ast.Stmt{},
+	}
+
+	// Parse one statement
+	stmt := p.parseStatement()
+	if stmt != nil {
+		block.Statements = append(block.Statements, stmt)
+	}
+
+	return block
+}
+
 func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 	block := &ast.BlockStatement{
 		Token:      p.curToken,
@@ -1192,4 +1219,221 @@ func (p *Parser) parseDeclareStatement() *ast.DeclareStatement {
 	}
 
 	return stmt
+}
+
+// parseAttributeGroup parses a PHP 8 attribute group: #[Attr1, Attr2(arg)]
+// Returns a list of attribute groups (allows multiple #[] blocks)
+func (p *Parser) parseAttributeGroups() []*ast.AttributeGroup {
+	var groups []*ast.AttributeGroup
+
+	for p.curTokenIs(lexer.ATTRIBUTE_START) {
+		group := p.parseAttributeGroup()
+		if group != nil {
+			groups = append(groups, group)
+		}
+		// Move past the closing bracket if we haven't already
+		if p.curTokenIs(lexer.RBRACKET) {
+			p.nextToken()
+		}
+	}
+
+	return groups
+}
+
+// parseAttributeGroup parses a single attribute group: #[Attr1, Attr2(arg)]
+func (p *Parser) parseAttributeGroup() *ast.AttributeGroup {
+	group := &ast.AttributeGroup{
+		Token:      p.curToken,
+		Attributes: []*ast.Attribute{},
+	}
+
+	p.nextToken() // consume #[
+
+	// Parse first attribute
+	attr := p.parseAttribute()
+	if attr != nil {
+		group.Attributes = append(group.Attributes, attr)
+	}
+
+	// Parse additional attributes separated by commas
+	for p.curTokenIs(lexer.COMMA) {
+		p.nextToken() // consume comma
+		attr := p.parseAttribute()
+		if attr != nil {
+			group.Attributes = append(group.Attributes, attr)
+		}
+	}
+
+	// Expect closing bracket
+	if !p.curTokenIs(lexer.RBRACKET) {
+		p.error(fmt.Sprintf("expected ']' after attribute, got %s", p.curToken.Type))
+		return nil
+	}
+
+	return group
+}
+
+// parseAttribute parses a single attribute: AttributeName or AttributeName(args)
+func (p *Parser) parseAttribute() *ast.Attribute {
+	attr := &ast.Attribute{
+		Token:     p.curToken,
+		Arguments: []ast.Expr{},
+		Named:     make(map[string]ast.Expr),
+	}
+
+	// Parse attribute name (can be namespaced like \Namespace\Attribute or Attribute)
+	attr.Name = p.parseNamespacedName()
+
+	// Check for arguments
+	if p.curTokenIs(lexer.LPAREN) {
+		p.nextToken() // consume (
+
+		// Parse arguments
+		if !p.curTokenIs(lexer.RPAREN) {
+			p.parseAttributeArguments(attr)
+		}
+
+		// Expect closing paren
+		if !p.curTokenIs(lexer.RPAREN) {
+			p.error(fmt.Sprintf("expected ')' after attribute arguments, got %s", p.curToken.Type))
+			return nil
+		}
+		p.nextToken() // consume )
+	}
+
+	return attr
+}
+
+// parseAttributeArguments parses attribute arguments (positional and named)
+func (p *Parser) parseAttributeArguments(attr *ast.Attribute) {
+	for {
+		// Check for named argument: name: value
+		if p.curTokenIs(lexer.IDENT) && p.peekTokenIs(lexer.COLON) {
+			name := p.curToken.Literal
+			p.nextToken() // consume name
+			p.nextToken() // consume :
+			value := p.parseExpression(LOWEST)
+			attr.Named[name] = value
+		} else {
+			// Positional argument
+			value := p.parseExpression(LOWEST)
+			attr.Arguments = append(attr.Arguments, value)
+		}
+
+		// After parseExpression, curToken might be:
+		// 1. On the last token of a simple expression (literal)
+		// 2. On a closing bracket/paren from complex expressions (array, call, etc.)
+		// We need to check peek for comma to continue, or advance to reach )
+
+		// If peek is comma, we have more arguments
+		if p.peekTokenIs(lexer.COMMA) {
+			p.nextToken() // move past current token
+			p.nextToken() // consume comma
+			continue
+		}
+
+		// If peek is ), we're done - advance to it
+		if p.peekTokenIs(lexer.RPAREN) {
+			p.nextToken() // move to )
+			break
+		}
+
+		// If cur is already ), we're done
+		if p.curTokenIs(lexer.RPAREN) {
+			break
+		}
+
+		// Otherwise advance and check again
+		p.nextToken()
+		if p.curTokenIs(lexer.RPAREN) || p.curTokenIs(lexer.COMMA) {
+			if p.curTokenIs(lexer.COMMA) {
+				p.nextToken() // consume comma
+				continue
+			}
+			break
+		}
+	}
+}
+
+// parseNamespacedName parses a potentially namespaced identifier like \Foo\Bar or Foo\Bar or Foo
+func (p *Parser) parseNamespacedName() ast.Expr {
+	// Check for leading backslash (fully qualified name)
+	prefix := ""
+	if p.curTokenIs(lexer.NS_SEPARATOR) {
+		prefix = "\\"
+		p.nextToken()
+	}
+
+	// Parse first identifier
+	if !p.curTokenIs(lexer.IDENT) {
+		p.error(fmt.Sprintf("expected identifier in attribute name, got %s", p.curToken.Type))
+		return nil
+	}
+
+	name := &ast.Identifier{
+		Token: p.curToken,
+		Value: prefix + p.curToken.Literal,
+	}
+	p.nextToken()
+
+	// Check for namespace separator
+	for p.curTokenIs(lexer.NS_SEPARATOR) {
+		p.nextToken() // consume \
+		if !p.curTokenIs(lexer.IDENT) {
+			p.error("expected identifier after namespace separator")
+			return name
+		}
+		// Build qualified name
+		name.Value = name.Value + "\\" + p.curToken.Literal
+		p.nextToken()
+	}
+
+	return name
+}
+
+// parseStatementWithAttributes parses a statement that may be preceded by attributes
+// and returns the appropriate declaration with attributes attached
+func (p *Parser) parseStatementWithAttributes() ast.Stmt {
+	// Parse attribute groups
+	attrs := p.parseAttributeGroups()
+
+	// Now parse the actual declaration
+	switch p.curToken.Type {
+	case lexer.FUNCTION:
+		fn := p.parseFunctionDeclaration()
+		if fn != nil {
+			fn.Attributes = attrs
+		}
+		return fn
+	case lexer.CLASS:
+		cls := p.parseClassDeclaration()
+		if cls != nil {
+			cls.Attributes = attrs
+		}
+		return cls
+	case lexer.INTERFACE:
+		iface := p.parseInterfaceDeclaration()
+		// Interface declaration should support attributes
+		return iface
+	case lexer.TRAIT:
+		trait := p.parseTraitDeclaration()
+		// Trait declaration should support attributes
+		return trait
+	case lexer.ABSTRACT, lexer.FINAL:
+		cls := p.parseClassDeclarationWithModifiers()
+		if cls != nil {
+			cls.Attributes = attrs
+		}
+		return cls
+	case lexer.READONLY:
+		// Could be readonly class
+		cls := p.parseClassDeclarationWithModifiers()
+		if cls != nil {
+			cls.Attributes = attrs
+		}
+		return cls
+	default:
+		p.error(fmt.Sprintf("unexpected token %s after attributes", p.curToken.Type))
+		return nil
+	}
 }

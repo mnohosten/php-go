@@ -706,3 +706,143 @@ func TestGetType_UnknownType(t *testing.T) {
 		t.Errorf("GetType(resource) = %v, want 'resource'", result.ToString())
 	}
 }
+
+// ============================================================================
+// Serialization Tests
+// ============================================================================
+
+func TestSerializeNull(t *testing.T) {
+	result := Serialize(types.NewNull())
+	if result.ToString() != "N;" {
+		t.Errorf("Serialize(null) = %q, want %q", result.ToString(), "N;")
+	}
+}
+
+func TestSerializeBool(t *testing.T) {
+	result := Serialize(types.NewBool(true))
+	if result.ToString() != "b:1;" {
+		t.Errorf("Serialize(true) = %q, want %q", result.ToString(), "b:1;")
+	}
+
+	result = Serialize(types.NewBool(false))
+	if result.ToString() != "b:0;" {
+		t.Errorf("Serialize(false) = %q, want %q", result.ToString(), "b:0;")
+	}
+}
+
+func TestSerializeInt(t *testing.T) {
+	result := Serialize(types.NewInt(42))
+	if result.ToString() != "i:42;" {
+		t.Errorf("Serialize(42) = %q, want %q", result.ToString(), "i:42;")
+	}
+}
+
+func TestSerializeString(t *testing.T) {
+	result := Serialize(types.NewString("hello"))
+	if result.ToString() != "s:5:\"hello\";" {
+		t.Errorf("Serialize(\"hello\") = %q, want %q", result.ToString(), "s:5:\"hello\";")
+	}
+}
+
+func TestSerializeArray(t *testing.T) {
+	arr := types.NewEmptyArray()
+	arr.Set(types.NewInt(0), types.NewString("a"))
+	arr.Set(types.NewInt(1), types.NewString("b"))
+
+	result := Serialize(types.NewArray(arr))
+	// Result should contain array format
+	resultStr := result.ToString()
+	if len(resultStr) < 5 || resultStr[:2] != "a:" {
+		t.Errorf("Serialize(array) should start with 'a:', got %q", resultStr)
+	}
+}
+
+func TestUnserializeNull(t *testing.T) {
+	result := Unserialize(types.NewString("N;"))
+	if result.Type() != types.TypeNull {
+		t.Errorf("Unserialize('N;') should return null, got %v", result.Type())
+	}
+}
+
+func TestUnserializeBool(t *testing.T) {
+	result := Unserialize(types.NewString("b:1;"))
+	if result.Type() != types.TypeBool || !result.ToBool() {
+		t.Error("Unserialize('b:1;') should return true")
+	}
+
+	result = Unserialize(types.NewString("b:0;"))
+	if result.Type() != types.TypeBool || result.ToBool() {
+		t.Error("Unserialize('b:0;') should return false")
+	}
+}
+
+func TestUnserializeInt(t *testing.T) {
+	result := Unserialize(types.NewString("i:42;"))
+	if result.Type() != types.TypeInt || result.ToInt() != 42 {
+		t.Errorf("Unserialize('i:42;') = %v, want 42", result.ToInt())
+	}
+}
+
+func TestUnserializeString(t *testing.T) {
+	result := Unserialize(types.NewString("s:5:\"hello\";"))
+	if result.Type() != types.TypeString || result.ToString() != "hello" {
+		t.Errorf("Unserialize('s:5:\"hello\";') = %q, want %q", result.ToString(), "hello")
+	}
+}
+
+func TestUnserializeArray(t *testing.T) {
+	// a:2:{i:0;s:1:"a";i:1;s:1:"b";}
+	result := Unserialize(types.NewString("a:2:{i:0;s:1:\"a\";i:1;s:1:\"b\";}"))
+	if result.Type() != types.TypeArray {
+		t.Fatalf("Unserialize(array) should return array, got %v", result.Type())
+	}
+
+	arr := result.ToArray()
+	if arr.Len() != 2 {
+		t.Errorf("Expected array length 2, got %d", arr.Len())
+	}
+}
+
+func TestUnserializeInvalid(t *testing.T) {
+	result := Unserialize(types.NewString("invalid"))
+	if result.Type() != types.TypeBool || result.ToBool() != false {
+		t.Error("Unserialize(invalid) should return false")
+	}
+}
+
+func TestSerializeUnserializeRoundTrip(t *testing.T) {
+	// Test round-trip for various types
+	original := types.NewString("test string")
+	serialized := Serialize(original)
+	unserialized := Unserialize(serialized)
+
+	if unserialized.ToString() != original.ToString() {
+		t.Errorf("Round-trip failed: original=%q, result=%q", original.ToString(), unserialized.ToString())
+	}
+}
+
+// ============================================================================
+// Method Exists Tests
+// ============================================================================
+
+func TestMethodExistsWithObject(t *testing.T) {
+	// Create a class with a method
+	class := types.NewClassEntry("TestClass")
+	class.Methods["testMethod"] = &types.MethodDef{
+		Name:       "testMethod",
+		Visibility: types.VisibilityPublic,
+	}
+
+	obj := types.NewObjectFromClass(class)
+	objVal := types.NewObject(obj)
+
+	result := MethodExistsStub(objVal, types.NewString("testMethod"))
+	if !result.ToBool() {
+		t.Error("MethodExistsStub should return true for existing method")
+	}
+
+	result = MethodExistsStub(objVal, types.NewString("nonExistent"))
+	if result.ToBool() {
+		t.Error("MethodExistsStub should return false for non-existing method")
+	}
+}

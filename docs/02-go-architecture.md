@@ -948,6 +948,356 @@ php-go --profile script.php
 // Generates profile.pb.gz for analysis
 ```
 
+## Phase 6 Implementation Details
+
+### Compiler Improvements (Phase 6A-6B)
+
+#### 1. Symbol Table Enhancements
+
+**Variable Naming Conflict Resolution**:
+```go
+// Modified variable resolution to distinguish between
+// builtin functions and user variables
+func (c *Compiler) compileVariable(node *ast.Variable) {
+    sym, ok := c.symbolTable.Resolve(node.Name)
+
+    // If resolved symbol is a builtin, treat as undefined variable
+    if ok && sym.Scope == BuiltinScope {
+        // Define new variable instead of referencing builtin
+        sym = c.symbolTable.Define(node.Name)
+    }
+
+    // Emit FETCH_VAR with proper symbol
+    c.emit(OpFetchVar, SymbolOperand(sym), ResultOperand())
+}
+```
+
+**Implementation Files**:
+- `pkg/compiler/compiler.go` - Lines 2563-2585, 2587-2643, 2645-2680
+- Applied to: variable fetch, assignment, foreach, increment/decrement, isset, empty, unset, catch
+
+#### 2. Temporary Variable Management
+
+**Foreach Iterator Protection**:
+```go
+// Save temp stack level before loop body
+func (c *Compiler) compileForeach(node *ast.ForeachStatement) {
+    // ... setup iterator ...
+
+    // Save current temp level before entering loop body
+    savedTempLevel := c.numTemps
+
+    // Compile loop body
+    c.compileStatement(node.Body)
+
+    // Don't free temps allocated for iterator
+    c.numTemps = savedTempLevel
+
+    // ... continue iteration ...
+}
+```
+
+**ExpressionStatement Fix**:
+```go
+// Only free temps allocated during this expression
+func (c *Compiler) compileExpressionStatement(node *ast.ExpressionStatement) {
+    savedTempLevel := c.numTemps
+
+    c.Compile(node.Expression)
+
+    // Free only newly allocated temps
+    for i := savedTempLevel; i < c.numTemps; i++ {
+        c.FreeTemp(i)
+    }
+    c.numTemps = savedTempLevel
+}
+```
+
+**Implementation Files**:
+- `pkg/compiler/compiler.go` - Lines 317-335 (ExpressionStatement)
+- `pkg/compiler/compiler.go` - Lines 2115-2285 (Foreach compilation)
+
+#### 3. Control Flow Fixes
+
+**If Statement Condition Evaluation**:
+```go
+// Fixed: Use condition result temp instead of hardcoded TmpVarOperand(0)
+func (c *Compiler) compileIf(node *ast.IfStatement) {
+    // Evaluate condition and capture its result temp
+    condTemp := c.Compile(node.Condition)
+
+    // Jump to else/end if condition is false
+    // BEFORE: c.emit(OpJmpZ, vm.TmpVarOperand(0), ...)  // WRONG!
+    // AFTER:
+    c.emit(OpJmpZ, condTemp, JumpTarget(elseLabel))
+}
+```
+
+**Implementation Files**:
+- `pkg/compiler/compiler.go` - Lines 1877, 1911
+
+**Do-While Implementation**:
+```go
+func (c *Compiler) compileDoWhile(node *ast.DoWhileStatement) {
+    startLabel := c.NewLabel()
+    endLabel := c.NewLabel()
+
+    // Enter loop context for break/continue
+    c.EnterLoop(endLabel, startLabel)
+    defer c.ExitLoop()
+
+    // Mark start (body executes first in do-while)
+    c.MarkLabel(startLabel)
+
+    // Compile body
+    c.compileStatement(node.Body)
+
+    // Evaluate condition
+    condResult := c.Compile(node.Condition)
+
+    // Jump back to start if condition is true
+    c.emit(OpJmpNZ, condResult, JumpTarget(startLabel))
+
+    // Mark end
+    c.MarkLabel(endLabel)
+}
+```
+
+**Implementation Files**:
+- `pkg/compiler/compiler.go` - Lines 1954-1980
+
+#### 4. PHP 7+ Language Features
+
+**Null Coalescing Operator (??)**:
+```go
+// Compiler support
+func (c *Compiler) compileInfixExpression(node *ast.InfixExpression) vm.Operand {
+    switch node.Operator {
+    case "??":
+        // Emit OpCoalesce opcode
+        left := c.Compile(node.Left)
+        right := c.Compile(node.Right)
+        result := c.AllocTemp()
+        c.emit(OpCoalesce, left, right, result)
+        return result
+    // ... other operators ...
+    }
+}
+
+// VM handler
+func (vm *VM) opCoalesce(frame *Frame, instr Instruction) error {
+    left := vm.fetchOperand(frame, instr.op1)
+
+    // Return left if not null/undef, otherwise right
+    if left.IsNull() || left.IsUndef() {
+        right := vm.fetchOperand(frame, instr.op2)
+        vm.storeOperand(frame, instr.result, right)
+    } else {
+        vm.storeOperand(frame, instr.result, left)
+    }
+    return nil
+}
+```
+
+**Implementation Files**:
+- `pkg/compiler/compiler.go` - Line 1671 (compiler case)
+- `pkg/vm/handlers_comparison.go` - Lines 136-152 (VM handler)
+- `pkg/vm/vm.go` - Line 156 (dispatch case)
+
+**Class Name Expression (::class)**:
+```go
+func (c *Compiler) compileClassNameExpression(node *ast.ClassNameExpression) vm.Operand {
+    // Extract class name from identifier
+    var className string
+    if ident, ok := node.Class.(*ast.Identifier); ok {
+        className = ident.Value
+    } else if fqn, ok := node.Class.(*ast.FullyQualifiedName); ok {
+        className = fqn.Parts[len(fqn.Parts)-1]
+    }
+
+    // Add as constant and return as string value
+    constIdx := c.addConstant(types.NewString(className))
+    result := c.AllocTemp()
+    c.emit(OpAssign, vm.ConstOperand(constIdx), result)
+    return result
+}
+```
+
+**Implementation Files**:
+- `pkg/compiler/compiler.go` - Lines 1835-1863
+
+**Array Destructuring in Foreach**:
+```go
+func (c *Compiler) compileForeachWithDestructuring(
+    arrayExpr *ast.ArrayExpression,
+    iterValue vm.Operand,
+) {
+    // For each element in the destructuring pattern
+    for i, elem := range arrayExpr.Elements {
+        // Determine key (explicit or numeric index)
+        var keyOperand vm.Operand
+        if elem.Key != nil {
+            keyOperand = c.Compile(elem.Key)
+        } else {
+            keyOperand = vm.ConstOperand(c.addConstant(types.NewInt(int64(i))))
+        }
+
+        // Fetch element: $temp = $iterValue[$key]
+        elementTemp := c.AllocTemp()
+        c.emit(OpFetchDimR, iterValue, keyOperand, elementTemp)
+
+        // Assign to target variable
+        if varNode, ok := elem.Value.(*ast.Variable); ok {
+            symbol := c.symbolTable.Define(varNode.Name)
+            c.emit(OpAssign, elementTemp, vm.SymbolOperand(symbol))
+        }
+    }
+}
+```
+
+**Implementation Files**:
+- `pkg/compiler/compiler.go` - Lines 2184-2228
+
+### Virtual Machine Enhancements (Phase 6A)
+
+#### DECLARE_CLASS Opcode Handler
+
+```go
+func (vm *VM) opDeclareClass(frame *Frame, instr Instruction) error {
+    // Fetch class name from constants
+    className := vm.fetchOperand(frame, instr.op1).AsString()
+
+    // Check for parent class (optional)
+    var parentClass *types.ClassEntry
+    if instr.ext != 0 {
+        parentName := vm.fetchOperand(frame, instr.op2).AsString()
+        parentClass = vm.classes[parentName]
+    }
+
+    // Create and register class entry
+    class := &types.ClassEntry{
+        Name:       className,
+        Parent:     parentClass,
+        Properties: make(map[string]*types.PropertyEntry),
+        Methods:    make(map[string]*types.MethodEntry),
+        Constants:  make(map[string]types.Value),
+    }
+
+    // Apply inheritance if parent exists
+    if parentClass != nil {
+        class.InheritFrom(parentClass)
+    }
+
+    vm.classes[className] = class
+    return nil
+}
+```
+
+**Implementation Files**:
+- `pkg/vm/handlers_object.go` - Lines 289-324
+- `pkg/vm/vm.go` - Line 108 (dispatch case)
+
+### Testing Infrastructure (Phase 6C)
+
+#### Example Test Suite
+
+```go
+// tests/examples_test.go
+func TestBasicExamples(t *testing.T) {
+    examples := []string{
+        "arrays", "control_flow", "expressions",
+        "functions", "hello", "strings", "variables",
+    }
+
+    for _, name := range examples {
+        t.Run(name, func(t *testing.T) {
+            // Run php-go on example
+            output := runPhpGo("examples/basic/" + name + ".php")
+
+            // Read expected output
+            expected := readFile("examples/basic/" + name + ".expected")
+
+            // Compare
+            if output != expected {
+                t.Errorf("Output mismatch for %s\nGot:\n%s\nExpected:\n%s",
+                    name, output, expected)
+            }
+        })
+    }
+}
+```
+
+#### Regression Test Suite
+
+```go
+// pkg/compiler/regression_test.go
+// 56 test cases organized by phase:
+
+func TestRegression_Phase6A1_VariableNaming(t *testing.T) {
+    // 6 tests for variables with builtin names
+}
+
+func TestRegression_Phase6A2_ForeachIncrement(t *testing.T) {
+    // 4 tests for foreach with operations
+}
+
+func TestRegression_Phase6A3_DeclareClass(t *testing.T) {
+    // 2 tests for class declaration
+}
+
+func TestRegression_Phase6A4_IfConditions(t *testing.T) {
+    // 4 tests for if statement evaluation
+}
+
+func TestRegression_Phase6A4_IncrementDecrement(t *testing.T) {
+    // 7 tests for ++ and -- operators
+}
+
+func TestRegression_Phase6B1_NullCoalescing(t *testing.T) {
+    // 6 tests for ?? operator
+}
+
+func TestRegression_Phase6B2_DoWhile(t *testing.T) {
+    // 4 tests for do-while loops
+}
+
+func TestRegression_Phase6B3_ClassNameExpression(t *testing.T) {
+    // 4 tests for ClassName::class
+}
+
+func TestRegression_Phase6B4_ForeachDestructuring(t *testing.T) {
+    // 4 tests for array destructuring
+}
+
+func TestRegression_ComplexInteractions(t *testing.T) {
+    // 5 tests for combinations of features
+}
+```
+
+**Implementation Files**:
+- `tests/examples_test.go` - Example validation tests
+- `pkg/compiler/regression_test.go` - 56 regression test cases
+
+### Key Design Decisions
+
+#### 1. Temporary Variable Scoping
+**Decision**: Track temp allocation per expression, not globally
+**Rationale**: Prevents premature freeing of iterator temps during loop bodies
+**Trade-off**: Slightly more complex compiler logic, but correct semantics
+
+#### 2. Builtin vs User Symbols
+**Decision**: Check symbol scope before treating as reference
+**Rationale**: PHP allows variables to shadow builtin function names
+**Implementation**: Applied at all variable resolution points consistently
+
+#### 3. Opcode Handler Organization
+**Decision**: Group handlers by category in separate files
+**Rationale**: Better maintainability, easier to find related opcodes
+**Files**:
+- `handlers_comparison.go` - Comparisons and null coalescing
+- `handlers_object.go` - Object operations including DECLARE_CLASS
+- `handlers_array.go` - Array operations including foreach iterators
+
 ## Summary
 
 This architecture leverages Go's strengths:
@@ -963,7 +1313,13 @@ While maintaining PHP compatibility through:
 - Compatible standard library
 - PHP semantics preserved
 
+Phase 6 additions demonstrate:
+- Careful temp variable management
+- Proper symbol table scoping
+- Comprehensive regression testing
+- PHP 7+ modern feature support
+
 ---
 
-**Last Updated**: 2025-11-21
-**Status**: Architecture Design Complete
+**Last Updated**: 2025-11-24
+**Status**: Phase 6A-6C Complete (604/1050 hours, 58%)

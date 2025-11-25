@@ -1,0 +1,14 @@
+Basic strings:
+Hello
+World
+
+Multi-line string:
+Line 1
+Line 2
+Line 3
+
+String length:
+Length of 'Hello': 5
+Length of variable: 5
+
+Empty string length: 0

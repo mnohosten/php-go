@@ -1,0 +1,8 @@
+Function examples:
+User-defined functions coming in Phase 3/6
+
+Built-in function - strlen:
+Length: 6
+
+Built-in constructs - exit/die:
+These work for PHPT SKIPIF tests

@@ -224,6 +224,51 @@ func TestStackOverflow(t *testing.T) {
 	}
 }
 
+func TestStackDepthEnforcementInPushFrame(t *testing.T) {
+	// Test that stack depth is properly enforced when pushing frames
+	vm := New()
+	vm.maxStackDepth = 5 // Set low limit for testing
+
+	fn := &CompiledFunction{
+		Name:         "test",
+		Instructions: Instructions{},
+		NumLocals:    5,
+	}
+
+	// Push frames up to the limit
+	for i := 0; i < 5; i++ {
+		err := vm.pushFrame(NewFrame(fn))
+		if err != nil {
+			t.Errorf("Unexpected error at depth %d: %v", i, err)
+		}
+	}
+
+	// This should fail - exceeds maxStackDepth
+	err := vm.pushFrame(NewFrame(fn))
+	if err == nil {
+		t.Error("Expected stack overflow error when exceeding maxStackDepth")
+	}
+
+	// Verify error message
+	expectedMsg := "stack overflow"
+	if err != nil && !containsSubstring(err.Error(), expectedMsg) {
+		t.Errorf("Expected error containing '%s', got: %v", expectedMsg, err)
+	}
+}
+
+// Helper function to check if string contains substring
+func containsSubstring(s, substr string) bool {
+	if len(s) < len(substr) {
+		return false
+	}
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+
 // ============================================================================
 // Output Tests
 // ============================================================================
@@ -919,5 +964,781 @@ func TestExecute_JmpNZ(t *testing.T) {
 	output := vm.GetOutput()
 	if output != "Executed" {
 		t.Errorf("Expected 'Executed', got '%s'", output)
+	}
+}
+
+// ============================================================================
+// Global Variable Tests
+// ============================================================================
+
+// TestGlobalVariableBinding tests that global statement binds local to global variable
+func TestGlobalVariableBinding(t *testing.T) {
+	// Set up a VM with a global variable
+	vm := New()
+	vm.SetGlobal("myGlobal", types.NewInt(42))
+
+	// Constants: 0 = "myGlobal" (variable name)
+	constants := []interface{}{"myGlobal"}
+	vm.constants = constants
+
+	// Create a function that uses global statement
+	fn := &CompiledFunction{
+		Name:      "test",
+		NumLocals: 2,
+		NumParams: 0,
+		NumCVs:    1,
+	}
+
+	frame := NewFrame(fn)
+
+	// Simulate BIND_GLOBAL instruction
+	instr := Instruction{
+		Opcode: OpBindGlobal,
+		Op1:    Operand{Type: OpCV, Value: 0},    // local variable index
+		Op2:    Operand{Type: OpConst, Value: 0}, // constant index for "myGlobal"
+	}
+
+	err := vm.opBindGlobal(frame, instr)
+	if err != nil {
+		t.Fatalf("opBindGlobal failed: %v", err)
+	}
+
+	// Verify the binding was recorded
+	if frame.globalBindings == nil {
+		t.Fatal("globalBindings was not initialized")
+	}
+
+	if name, ok := frame.globalBindings[0]; !ok {
+		t.Error("local index 0 not bound to global")
+	} else if name != "myGlobal" {
+		t.Errorf("Expected binding to 'myGlobal', got '%s'", name)
+	}
+}
+
+// TestGlobalVariableRead tests reading a global variable through binding
+func TestGlobalVariableRead(t *testing.T) {
+	vm := New()
+	vm.SetGlobal("counter", types.NewInt(100))
+	vm.constants = []interface{}{"counter"}
+
+	fn := &CompiledFunction{
+		Name:      "test",
+		NumLocals: 2,
+		NumParams: 0,
+		NumCVs:    1,
+	}
+
+	frame := NewFrame(fn)
+
+	// Bind local 0 to global "counter"
+	bindInstr := Instruction{
+		Opcode: OpBindGlobal,
+		Op1:    Operand{Type: OpCV, Value: 0},
+		Op2:    Operand{Type: OpConst, Value: 0},
+	}
+	err := vm.opBindGlobal(frame, bindInstr)
+	if err != nil {
+		t.Fatalf("opBindGlobal failed: %v", err)
+	}
+
+	// Now read the value using getOperandValue
+	val, err := vm.getOperandValue(frame, Operand{Type: OpCV, Value: 0})
+	if err != nil {
+		t.Fatalf("getOperandValue failed: %v", err)
+	}
+
+	if val.ToInt() != 100 {
+		t.Errorf("Expected 100, got %d", val.ToInt())
+	}
+}
+
+// TestGlobalVariableWrite tests writing to a global variable through binding
+func TestGlobalVariableWrite(t *testing.T) {
+	vm := New()
+	vm.SetGlobal("counter", types.NewInt(100))
+	vm.constants = []interface{}{"counter"}
+
+	fn := &CompiledFunction{
+		Name:      "test",
+		NumLocals: 2,
+		NumParams: 0,
+		NumCVs:    1,
+	}
+
+	frame := NewFrame(fn)
+
+	// Bind local 0 to global "counter"
+	bindInstr := Instruction{
+		Opcode: OpBindGlobal,
+		Op1:    Operand{Type: OpCV, Value: 0},
+		Op2:    Operand{Type: OpConst, Value: 0},
+	}
+	err := vm.opBindGlobal(frame, bindInstr)
+	if err != nil {
+		t.Fatalf("opBindGlobal failed: %v", err)
+	}
+
+	// Write a new value using setOperandValue
+	err = vm.setOperandValue(frame, Operand{Type: OpCV, Value: 0}, types.NewInt(200))
+	if err != nil {
+		t.Fatalf("setOperandValue failed: %v", err)
+	}
+
+	// Verify the global was updated
+	globalVal, ok := vm.GetGlobal("counter")
+	if !ok {
+		t.Fatal("Global 'counter' not found")
+	}
+	if globalVal.ToInt() != 200 {
+		t.Errorf("Expected global value 200, got %d", globalVal.ToInt())
+	}
+}
+
+// TestMultipleGlobalBindings tests multiple global variable bindings
+func TestMultipleGlobalBindings(t *testing.T) {
+	vm := New()
+	vm.SetGlobal("var1", types.NewInt(10))
+	vm.SetGlobal("var2", types.NewString("hello"))
+	vm.SetGlobal("var3", types.NewBool(true))
+	vm.constants = []interface{}{"var1", "var2", "var3"}
+
+	fn := &CompiledFunction{
+		Name:      "test",
+		NumLocals: 5,
+		NumParams: 0,
+		NumCVs:    3,
+	}
+
+	frame := NewFrame(fn)
+
+	// Bind three local variables to three globals
+	bindings := []struct {
+		localIdx int
+		constIdx int
+		name     string
+	}{
+		{0, 0, "var1"},
+		{1, 1, "var2"},
+		{2, 2, "var3"},
+	}
+
+	for _, b := range bindings {
+		instr := Instruction{
+			Opcode: OpBindGlobal,
+			Op1:    Operand{Type: OpCV, Value: uint32(b.localIdx)},
+			Op2:    Operand{Type: OpConst, Value: uint32(b.constIdx)},
+		}
+		err := vm.opBindGlobal(frame, instr)
+		if err != nil {
+			t.Fatalf("opBindGlobal for %s failed: %v", b.name, err)
+		}
+	}
+
+	// Verify all bindings
+	if len(frame.globalBindings) != 3 {
+		t.Errorf("Expected 3 bindings, got %d", len(frame.globalBindings))
+	}
+
+	// Read all values
+	val1, _ := vm.getOperandValue(frame, Operand{Type: OpCV, Value: 0})
+	val2, _ := vm.getOperandValue(frame, Operand{Type: OpCV, Value: 1})
+	val3, _ := vm.getOperandValue(frame, Operand{Type: OpCV, Value: 2})
+
+	if val1.ToInt() != 10 {
+		t.Errorf("var1: expected 10, got %d", val1.ToInt())
+	}
+	if val2.ToString() != "hello" {
+		t.Errorf("var2: expected 'hello', got '%s'", val2.ToString())
+	}
+	if !val3.ToBool() {
+		t.Error("var3: expected true")
+	}
+}
+
+// TestGlobalVariableNewCreation tests that binding to non-existent global creates it
+func TestGlobalVariableNewCreation(t *testing.T) {
+	vm := New()
+	// Don't set "newVar" - it should be created by BIND_GLOBAL
+	vm.constants = []interface{}{"newVar"}
+
+	fn := &CompiledFunction{
+		Name:      "test",
+		NumLocals: 2,
+		NumParams: 0,
+		NumCVs:    1,
+	}
+
+	frame := NewFrame(fn)
+
+	// Bind local 0 to non-existent global "newVar"
+	instr := Instruction{
+		Opcode: OpBindGlobal,
+		Op1:    Operand{Type: OpCV, Value: 0},
+		Op2:    Operand{Type: OpConst, Value: 0},
+	}
+	err := vm.opBindGlobal(frame, instr)
+	if err != nil {
+		t.Fatalf("opBindGlobal failed: %v", err)
+	}
+
+	// Verify the global was created (with null value)
+	if vm.globals["newVar"] == nil {
+		t.Fatal("Global 'newVar' was not created")
+	}
+
+	// Write a value through the binding
+	err = vm.setOperandValue(frame, Operand{Type: OpCV, Value: 0}, types.NewString("created"))
+	if err != nil {
+		t.Fatalf("setOperandValue failed: %v", err)
+	}
+
+	// Verify the global has the new value
+	if vm.globals["newVar"].ToString() != "created" {
+		t.Errorf("Expected 'created', got '%s'", vm.globals["newVar"].ToString())
+	}
+}
+
+// TestGlobalVariableUnboundLocalAccess tests that unbound locals work normally
+func TestGlobalVariableUnboundLocalAccess(t *testing.T) {
+	vm := New()
+	vm.SetGlobal("myGlobal", types.NewInt(999))
+	vm.constants = []interface{}{"myGlobal"}
+
+	fn := &CompiledFunction{
+		Name:      "test",
+		NumLocals: 3,
+		NumParams: 0,
+		NumCVs:    2,
+	}
+
+	frame := NewFrame(fn)
+
+	// Only bind local 0 to global
+	instr := Instruction{
+		Opcode: OpBindGlobal,
+		Op1:    Operand{Type: OpCV, Value: 0},
+		Op2:    Operand{Type: OpConst, Value: 0},
+	}
+	_ = vm.opBindGlobal(frame, instr)
+
+	// Set local 1 directly (not bound to global)
+	frame.setLocal(1, types.NewInt(123))
+
+	// Read local 0 (should be from global)
+	val0, _ := vm.getOperandValue(frame, Operand{Type: OpCV, Value: 0})
+	if val0.ToInt() != 999 {
+		t.Errorf("local 0: expected 999 from global, got %d", val0.ToInt())
+	}
+
+	// Read local 1 (should be from local storage)
+	val1, _ := vm.getOperandValue(frame, Operand{Type: OpCV, Value: 1})
+	if val1.ToInt() != 123 {
+		t.Errorf("local 1: expected 123 from local, got %d", val1.ToInt())
+	}
+
+	// Write to local 1 should not affect globals
+	_ = vm.setOperandValue(frame, Operand{Type: OpCV, Value: 1}, types.NewInt(456))
+	val1After, _ := vm.getOperandValue(frame, Operand{Type: OpCV, Value: 1})
+	if val1After.ToInt() != 456 {
+		t.Errorf("local 1 after write: expected 456, got %d", val1After.ToInt())
+	}
+
+	// Global should still be 999 (local 1 write didn't affect it)
+	if vm.globals["myGlobal"].ToInt() != 999 {
+		t.Errorf("Global should still be 999, got %d", vm.globals["myGlobal"].ToInt())
+	}
+}
+
+// ============================================================================
+// Unset Tests
+// ============================================================================
+
+// TestOpUnsetVar tests unsetting a local variable
+func TestOpUnsetVar(t *testing.T) {
+	vm := New()
+
+	fn := &CompiledFunction{Instructions: Instructions{}, NumLocals: 5}
+	frame := NewFrame(fn)
+
+	// Set up a variable
+	frame.setLocal(0, types.NewInt(42))
+
+	// Verify it's set
+	if frame.getLocal(0).Type() != types.TypeInt {
+		t.Fatalf("Variable should be set to Int, got %v", frame.getLocal(0).Type())
+	}
+
+	// Unset the variable
+	instr := Instruction{
+		Opcode: OpUnsetVar,
+		Op1:    Operand{Type: OpCV, Value: 0},
+	}
+
+	err := vm.opUnsetVar(frame, instr)
+	if err != nil {
+		t.Fatalf("opUnsetVar failed: %v", err)
+	}
+
+	// Verify the variable is now undefined
+	if frame.getLocal(0).Type() != types.TypeUndef {
+		t.Errorf("Variable should be Undef after unset, got %v", frame.getLocal(0).Type())
+	}
+}
+
+// TestOpUnsetVar_String tests unsetting a string variable
+func TestOpUnsetVar_String(t *testing.T) {
+	vm := New()
+
+	fn := &CompiledFunction{Instructions: Instructions{}, NumLocals: 5}
+	frame := NewFrame(fn)
+
+	// Set up a string variable
+	frame.setLocal(1, types.NewString("hello"))
+
+	// Unset
+	instr := Instruction{
+		Opcode: OpUnsetVar,
+		Op1:    Operand{Type: OpCV, Value: 1},
+	}
+
+	err := vm.opUnsetVar(frame, instr)
+	if err != nil {
+		t.Fatalf("opUnsetVar failed: %v", err)
+	}
+
+	if frame.getLocal(1).Type() != types.TypeUndef {
+		t.Errorf("String variable should be Undef after unset, got %v", frame.getLocal(1).Type())
+	}
+}
+
+// TestOpUnsetVar_Array tests unsetting an array variable
+func TestOpUnsetVar_Array(t *testing.T) {
+	vm := New()
+
+	fn := &CompiledFunction{Instructions: Instructions{}, NumLocals: 5}
+	frame := NewFrame(fn)
+
+	// Set up an array variable
+	arr := types.NewEmptyArray()
+	arr.Set(types.NewString("key"), types.NewString("value"))
+	frame.setLocal(2, types.NewArray(arr))
+
+	// Unset the whole array
+	instr := Instruction{
+		Opcode: OpUnsetVar,
+		Op1:    Operand{Type: OpCV, Value: 2},
+	}
+
+	err := vm.opUnsetVar(frame, instr)
+	if err != nil {
+		t.Fatalf("opUnsetVar failed: %v", err)
+	}
+
+	if frame.getLocal(2).Type() != types.TypeUndef {
+		t.Errorf("Array variable should be Undef after unset, got %v", frame.getLocal(2).Type())
+	}
+}
+
+// TestOpUnsetVar_AlreadyUnset tests unsetting an already unset variable (no error)
+func TestOpUnsetVar_AlreadyUnset(t *testing.T) {
+	vm := New()
+
+	fn := &CompiledFunction{Instructions: Instructions{}, NumLocals: 5}
+	frame := NewFrame(fn)
+
+	// Variable is not set (already Undef by default)
+	instr := Instruction{
+		Opcode: OpUnsetVar,
+		Op1:    Operand{Type: OpCV, Value: 3},
+	}
+
+	// This should not error - PHP allows unsetting undefined variables
+	err := vm.opUnsetVar(frame, instr)
+	if err != nil {
+		t.Errorf("opUnsetVar should not error on already unset variable: %v", err)
+	}
+
+	if frame.getLocal(3).Type() != types.TypeUndef {
+		t.Errorf("Variable should remain Undef, got %v", frame.getLocal(3).Type())
+	}
+}
+
+// TestOpUnsetDim tests unsetting array elements
+func TestOpUnsetDim(t *testing.T) {
+	vm := New()
+
+	fn := &CompiledFunction{Instructions: Instructions{}, NumLocals: 5}
+	frame := NewFrame(fn)
+
+	// Set up an array
+	arr := types.NewEmptyArray()
+	arr.Set(types.NewString("name"), types.NewString("John"))
+	arr.Set(types.NewString("age"), types.NewInt(30))
+	arr.Set(types.NewInt(0), types.NewString("first"))
+	frame.setLocal(0, types.NewArray(arr))
+
+	// Unset $arr["age"]
+	frame.setLocal(1, types.NewString("age"))
+	instr := Instruction{
+		Opcode: OpUnsetDim,
+		Op1:    Operand{Type: OpCV, Value: 0},
+		Op2:    Operand{Type: OpTmpVar, Value: 1},
+	}
+
+	err := vm.opUnsetDim(frame, instr)
+	if err != nil {
+		t.Fatalf("opUnsetDim failed: %v", err)
+	}
+
+	// Verify "age" was deleted
+	_, exists := arr.Get(types.NewString("age"))
+	if exists {
+		t.Error("Key 'age' should have been deleted from array")
+	}
+
+	// Verify other elements still exist
+	val, exists := arr.Get(types.NewString("name"))
+	if !exists || val.ToString() != "John" {
+		t.Error("Key 'name' should still exist with value 'John'")
+	}
+
+	val, exists = arr.Get(types.NewInt(0))
+	if !exists || val.ToString() != "first" {
+		t.Error("Key 0 should still exist with value 'first'")
+	}
+}
+
+// TestOpUnsetDim_IntKey tests unsetting array element with integer key
+func TestOpUnsetDim_IntKey(t *testing.T) {
+	vm := New()
+
+	fn := &CompiledFunction{Instructions: Instructions{}, NumLocals: 5}
+	frame := NewFrame(fn)
+
+	// Set up an array with integer keys
+	arr := types.NewEmptyArray()
+	arr.Set(types.NewInt(0), types.NewString("zero"))
+	arr.Set(types.NewInt(1), types.NewString("one"))
+	arr.Set(types.NewInt(2), types.NewString("two"))
+	frame.setLocal(0, types.NewArray(arr))
+
+	// Unset $arr[1]
+	frame.setLocal(1, types.NewInt(1))
+	instr := Instruction{
+		Opcode: OpUnsetDim,
+		Op1:    Operand{Type: OpCV, Value: 0},
+		Op2:    Operand{Type: OpTmpVar, Value: 1},
+	}
+
+	err := vm.opUnsetDim(frame, instr)
+	if err != nil {
+		t.Fatalf("opUnsetDim failed: %v", err)
+	}
+
+	// Verify index 1 was deleted
+	_, exists := arr.Get(types.NewInt(1))
+	if exists {
+		t.Error("Index 1 should have been deleted from array")
+	}
+
+	// Verify other indices still exist
+	if arr.Len() != 2 {
+		t.Errorf("Array should have 2 elements, got %d", arr.Len())
+	}
+}
+
+// TestOpUnsetDim_NonExistentKey tests unsetting non-existent key (no error in PHP)
+func TestOpUnsetDim_NonExistentKey(t *testing.T) {
+	vm := New()
+
+	fn := &CompiledFunction{Instructions: Instructions{}, NumLocals: 5}
+	frame := NewFrame(fn)
+
+	// Set up an array
+	arr := types.NewEmptyArray()
+	arr.Set(types.NewString("name"), types.NewString("John"))
+	frame.setLocal(0, types.NewArray(arr))
+
+	// Try to unset non-existent key
+	frame.setLocal(1, types.NewString("nonexistent"))
+	instr := Instruction{
+		Opcode: OpUnsetDim,
+		Op1:    Operand{Type: OpCV, Value: 0},
+		Op2:    Operand{Type: OpTmpVar, Value: 1},
+	}
+
+	// Should not error
+	err := vm.opUnsetDim(frame, instr)
+	if err != nil {
+		t.Errorf("opUnsetDim should not error on non-existent key: %v", err)
+	}
+
+	// Array should be unchanged
+	if arr.Len() != 1 {
+		t.Errorf("Array should still have 1 element, got %d", arr.Len())
+	}
+}
+
+// TestOpUnsetDim_NonArray tests unsetting on non-array (no-op in PHP)
+func TestOpUnsetDim_NonArray(t *testing.T) {
+	vm := New()
+
+	fn := &CompiledFunction{Instructions: Instructions{}, NumLocals: 5}
+	frame := NewFrame(fn)
+
+	// Set up a non-array value
+	frame.setLocal(0, types.NewString("hello"))
+	frame.setLocal(1, types.NewInt(0))
+
+	instr := Instruction{
+		Opcode: OpUnsetDim,
+		Op1:    Operand{Type: OpCV, Value: 0},
+		Op2:    Operand{Type: OpTmpVar, Value: 1},
+	}
+
+	// Should not error - it's a no-op in PHP
+	err := vm.opUnsetDim(frame, instr)
+	if err != nil {
+		t.Errorf("opUnsetDim should not error on non-array: %v", err)
+	}
+
+	// String should be unchanged
+	if frame.getLocal(0).ToString() != "hello" {
+		t.Error("String value should be unchanged")
+	}
+}
+
+// TestMultipleUnsets tests unsetting multiple things in sequence
+func TestMultipleUnsets(t *testing.T) {
+	vm := New()
+
+	fn := &CompiledFunction{Instructions: Instructions{}, NumLocals: 10}
+	frame := NewFrame(fn)
+
+	// Set up variables
+	frame.setLocal(0, types.NewInt(10))
+	frame.setLocal(1, types.NewString("hello"))
+	arr := types.NewEmptyArray()
+	arr.Set(types.NewString("a"), types.NewInt(1))
+	arr.Set(types.NewString("b"), types.NewInt(2))
+	frame.setLocal(2, types.NewArray(arr))
+
+	// Unset $var0
+	err := vm.opUnsetVar(frame, Instruction{
+		Opcode: OpUnsetVar,
+		Op1:    Operand{Type: OpCV, Value: 0},
+	})
+	if err != nil {
+		t.Fatalf("First unset failed: %v", err)
+	}
+
+	// Unset $var1
+	err = vm.opUnsetVar(frame, Instruction{
+		Opcode: OpUnsetVar,
+		Op1:    Operand{Type: OpCV, Value: 1},
+	})
+	if err != nil {
+		t.Fatalf("Second unset failed: %v", err)
+	}
+
+	// Unset $arr["a"]
+	frame.setLocal(3, types.NewString("a"))
+	err = vm.opUnsetDim(frame, Instruction{
+		Opcode: OpUnsetDim,
+		Op1:    Operand{Type: OpCV, Value: 2},
+		Op2:    Operand{Type: OpTmpVar, Value: 3},
+	})
+	if err != nil {
+		t.Fatalf("Third unset failed: %v", err)
+	}
+
+	// Verify all unsets worked
+	if frame.getLocal(0).Type() != types.TypeUndef {
+		t.Error("var0 should be Undef")
+	}
+	if frame.getLocal(1).Type() != types.TypeUndef {
+		t.Error("var1 should be Undef")
+	}
+
+	// Array should only have key "b"
+	_, exists := arr.Get(types.NewString("a"))
+	if exists {
+		t.Error("Array key 'a' should have been deleted")
+	}
+	val, exists := arr.Get(types.NewString("b"))
+	if !exists || val.ToInt() != 2 {
+		t.Error("Array key 'b' should still exist with value 2")
+	}
+}
+
+// ============================================================================
+// Misc Functions Tests (define, defined, constant, etc.)
+// ============================================================================
+
+func TestDefineAndDefined(t *testing.T) {
+	vm := New()
+
+	// Test defined on non-existent constant
+	result := vm.funcDefined([]*types.Value{types.NewString("MY_CONST")})
+	if result.ToBool() {
+		t.Error("MY_CONST should not be defined yet")
+	}
+
+	// Define a constant
+	result = vm.funcDefine([]*types.Value{
+		types.NewString("MY_CONST"),
+		types.NewInt(42),
+	})
+	if !result.ToBool() {
+		t.Error("define() should return true for new constant")
+	}
+
+	// Test defined on existing constant
+	result = vm.funcDefined([]*types.Value{types.NewString("MY_CONST")})
+	if !result.ToBool() {
+		t.Error("MY_CONST should be defined after define()")
+	}
+
+	// Test redefining (should fail)
+	result = vm.funcDefine([]*types.Value{
+		types.NewString("MY_CONST"),
+		types.NewInt(100),
+	})
+	if result.ToBool() {
+		t.Error("define() should return false when constant already exists")
+	}
+}
+
+func TestConstant(t *testing.T) {
+	vm := New()
+
+	// Define a constant
+	vm.funcDefine([]*types.Value{
+		types.NewString("TEST_VALUE"),
+		types.NewString("hello world"),
+	})
+
+	// Get the constant value
+	result := vm.funcConstant([]*types.Value{types.NewString("TEST_VALUE")})
+	if result.ToString() != "hello world" {
+		t.Errorf("constant() should return 'hello world', got '%s'", result.ToString())
+	}
+
+	// Test non-existent constant
+	result = vm.funcConstant([]*types.Value{types.NewString("NONEXISTENT")})
+	if result.Type() != types.TypeNull {
+		t.Error("constant() should return null for non-existent constant")
+	}
+}
+
+func TestBuiltinConstants(t *testing.T) {
+	vm := New()
+
+	// Test PHP_VERSION
+	result := vm.funcDefined([]*types.Value{types.NewString("PHP_VERSION")})
+	if !result.ToBool() {
+		t.Error("PHP_VERSION should be defined")
+	}
+
+	result = vm.funcConstant([]*types.Value{types.NewString("PHP_VERSION")})
+	if result.ToString() != "8.4.0" {
+		t.Errorf("PHP_VERSION should be '8.4.0', got '%s'", result.ToString())
+	}
+
+	// Test PHP_EOL
+	result = vm.funcConstant([]*types.Value{types.NewString("PHP_EOL")})
+	if result.ToString() != "\n" {
+		t.Error("PHP_EOL should be newline character")
+	}
+
+	// Test PHP_INT_MAX
+	result = vm.funcConstant([]*types.Value{types.NewString("PHP_INT_MAX")})
+	if result.ToInt() != 9223372036854775807 {
+		t.Errorf("PHP_INT_MAX should be 9223372036854775807, got %d", result.ToInt())
+	}
+}
+
+func TestFunctionExistsWithVM(t *testing.T) {
+	vm := New()
+
+	// Test builtin function
+	result := vm.funcFunctionExists([]*types.Value{types.NewString("strlen")})
+	if !result.ToBool() {
+		t.Error("strlen should exist as builtin")
+	}
+
+	// Test non-existent function
+	result = vm.funcFunctionExists([]*types.Value{types.NewString("nonexistent_func")})
+	if result.ToBool() {
+		t.Error("nonexistent_func should not exist")
+	}
+
+	// Register a user function and test
+	vm.RegisterFunction("my_custom_func", &CompiledFunction{
+		Name:         "my_custom_func",
+		Instructions: Instructions{},
+		NumParams:    0,
+	})
+	result = vm.funcFunctionExists([]*types.Value{types.NewString("my_custom_func")})
+	if !result.ToBool() {
+		t.Error("my_custom_func should exist after registration")
+	}
+}
+
+func TestFuncNumArgs(t *testing.T) {
+	vm := New()
+
+	// Test with no frame
+	result := vm.funcNumArgs(nil)
+	if result.ToInt() != 0 {
+		t.Error("func_num_args with nil frame should return 0")
+	}
+
+	// Test with frame
+	fn := &CompiledFunction{
+		Name:      "test_func",
+		NumParams: 3,
+	}
+	frame := NewFrame(fn)
+	result = vm.funcNumArgs(frame)
+	if result.ToInt() != 3 {
+		t.Errorf("func_num_args should return 3, got %d", result.ToInt())
+	}
+}
+
+func TestFuncGetArgs(t *testing.T) {
+	vm := New()
+
+	// Test with no frame
+	result := vm.funcGetArgs(nil)
+	arr := result.ToArray()
+	if arr.Len() != 0 {
+		t.Error("func_get_args with nil frame should return empty array")
+	}
+
+	// Test with frame that has parameters
+	fn := &CompiledFunction{
+		Name:      "test_func",
+		NumParams: 2,
+		NumLocals: 2,
+	}
+	frame := NewFrame(fn)
+	frame.setParam(0, types.NewString("arg1"))
+	frame.setParam(1, types.NewInt(42))
+
+	result = vm.funcGetArgs(frame)
+	arr = result.ToArray()
+	if arr.Len() != 2 {
+		t.Errorf("func_get_args should return array with 2 elements, got %d", arr.Len())
+	}
+
+	val, _ := arr.Get(types.NewInt(0))
+	if val.ToString() != "arg1" {
+		t.Errorf("First arg should be 'arg1', got '%s'", val.ToString())
+	}
+
+	val, _ = arr.Get(types.NewInt(1))
+	if val.ToInt() != 42 {
+		t.Errorf("Second arg should be 42, got %d", val.ToInt())
 	}
 }

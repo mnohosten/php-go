@@ -39,6 +39,33 @@ type Compiler struct {
 
 	// nextTempVar is the next available temp var number
 	nextTempVar int
+
+	// closureCounter generates unique closure names
+	closureCounter int
+
+	// currentNamespace tracks the current namespace context
+	// Empty string means global namespace
+	currentNamespace string
+
+	// useImports maps short names to fully qualified names
+	// Key is the alias/short name, value is the FQN
+	useImports map[string]string
+
+	// useFunctionImports maps function aliases to FQN
+	useFunctionImports map[string]string
+
+	// useConstImports maps constant aliases to FQN
+	useConstImports map[string]string
+
+	// functionSignatures maps function names to their parameter info
+	// Used to determine if a parameter should be passed by reference
+	functionSignatures map[string]*FunctionSignature
+}
+
+// FunctionSignature holds information about a function's parameters
+type FunctionSignature struct {
+	Name       string
+	ParamByRef []bool // Whether each parameter is by-reference
 }
 
 // LoopContext tracks information about a loop for break/continue
@@ -69,6 +96,11 @@ func New() *Compiler {
 		previousInstruction: EmittedInstruction{},
 		tempVarStack:        []int{},
 		nextTempVar:         0,
+		currentNamespace:    "",
+		useImports:          make(map[string]string),
+		useFunctionImports:  make(map[string]string),
+		useConstImports:     make(map[string]string),
+		functionSignatures:  make(map[string]*FunctionSignature),
 	}
 	c.InitSymbolTable()
 	return c
@@ -376,19 +408,37 @@ func (c *Compiler) Compile(node ast.Node) error {
 			// Get or create the variable symbol
 			symbol := c.symbolTable.Define(variable.Value)
 
+			// Store the variable name as a constant so VM can look it up in globals
+			nameIdx := c.AddConstant(variable.Value)
+
 			// Emit BIND_GLOBAL opcode
-			// This tells the VM to bind the local variable to the global scope
+			// Op1 = local variable index (CV)
+			// Op2 = constant index containing the variable name
 			c.EmitWithLine(vm.OpBindGlobal, uint32(node.Token.Pos.Line),
 				vm.CVOperand(uint32(symbol.Index)),
-				vm.UnusedOperand(),
+				vm.ConstOperand(uint32(nameIdx)),
 				vm.UnusedOperand())
 		}
 		return nil
 
 	case *ast.NamespaceStatement:
 		// Namespace declarations are compile-time constructs that affect name resolution
-		// For now, we'll compile the body statements but namespace resolution
-		// is handled by the symbol table and name resolution logic
+		// Save the previous namespace to restore it after bracketed namespaces
+		previousNamespace := c.currentNamespace
+
+		// Set the current namespace
+		if node.Name != nil {
+			c.currentNamespace = node.Name.String()
+		} else {
+			// Global namespace (namespace { ... })
+			c.currentNamespace = ""
+		}
+
+		// Clear use imports when entering a new namespace
+		c.useImports = make(map[string]string)
+		c.useFunctionImports = make(map[string]string)
+		c.useConstImports = make(map[string]string)
+
 		if node.Body != nil {
 			// Bracketed namespace: namespace Name { ... }
 			for _, stmt := range node.Body.Statements {
@@ -396,8 +446,11 @@ func (c *Compiler) Compile(node ast.Node) error {
 					return err
 				}
 			}
+			// Restore previous namespace after bracketed namespace
+			c.currentNamespace = previousNamespace
 		} else {
 			// Unbracketed namespace: namespace Name; statements...
+			// This namespace extends to the end of the file or next namespace
 			for _, stmt := range node.Statements {
 				if err := c.Compile(stmt); err != nil {
 					return err
@@ -408,9 +461,39 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 	case *ast.UseStatement:
 		// Use statements are compile-time constructs that affect name resolution
-		// The imports are registered in the symbol table during compilation
-		// No runtime opcodes need to be emitted
-		// TODO: Register use imports in symbol table for proper name resolution
+		// Register imports in the compiler's import maps
+		for _, useImport := range node.Uses {
+			// Build the fully qualified name
+			var fqn string
+			if node.Prefix != "" {
+				// Group use syntax: use Prefix\{Name, ...}
+				fqn = node.Prefix + "\\" + useImport.Name.String()
+			} else {
+				fqn = useImport.Name.String()
+			}
+
+			// Determine the alias (short name)
+			var alias string
+			if useImport.Alias != "" {
+				alias = useImport.Alias
+			} else {
+				// Use the last part of the name as the alias
+				parts := useImport.Name.Parts
+				if len(parts) > 0 {
+					alias = parts[len(parts)-1]
+				}
+			}
+
+			// Register in the appropriate map based on use type
+			switch node.Type {
+			case "function":
+				c.useFunctionImports[alias] = fqn
+			case "const":
+				c.useConstImports[alias] = fqn
+			default:
+				c.useImports[alias] = fqn
+			}
+		}
 		return nil
 
 	case *ast.DeclareStatement:
@@ -709,6 +792,8 @@ func (c *Compiler) Compile(node ast.Node) error {
 			opcode = vm.OpSR
 		case "<=>":
 			opcode = vm.OpSpaceship
+		case "??":
+			opcode = vm.OpCoalesce
 		default:
 			return fmt.Errorf("unknown infix operator: %s", node.Operator)
 		}
@@ -879,6 +964,17 @@ func (c *Compiler) Compile(node ast.Node) error {
 		return nil
 
 	case *ast.Variable:
+		// Special case for $this - use FETCH_THIS opcode
+		// This prevents $this from occupying CV index 0, avoiding conflicts with parameters
+		if node.Name == "this" {
+			temp := c.AllocTemp()
+			c.EmitWithLine(vm.OpFetchThis, uint32(node.Token.Pos.Line),
+				vm.UnusedOperand(),
+				vm.UnusedOperand(),
+				temp)
+			return nil
+		}
+
 		// Look up the variable in the symbol table
 		symbol, ok := c.ResolveVariable(node.Name)
 		if !ok {
@@ -970,19 +1066,37 @@ func (c *Compiler) Compile(node ast.Node) error {
 			}
 			arrayTemp := c.CurrentTemp()
 
-			// Compile the index
-			if err := c.Compile(index.Index); err != nil {
-				return err
+			var indexTemp vm.Operand
+			// Check if index is nil (array append: $arr[] = value)
+			if index.Index == nil {
+				// Use UnusedOperand to indicate append (VM will use next integer key)
+				indexTemp = vm.UnusedOperand()
+			} else {
+				// Compile the index
+				if err := c.Compile(index.Index); err != nil {
+					return err
+				}
+				indexTemp = c.CurrentTemp()
 			}
-			indexTemp := c.CurrentTemp()
 
 			// Emit ASSIGN_DIM instruction
 			c.EmitWithLine(vm.OpAssignDim, uint32(node.Token.Pos.Line),
 				arrayTemp, // Array
-				indexTemp, // Index/key
+				indexTemp, // Index/key (or UnusedOperand for append)
 				valueTemp) // Value to assign
 			return nil
 		}
+
+		// Handle list() destructuring assignment: list($a, $b) = $array
+		if listExpr, ok := node.Left.(*ast.ListExpression); ok {
+			return c.compileListDestructuring(listExpr, c.CurrentTemp(), uint32(node.Token.Pos.Line))
+		}
+
+		// Handle short destructuring syntax: [$a, $b] = $array
+		if arrayExpr, ok := node.Left.(*ast.ArrayExpression); ok {
+			return c.compileArrayDestructuring(arrayExpr, c.CurrentTemp(), uint32(node.Token.Pos.Line))
+		}
+
 		return fmt.Errorf("assignment to non-variable not yet implemented")
 
 	// Identifier (convert to string constant)
@@ -1001,6 +1115,18 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 	// Closure Expression (anonymous function)
 	case *ast.ClosureExpression:
+		// Generate unique closure name
+		c.closureCounter++
+		closureName := fmt.Sprintf("{closure}#%d", c.closureCounter)
+		closureNameIdx := c.AddConstant(closureName)
+
+		// Emit DECLARE_LAMBDA_FUNCTION placeholder (will be patched with positions)
+		declareLambdaPos := c.EmitWithExtended(vm.OpDeclareLambdaFunction, uint32(node.Token.Pos.Line),
+			uint32(len(node.Parameters)),               // ExtendedValue: Number of parameters
+			vm.ConstOperand(uint32(closureNameIdx)),    // Op1: Closure name
+			vm.UnusedOperand(),                         // Op2: Closure start position (will be patched)
+			vm.UnusedOperand())                         // Result: Closure end position (will be patched)
+
 		// Remember closure start position
 		closureStart := c.CurrentPosition()
 
@@ -1066,21 +1192,10 @@ func (c *Compiler) Compile(node ast.Node) error {
 		// Closure end position
 		closureEnd := c.CurrentPosition()
 
-		// DECLARE_LAMBDA_FUNCTION to create the closure object
-		// Store closure metadata: num params, start pos, end pos, flags
-		flags := uint32(0)
-		if node.Static {
-			flags |= 1 // Static flag
-		}
-		if node.ByRef {
-			flags |= 2 // Return by reference flag
-		}
-
-		c.EmitWithExtended(vm.OpDeclareLambdaFunction, uint32(node.Token.Pos.Line),
-			uint32(len(node.Parameters)),          // Number of parameters
-			vm.ConstOperand(uint32(flags)),        // Flags (static, byref)
-			vm.ConstOperand(uint32(closureStart)), // Closure start position
-			vm.ConstOperand(uint32(closureEnd)))   // Closure end position
+		// Patch the DECLARE_LAMBDA_FUNCTION with actual positions
+		// Op2 = closureStart, Result = closureEnd
+		c.PatchJump(declareLambdaPos, 2, closureStart)
+		c.PatchJump(declareLambdaPos, 3, closureEnd)
 
 		// Bind captured variables from use clause
 		for _, useVar := range node.Use {
@@ -1101,8 +1216,10 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 	// Arrow Function Expression (PHP 7.4+)
 	case *ast.ArrowFunctionExpression:
-		// Remember arrow function start position
-		arrowStart := c.CurrentPosition()
+		// Generate unique arrow function name
+		c.closureCounter++
+		arrowName := fmt.Sprintf("{arrow}#%d", c.closureCounter)
+		arrowNameIdx := c.AddConstant(arrowName)
 
 		// Find all variables referenced in the arrow function body
 		// We'll need to capture these from the parent scope
@@ -1124,6 +1241,16 @@ func (c *Compiler) Compile(node ast.Node) error {
 				}
 			}
 		}
+
+		// Emit DECLARE_LAMBDA_FUNCTION placeholder (will be patched with positions)
+		declareLambdaPos := c.EmitWithExtended(vm.OpDeclareLambdaFunction, uint32(node.Token.Pos.Line),
+			uint32(len(node.Parameters)),            // ExtendedValue: Number of parameters
+			vm.ConstOperand(uint32(arrowNameIdx)),   // Op1: Arrow function name
+			vm.UnusedOperand(),                      // Op2: Start position (will be patched)
+			vm.UnusedOperand())                      // Result: End position (will be patched)
+
+		// Remember arrow function start position
+		arrowStart := c.CurrentPosition()
 
 		// Enter new scope for arrow function
 		c.EnterScope()
@@ -1182,20 +1309,10 @@ func (c *Compiler) Compile(node ast.Node) error {
 		// Arrow function end position
 		arrowEnd := c.CurrentPosition()
 
-		// DECLARE_LAMBDA_FUNCTION to create the arrow function object
-		flags := uint32(0)
-		if node.Static {
-			flags |= 1 // Static flag
-		}
-		if node.ByRef {
-			flags |= 2 // Return by reference flag
-		}
-
-		c.EmitWithExtended(vm.OpDeclareLambdaFunction, uint32(node.Token.Pos.Line),
-			uint32(len(node.Parameters)),        // Number of parameters
-			vm.ConstOperand(uint32(flags)),      // Flags (static, byref)
-			vm.ConstOperand(uint32(arrowStart)), // Arrow function start position
-			vm.ConstOperand(uint32(arrowEnd)))   // Arrow function end position
+		// Patch the DECLARE_LAMBDA_FUNCTION with actual positions
+		// Op2 = arrowStart, Result = arrowEnd
+		c.PatchJump(declareLambdaPos, 2, arrowStart)
+		c.PatchJump(declareLambdaPos, 3, arrowEnd)
 
 		// Arrow functions auto-capture variables from parent scope
 		// Emit BIND_LEXICAL for each captured variable
@@ -1269,6 +1386,11 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 		arrayTemp := c.CurrentTemp()
 
+		// Check if index is nil (this shouldn't happen in read context, but handle gracefully)
+		if node.Index == nil {
+			return fmt.Errorf("array append syntax [] cannot be used in read context")
+		}
+
 		// Compile the index
 		if err := c.Compile(node.Index); err != nil {
 			return err
@@ -1307,9 +1429,12 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 	// Function Call
 	case *ast.CallExpression:
-		// Check if this is a special language construct (exit/die)
+		// Try to get function name for signature lookup
+		var funcName string
+		var funcSig *FunctionSignature
 		if ident, ok := node.Function.(*ast.Identifier); ok {
-			funcName := ident.Value
+			funcName = ident.Value
+			// Check for special language constructs
 			if funcName == "exit" || funcName == "die" {
 				// Handle exit/die specially
 				if len(node.Arguments) > 0 {
@@ -1324,6 +1449,8 @@ func (c *Compiler) Compile(node ast.Node) error {
 				}
 				return nil
 			}
+			// Look up function signature for by-ref parameter handling
+			funcSig = c.functionSignatures[funcName]
 		}
 
 		// Compile the function expression - it will allocate a temp
@@ -1334,27 +1461,73 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 		// KEY INSIGHT: Compile ALL arguments BEFORE initializing the call
 		// This allows nested calls in arguments to complete fully before we init this call
-		var argTemps []vm.Operand
-		for _, arg := range node.Arguments {
+		// BUT for by-ref parameters, we need to track the variable operand separately
+		type argInfo struct {
+			temp     vm.Operand
+			byRef    bool
+			varOp    vm.Operand // Variable operand for by-ref params
+		}
+		var args []argInfo
+
+		for i, arg := range node.Arguments {
+			// Check if this parameter should be passed by reference
+			isByRef := false
+			if funcSig != nil && i < len(funcSig.ParamByRef) {
+				isByRef = funcSig.ParamByRef[i]
+			}
+
+			if isByRef {
+				// For by-ref params, try to get the variable operand directly
+				if varExpr, ok := arg.Value.(*ast.Variable); ok {
+					// It's a simple variable - get its symbol
+					symbol, found := c.symbolTable.Resolve(varExpr.Name)
+					if found {
+						// Store variable operand for later
+						args = append(args, argInfo{
+							temp:  vm.UnusedOperand(),
+							byRef: true,
+							varOp: vm.CVOperand(uint32(symbol.Index)),
+						})
+						continue
+					}
+				}
+				// If we couldn't get a direct variable reference, fall back to normal compilation
+				// This happens for expressions like foo($arr[$i]) - we still compile it normally
+			}
+
+			// Normal parameter - compile to temp
 			if err := c.Compile(arg.Value); err != nil {
 				return err
 			}
-			// Save the argument's temp - it's in CurrentTemp() after compilation
-			argTemps = append(argTemps, c.CurrentTemp())
+			args = append(args, argInfo{
+				temp:  c.CurrentTemp(),
+				byRef: false,
+				varOp: vm.UnusedOperand(),
+			})
 		}
 
 		// NOW initialize the function call (after all arguments are ready)
-		c.EmitWithLine(vm.OpInitFcallByName, uint32(node.Token.Pos.Line),
+		// Use ExtendedValue for argument count
+		c.EmitWithExtended(vm.OpInitFcallByName, uint32(node.Token.Pos.Line), uint32(len(node.Arguments)),
 			funcTemp,
-			vm.ConstOperand(uint32(len(node.Arguments))), // Argument count
+			vm.UnusedOperand(),
 			vm.UnusedOperand())
 
 		// Send all the pre-compiled arguments
-		for _, argTemp := range argTemps {
-			c.EmitWithLine(vm.OpSendVal, uint32(node.Token.Pos.Line),
-				argTemp,
-				vm.UnusedOperand(),
-				vm.UnusedOperand())
+		for _, arg := range args {
+			if arg.byRef {
+				// By-reference parameter - use OpSendRef with variable operand
+				c.EmitWithLine(vm.OpSendRef, uint32(node.Token.Pos.Line),
+					arg.varOp,
+					vm.UnusedOperand(),
+					vm.UnusedOperand())
+			} else {
+				// Normal parameter
+				c.EmitWithLine(vm.OpSendVal, uint32(node.Token.Pos.Line),
+					arg.temp,
+					vm.UnusedOperand(),
+					vm.UnusedOperand())
+			}
 		}
 
 		// Execute function call - result goes to a new temp
@@ -1379,30 +1552,35 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 		methodTemp := c.CurrentTemp()
 
-		// Compile arguments
-		for _, arg := range node.Arguments {
-			if err := c.Compile(arg.Value); err != nil {
-				return err
-			}
-			// TODO: Push arguments onto stack properly
-		}
-
-		// Initialize method call
-		c.EmitWithLine(vm.OpInitMethodCall, uint32(node.Token.Pos.Line),
+		// Initialize method call with argument count in extended value
+		c.EmitWithExtended(vm.OpInitMethodCall, uint32(node.Token.Pos.Line),
+			uint32(len(node.Arguments)),
 			objTemp,
 			methodTemp,
 			vm.UnusedOperand())
 
-		// Allocate result temp and execute method call with argument count in extended value
+		// Compile and send arguments
+		for _, arg := range node.Arguments {
+			if err := c.Compile(arg.Value); err != nil {
+				return err
+			}
+			argTemp := c.CurrentTemp()
+			// Emit SEND_VAL for the argument
+			c.EmitWithLine(vm.OpSendVal, uint32(node.Token.Pos.Line),
+				argTemp,
+				vm.UnusedOperand(),
+				vm.UnusedOperand())
+		}
+
+		// Allocate result temp and execute method call
 		resultTemp := c.AllocTemp()
-		c.EmitWithExtended(vm.OpDoFcall, uint32(node.Token.Pos.Line),
-			uint32(len(node.Arguments)),
+		c.EmitWithLine(vm.OpDoFcall, uint32(node.Token.Pos.Line),
 			vm.UnusedOperand(),
 			vm.UnusedOperand(),
 			resultTemp)
 		return nil
 
-	// Static Property Access (Class::$property)
+	// Static Property Access (Class::$property) or Class Constant Access (Class::CONSTANT)
 	case *ast.StaticPropertyExpression:
 		// Compile the class name (could be identifier or dynamic)
 		if err := c.Compile(node.Class); err != nil {
@@ -1410,7 +1588,23 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 		classTemp := c.CurrentTemp()
 
-		// Compile the property (usually a variable)
+		// Check if this is a class constant (Identifier) or static property (Variable)
+		if ident, ok := node.Property.(*ast.Identifier); ok {
+			// Class constant access: Class::CONSTANT
+			// Store constant name as constant
+			constNameIdx := c.AddConstant(ident.Value)
+
+			// Allocate result temp and fetch class constant
+			resultTemp := c.AllocTemp()
+			c.EmitWithLine(vm.OpFetchClassConstant, uint32(node.Token.Pos.Line),
+				classTemp,
+				vm.ConstOperand(uint32(constNameIdx)),
+				resultTemp)
+			return nil
+		}
+
+		// Static property access: Class::$property
+		// Compile the property (a variable)
 		if err := c.Compile(node.Property); err != nil {
 			return err
 		}
@@ -1461,6 +1655,55 @@ func (c *Compiler) Compile(node ast.Node) error {
 			resultTemp)
 		return nil
 
+	// Class Name Expression (ClassName::class)
+	case *ast.ClassNameExpression:
+		// Get the class name
+		var className string
+		isSpecialKeyword := false
+
+		switch classExpr := node.Class.(type) {
+		case *ast.Identifier:
+			className = classExpr.Value
+			// Check for special keywords
+			if className == "self" || className == "parent" || className == "static" {
+				isSpecialKeyword = true
+			}
+		default:
+			// For dynamic class expressions, compile them
+			if err := c.Compile(node.Class); err != nil {
+				return err
+			}
+			classTemp := c.CurrentTemp()
+			resultTemp := c.AllocTemp()
+			c.EmitWithLine(vm.OpFetchClassName, uint32(node.Token.Pos.Line),
+				classTemp,
+				vm.UnusedOperand(),
+				resultTemp)
+			return nil
+		}
+
+		// For static class names, resolve the FQN at compile time
+		// (except for self/parent/static which are resolved at runtime)
+		if !isSpecialKeyword {
+			className = c.ResolveClassName(className)
+		}
+
+		// Load the class name as a constant
+		classIdx := c.AddConstant(className)
+		classTemp := c.AllocTemp()
+		c.EmitWithLine(vm.OpQMAssign, uint32(node.Token.Pos.Line),
+			vm.ConstOperand(uint32(classIdx)),
+			vm.UnusedOperand(),
+			classTemp)
+
+		// Emit FETCH_CLASS_NAME opcode
+		resultTemp := c.AllocTemp()
+		c.EmitWithLine(vm.OpFetchClassName, uint32(node.Token.Pos.Line),
+			classTemp,
+			vm.UnusedOperand(),
+			resultTemp)
+		return nil
+
 	// Isset Expression
 	case *ast.IssetExpression:
 		// isset() checks if variables are set and not null
@@ -1475,77 +1718,156 @@ func (c *Compiler) Compile(node ast.Node) error {
 			return fmt.Errorf("isset() requires at least one argument")
 		}
 
-		// Helper function to get CV operand from variable expression
-		getVarOperand := func(expr ast.Expr) (vm.Operand, error) {
-			if variable, ok := expr.(*ast.Variable); ok {
+		// Helper function to compile isset check for an expression
+		// Returns the result temp operand
+		compileIssetCheck := func(expr ast.Expr) (vm.Operand, error) {
+			switch e := expr.(type) {
+			case *ast.Variable:
+				// Simple variable: isset($var)
 				// IMPORTANT: isset() should NOT define variables
-				// If the variable doesn't exist, we still need to check it
-				// So we define it as undefined for the check, but don't initialize it
-				symbol, ok := c.ResolveVariable(variable.Name)
+				symbol, ok := c.ResolveVariable(e.Name)
 				if !ok {
 					// Define the variable but DON'T initialize it
-					// This allows isset() to check an undefined variable
-					symbol = c.DefineVariable(variable.Name)
+					symbol = c.DefineVariable(e.Name)
 				}
-				return vm.CVOperand(uint32(symbol.Index)), nil
+				resultTemp := c.AllocTemp()
+				// ExtendedValue: 0 = isset mode
+				c.EmitWithExtended(vm.OpIssetIsemptyVar, uint32(node.Token.Pos.Line), 0,
+					vm.CVOperand(uint32(symbol.Index)),
+					vm.UnusedOperand(),
+					resultTemp)
+				return resultTemp, nil
+
+			case *ast.IndexExpression:
+				// Array access: isset($arr[$key]) or isset($arr['key'])
+				// Compile the array expression
+				if err := c.Compile(e.Left); err != nil {
+					return vm.UnusedOperand(), err
+				}
+				arrayTemp := c.CurrentTemp()
+
+				// Compile the index expression
+				if err := c.Compile(e.Index); err != nil {
+					return vm.UnusedOperand(), err
+				}
+				indexTemp := c.CurrentTemp()
+
+				// Emit isset check for array element
+				// ExtendedValue: 0 = isset mode
+				resultTemp := c.AllocTemp()
+				c.EmitWithExtended(vm.OpIssetIsemptyDimObj, uint32(node.Token.Pos.Line), 0,
+					arrayTemp,
+					indexTemp,
+					resultTemp)
+				return resultTemp, nil
+
+			case *ast.PropertyExpression:
+				// Property access: isset($obj->prop)
+				// Compile the object expression
+				if err := c.Compile(e.Object); err != nil {
+					return vm.UnusedOperand(), err
+				}
+				objTemp := c.CurrentTemp()
+
+				// Compile or get the property name
+				var propTemp vm.Operand
+				if ident, ok := e.Property.(*ast.Identifier); ok {
+					// Static property name - use constant
+					propIdx := c.AddConstant(types.NewString(ident.Value))
+					propTemp = vm.ConstOperand(uint32(propIdx))
+				} else {
+					// Dynamic property name - compile it
+					if err := c.Compile(e.Property); err != nil {
+						return vm.UnusedOperand(), err
+					}
+					propTemp = c.CurrentTemp()
+				}
+
+				// Emit isset check for object property
+				// ExtendedValue: 0 = isset mode
+				resultTemp := c.AllocTemp()
+				c.EmitWithExtended(vm.OpIssetIsemptyPropObj, uint32(node.Token.Pos.Line), 0,
+					objTemp,
+					propTemp,
+					resultTemp)
+				return resultTemp, nil
+
+			default:
+				// For other expressions, compile them and check the result
+				// This is a fallback - should not be commonly used
+				if err := c.Compile(expr); err != nil {
+					return vm.UnusedOperand(), err
+				}
+				exprTemp := c.CurrentTemp()
+				resultTemp := c.AllocTemp()
+				// ExtendedValue: 0 = isset mode
+				c.EmitWithExtended(vm.OpIssetIsemptyVar, uint32(node.Token.Pos.Line), 0,
+					exprTemp,
+					vm.UnusedOperand(),
+					resultTemp)
+				return resultTemp, nil
 			}
-			// For more complex expressions (like $arr['key']), we'd need to compile them
-			// For now, just compile and get the temp
-			if err := c.Compile(expr); err != nil {
-				return vm.UnusedOperand(), err
-			}
-			return c.CurrentTemp(), nil
 		}
 
 		// For single variable, it's simple
 		if len(node.Variables) == 1 {
-			varOperand, err := getVarOperand(node.Variables[0])
-			if err != nil {
-				return err
-			}
-
-			resultTemp := c.AllocTemp()
-			c.EmitWithLine(vm.OpIssetIsemptyVar, uint32(node.Token.Pos.Line),
-				varOperand,
-				vm.ConstOperand(0), // 0 = isset mode (not empty mode)
-				resultTemp)
-			return nil
+			_, err := compileIssetCheck(node.Variables[0])
+			return err
 		}
 
 		// For multiple variables, use short-circuit evaluation
-		// Track jumps to the end (when a variable is not set)
-		var endJumps []int
+		// We'll use the last compileIssetCheck's result temp as the final result,
+		// but we need to set it to false if any earlier check fails
+
+		// Track jumps to the "false" branch
+		var falseJumps []int
+		var lastResultTemp vm.Operand
 
 		for i, variable := range node.Variables {
-			varOperand, err := getVarOperand(variable)
+			// Compile isset check for this variable
+			resultTemp, err := compileIssetCheck(variable)
 			if err != nil {
 				return err
 			}
 
-			// Emit isset check
-			resultTemp := c.AllocTemp()
-			c.EmitWithLine(vm.OpIssetIsemptyVar, uint32(node.Token.Pos.Line),
-				varOperand,
-				vm.ConstOperand(0), // 0 = isset mode
-				resultTemp)
-
 			// If this is not the last variable, check if it's false
-			// If false, jump to end
+			// If false, jump to "set false" code
 			if i < len(node.Variables)-1 {
 				jmpPos := c.EmitWithLine(vm.OpJmpZ, uint32(node.Token.Pos.Line),
 					resultTemp,
 					vm.TmpVarOperand(0), // placeholder address
 					vm.UnusedOperand())
-				endJumps = append(endJumps, jmpPos)
+				falseJumps = append(falseJumps, jmpPos)
+			} else {
+				// Last variable - this temp will hold the final result
+				lastResultTemp = resultTemp
 			}
-			// If we reach here and it's the last variable, result is in resultTemp
 		}
 
-		// Patch all jumps to point here (end of isset() evaluation)
+		// After all checks pass, jump past the "false" branch
+		skipFalsePos := c.EmitWithLine(vm.OpJmp, uint32(node.Token.Pos.Line),
+			vm.TmpVarOperand(0), // placeholder address
+			vm.UnusedOperand(),
+			vm.UnusedOperand())
+
+		// "False" branch: set last result temp to false
+		falsePos := c.CurrentPosition()
+		falseConstIdx := c.AddConstant(false)
+		c.EmitWithLine(vm.OpQMAssign, uint32(node.Token.Pos.Line),
+			vm.ConstOperand(uint32(falseConstIdx)),
+			vm.UnusedOperand(),
+			lastResultTemp)
+
+		// End position
 		endPos := c.CurrentPosition()
-		for _, jmpPos := range endJumps {
-			c.PatchJump(jmpPos, 1, endPos)
+
+		// Patch all "false" jumps to point to the false branch
+		for _, jmpPos := range falseJumps {
+			c.PatchJump(jmpPos, 2, falsePos)
 		}
+
+		// Patch the "skip false" jump to point to the end
+		c.PatchJump(skipFalsePos, 1, endPos)
 
 		return nil
 
@@ -1556,31 +1878,79 @@ func (c *Compiler) Compile(node ast.Node) error {
 		// Falsy values: false, 0, 0.0, "", "0", null, empty array
 		//
 		// IMPORTANT: empty() does NOT fetch the variable value - it checks if it exists and is falsy
-		// We must pass the CV index directly for simple variables
+		// We must handle different expression types appropriately
 
-		// Get the variable operand
-		var varOperand vm.Operand
-		if variable, ok := node.Variable.(*ast.Variable); ok {
-			// Look up or define the variable
-			symbol, ok := c.ResolveVariable(variable.Name)
+		switch e := node.Variable.(type) {
+		case *ast.Variable:
+			// Simple variable: empty($var)
+			symbol, ok := c.ResolveVariable(e.Name)
 			if !ok {
-				symbol = c.DefineVariable(variable.Name)
+				symbol = c.DefineVariable(e.Name)
 			}
-			varOperand = vm.CVOperand(uint32(symbol.Index))
-		} else {
-			// For more complex expressions (like $arr['key']), compile them
+			resultTemp := c.AllocTemp()
+			// ExtendedValue: 1 = empty mode
+			c.EmitWithExtended(vm.OpIssetIsemptyVar, uint32(node.Token.Pos.Line), 1,
+				vm.CVOperand(uint32(symbol.Index)),
+				vm.UnusedOperand(),
+				resultTemp)
+
+		case *ast.IndexExpression:
+			// Array access: empty($arr[$key])
+			if err := c.Compile(e.Left); err != nil {
+				return err
+			}
+			arrayTemp := c.CurrentTemp()
+
+			if err := c.Compile(e.Index); err != nil {
+				return err
+			}
+			indexTemp := c.CurrentTemp()
+
+			// Use OpIssetIsemptyDimObj with ExtendedValue=1 for empty mode
+			resultTemp := c.AllocTemp()
+			c.EmitWithExtended(vm.OpIssetIsemptyDimObj, uint32(node.Token.Pos.Line), 1,
+				arrayTemp,
+				indexTemp,
+				resultTemp)
+
+		case *ast.PropertyExpression:
+			// Property access: empty($obj->prop)
+			if err := c.Compile(e.Object); err != nil {
+				return err
+			}
+			objTemp := c.CurrentTemp()
+
+			var propTemp vm.Operand
+			if ident, ok := e.Property.(*ast.Identifier); ok {
+				propIdx := c.AddConstant(types.NewString(ident.Value))
+				propTemp = vm.ConstOperand(uint32(propIdx))
+			} else {
+				if err := c.Compile(e.Property); err != nil {
+					return err
+				}
+				propTemp = c.CurrentTemp()
+			}
+
+			// Use OpIssetIsemptyPropObj with ExtendedValue=1 for empty mode
+			resultTemp := c.AllocTemp()
+			c.EmitWithExtended(vm.OpIssetIsemptyPropObj, uint32(node.Token.Pos.Line), 1,
+				objTemp,
+				propTemp,
+				resultTemp)
+
+		default:
+			// For other expressions, compile and check
 			if err := c.Compile(node.Variable); err != nil {
 				return err
 			}
-			varOperand = c.CurrentTemp()
+			exprTemp := c.CurrentTemp()
+			resultTemp := c.AllocTemp()
+			// ExtendedValue: 1 = empty mode
+			c.EmitWithExtended(vm.OpIssetIsemptyVar, uint32(node.Token.Pos.Line), 1,
+				exprTemp,
+				vm.UnusedOperand(),
+				resultTemp)
 		}
-
-		// Emit empty check
-		resultTemp := c.AllocTemp()
-		c.EmitWithLine(vm.OpIssetIsemptyVar, uint32(node.Token.Pos.Line),
-			varOperand,
-			vm.ConstOperand(1), // 1 = empty mode (not isset mode)
-			resultTemp)
 
 		return nil
 
@@ -1753,22 +2123,59 @@ func (c *Compiler) Compile(node ast.Node) error {
 		if err := c.Compile(node.Class); err != nil {
 			return err
 		}
-		classTemp := vm.TmpVarOperand(0)
+		classTemp := c.CurrentTemp()
 
-		// Compile constructor arguments
+		// Allocate temp for result object
+		resultTemp := c.AllocTemp()
+
+		// NEW instruction creates the object (no arguments passed to NEW itself)
+		c.EmitWithLine(vm.OpNew, uint32(node.Token.Pos.Line),
+			classTemp,
+			vm.UnusedOperand(),
+			resultTemp) // New object in result temp
+
+		// Always attempt to call __construct (the VM will skip if it doesn't exist)
+		// Compile the method name "__construct"
+		constructorNameIdx := c.AddConstant("__construct")
+		constructorTemp := c.AllocTemp()
+		c.EmitWithLine(vm.OpQMAssign, uint32(node.Token.Pos.Line),
+			vm.ConstOperand(uint32(constructorNameIdx)),
+			vm.UnusedOperand(),
+			constructorTemp)
+
+		// Initialize method call for __construct
+		c.EmitWithExtended(vm.OpInitMethodCall, uint32(node.Token.Pos.Line),
+			uint32(len(node.Arguments)),
+			resultTemp,        // Object (the newly created one)
+			constructorTemp,   // Method name (__construct)
+			vm.UnusedOperand())
+
+		// Send constructor arguments
 		for _, arg := range node.Arguments {
 			if err := c.Compile(arg.Value); err != nil {
 				return err
 			}
-			// TODO: Push arguments onto stack properly
+			argTemp := c.CurrentTemp()
+			c.EmitWithLine(vm.OpSendVal, uint32(node.Token.Pos.Line),
+				argTemp,
+				vm.UnusedOperand(),
+				vm.UnusedOperand())
 		}
 
-		// NEW instruction with argument count in extended value
-		c.EmitWithExtended(vm.OpNew, uint32(node.Token.Pos.Line),
-			uint32(len(node.Arguments)),
-			classTemp,
+		// Call the constructor (result is unused since constructor returns void)
+		c.EmitWithLine(vm.OpDoFcall, uint32(node.Token.Pos.Line),
 			vm.UnusedOperand(),
-			vm.TmpVarOperand(1)) // New object in temp 1
+			vm.UnusedOperand(),
+			vm.UnusedOperand())
+
+		// Ensure the object (in resultTemp) is the current temp for the parent expression
+		// After constructor call, temps may have changed, so copy object to current temp
+		finalTemp := c.AllocTemp()
+		c.EmitWithLine(vm.OpQMAssign, uint32(node.Token.Pos.Line),
+			resultTemp,
+			vm.UnusedOperand(),
+			finalTemp)
+
 		return nil
 
 	case *ast.CloneExpression:
@@ -1776,13 +2183,16 @@ func (c *Compiler) Compile(node ast.Node) error {
 		if err := c.Compile(node.Object); err != nil {
 			return err
 		}
-		objectTemp := vm.TmpVarOperand(0)
+		objectTemp := c.CurrentTemp()
+
+		// Allocate temp for cloned result
+		resultTemp := c.AllocTemp()
 
 		// CLONE instruction
 		c.EmitWithLine(vm.OpClone, uint32(node.Token.Pos.Line),
 			objectTemp,
 			vm.UnusedOperand(),
-			vm.TmpVarOperand(1)) // Cloned object in temp 1
+			resultTemp)
 		return nil
 
 	// ========================================
@@ -1797,8 +2207,9 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 		// JMPZ to alternative/end if condition is false
+		// Use CurrentTemp() to get the correct temp variable where condition result is stored
 		jmpzPos := c.EmitWithLine(vm.OpJmpZ, uint32(node.Token.Pos.Line),
-			vm.TmpVarOperand(0),
+			c.CurrentTemp(),
 			vm.UnusedOperand(),
 			vm.UnusedOperand())
 
@@ -1807,11 +2218,17 @@ func (c *Compiler) Compile(node ast.Node) error {
 			return err
 		}
 
-		// JMP to end (skip elseif/else)
-		jmpEndPos := c.EmitWithLine(vm.OpJmp, uint32(node.Token.Pos.Line),
-			vm.UnusedOperand(),
-			vm.UnusedOperand(),
-			vm.UnusedOperand())
+		// Only emit JMP to end if there are elseif/else clauses
+		// Otherwise, fall through to next statement
+		hasElseifOrElse := len(node.ElseIfs) > 0 || node.Alternative != nil
+		var jmpEndPos int
+		if hasElseifOrElse {
+			// JMP to end (skip elseif/else)
+			jmpEndPos = c.EmitWithLine(vm.OpJmp, uint32(node.Token.Pos.Line),
+				vm.UnusedOperand(),
+				vm.UnusedOperand(),
+				vm.UnusedOperand())
+		}
 
 		// Patch JMPZ to point here
 		altStart := c.CurrentPosition()
@@ -1828,8 +2245,9 @@ func (c *Compiler) Compile(node ast.Node) error {
 			}
 
 			// JMPZ to next elseif/else
+			// Use CurrentTemp() to get the correct temp variable where condition result is stored
 			elseifJmpz := c.EmitWithLine(vm.OpJmpZ, uint32(elseif.Token.Pos.Line),
-				vm.TmpVarOperand(0),
+				c.CurrentTemp(),
 				vm.UnusedOperand(),
 				vm.UnusedOperand())
 
@@ -1859,7 +2277,9 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 		// Patch all jumps to end
 		endPos := c.CurrentPosition()
-		c.PatchJump(jmpEndPos, 1, endPos)
+		if hasElseifOrElse {
+			c.PatchJump(jmpEndPos, 1, endPos)
+		}
 		for _, jmp := range elseifJumps {
 			c.PatchJump(jmp, 1, endPos)
 		}
@@ -2058,16 +2478,27 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 		// Assign value
-		if valueVar, ok := node.Value.(*ast.Variable); ok {
-			symbol, ok := c.ResolveVariable(valueVar.Name)
+		switch valueTarget := node.Value.(type) {
+		case *ast.Variable:
+			symbol, ok := c.ResolveVariable(valueTarget.Name)
 			if !ok {
-				symbol = c.DefineVariable(valueVar.Name)
+				symbol = c.DefineVariable(valueTarget.Name)
 			}
 			// Assign value
 			c.EmitWithLine(vm.OpAssign, uint32(node.Token.Pos.Line),
 				valueTemp,
 				vm.UnusedOperand(),
 				vm.CVOperand(uint32(symbol.Index)))
+		case *ast.ArrayExpression:
+			// Short array destructuring: foreach ($arr as [$a, $b])
+			if err := c.compileArrayDestructuring(valueTarget, valueTemp, uint32(node.Token.Pos.Line)); err != nil {
+				return err
+			}
+		case *ast.ListExpression:
+			// List destructuring: foreach ($arr as list($a, $b))
+			if err := c.compileListDestructuring(valueTarget, valueTemp, uint32(node.Token.Pos.Line)); err != nil {
+				return err
+			}
 		}
 
 		// Compile loop body
@@ -2137,23 +2568,30 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 	// Switch Statement
 	case *ast.SwitchStatement:
+		// Save temp var stack level
+		savedTempLevel := len(c.tempVarStack)
+
 		// Compile switch subject
 		if err := c.Compile(node.Subject); err != nil {
 			return err
 		}
-		subjectTemp := vm.TmpVarOperand(0)
+		subjectTemp := c.CurrentTemp()
 
-		// Track case jump positions
-		caseJumps := []int{}
+		// Track case jump positions and corresponding cases (excluding default)
+		type caseInfo struct {
+			jumpPos   int
+			switchCase *ast.SwitchCase
+		}
+		caseInfos := []caseInfo{}
 		var defaultCase *ast.SwitchCase
 
 		// Enter switch as a loop context (for break)
 		c.EnterLoop(c.CurrentPosition())
 
-		// Compile each case
+		// First pass: compile case value comparisons and collect jump positions
 		for _, switchCase := range node.Cases {
 			if switchCase.Value == nil {
-				// Default case
+				// Default case - remember for later
 				defaultCase = switchCase
 				continue
 			}
@@ -2162,20 +2600,21 @@ func (c *Compiler) Compile(node ast.Node) error {
 			if err := c.Compile(switchCase.Value); err != nil {
 				return err
 			}
-			caseValueTemp := vm.TmpVarOperand(1)
+			caseValueTemp := c.CurrentTemp()
 
-			// Compare subject == case value
+			// Compare subject == case value (loose comparison)
+			resultTemp := c.AllocTemp()
 			c.EmitWithLine(vm.OpIsEqual, uint32(switchCase.Token.Pos.Line),
 				subjectTemp,
 				caseValueTemp,
-				vm.TmpVarOperand(2)) // Result in temp 2
+				resultTemp)
 
-			// JMPNZ to case body if equal
+			// JMPNZ to case body if equal (jump if result is non-zero/true)
 			jmpCase := c.EmitWithLine(vm.OpJmpNZ, uint32(switchCase.Token.Pos.Line),
-				vm.TmpVarOperand(2),
+				resultTemp,
 				vm.UnusedOperand(),
 				vm.UnusedOperand())
-			caseJumps = append(caseJumps, jmpCase)
+			caseInfos = append(caseInfos, caseInfo{jumpPos: jmpCase, switchCase: switchCase})
 		}
 
 		// If no match, jump to default or end
@@ -2184,15 +2623,24 @@ func (c *Compiler) Compile(node ast.Node) error {
 			vm.UnusedOperand(),
 			vm.UnusedOperand())
 
-		// Compile case bodies
-		for i, switchCase := range node.Cases {
+		// Second pass: compile case bodies in order
+		// Build a map from switchCase pointer to its caseInfo index
+		caseToInfo := make(map[*ast.SwitchCase]int)
+		for i, info := range caseInfos {
+			caseToInfo[info.switchCase] = i
+		}
+
+		// Compile case bodies in their original order (for proper fall-through)
+		for _, switchCase := range node.Cases {
 			if switchCase.Value == nil {
-				continue // Skip default, compile it later
+				continue // Skip default, compile it at the end
 			}
 
-			// Patch jump to this case
+			// Patch jump to this case body
+			// OpJmpNZ uses Op2 for the jump target (Op1 is the condition)
 			caseBodyPos := c.CurrentPosition()
-			c.PatchJump(caseJumps[i], 1, caseBodyPos)
+			infoIdx := caseToInfo[switchCase]
+			c.PatchJump(caseInfos[infoIdx].jumpPos, 2, caseBodyPos)
 
 			// Compile case statements
 			for _, stmt := range switchCase.Body {
@@ -2200,7 +2648,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 					return err
 				}
 			}
-			// Note: PHP switch has fall-through by default, no automatic jump to end
+			// PHP switch has fall-through by default - no automatic jump to end
 		}
 
 		// Compile default case if present
@@ -2222,38 +2670,48 @@ func (c *Compiler) Compile(node ast.Node) error {
 		// End of switch
 		endPos := c.CurrentPosition()
 		c.ExitLoop(endPos)
+
+		// Restore temp stack
+		c.tempVarStack = c.tempVarStack[:savedTempLevel]
 		return nil
 
 	// Try-Catch-Finally Statement
 	case *ast.TryStatement:
-		// For now, implement simplified version
-		// Full exception handling requires VM support
-
-		// Use FAST_CALL for finally block if present
-		var fastCallPos int
-		if node.Finally != nil {
-			fastCallPos = c.EmitWithLine(vm.OpFastCall, uint32(node.Token.Pos.Line),
-				vm.UnusedOperand(),
-				vm.UnusedOperand(),
-				vm.UnusedOperand())
-		}
-
 		// Compile try block
 		if err := c.Compile(node.Body); err != nil {
 			return err
 		}
 
-		// JMP over catch blocks
-		jmpEndPos := c.EmitWithLine(vm.OpJmp, uint32(node.Token.Pos.Line),
+		// JMP over catch blocks (to finally or end)
+		jmpToFinallyPos := c.EmitWithLine(vm.OpJmp, uint32(node.Token.Pos.Line),
 			vm.UnusedOperand(),
 			vm.UnusedOperand(),
 			vm.UnusedOperand())
 
+		// Collect JMP positions from catch blocks to patch later
+		var catchJmpPositions []int
+
 		// Compile catch clauses
 		for _, catchClause := range node.CatchClauses {
-			// CATCH opcode
+			// Get exception type(s) - for multiple types, use first one for now
+			// TODO: Support union types in catch (PHP 8.0+)
+			var exceptionTypeName string
+			if len(catchClause.Types) > 0 {
+				// Get the first type name
+				if catchClause.Types[0] != nil {
+					exceptionTypeName = catchClause.Types[0].String()
+				}
+			}
+
+			// Store exception type as constant
+			exceptionTypeIndex := uint32(0)
+			if exceptionTypeName != "" {
+				exceptionTypeIndex = uint32(c.AddConstant(exceptionTypeName))
+			}
+
+			// CATCH opcode - Op1 holds exception type constant index
 			c.EmitWithLine(vm.OpCatch, uint32(catchClause.Token.Pos.Line),
-				vm.UnusedOperand(),
+				vm.ConstOperand(exceptionTypeIndex),
 				vm.UnusedOperand(),
 				vm.TmpVarOperand(0)) // Exception in temp 0
 
@@ -2274,31 +2732,36 @@ func (c *Compiler) Compile(node ast.Node) error {
 				return err
 			}
 
-			// JMP to finally/end
-			c.EmitWithLine(vm.OpJmp, uint32(catchClause.Token.Pos.Line),
+			// JMP to finally/end - save position to patch later
+			catchJmpPos := c.EmitWithLine(vm.OpJmp, uint32(catchClause.Token.Pos.Line),
 				vm.UnusedOperand(),
 				vm.UnusedOperand(),
 				vm.UnusedOperand())
+			catchJmpPositions = append(catchJmpPositions, catchJmpPos)
 		}
-
-		// End position
-		endPos := c.CurrentPosition()
-		c.PatchJump(jmpEndPos, 1, endPos)
 
 		// Compile finally block if present
 		if node.Finally != nil {
+			// Finally position - patch try block JMP to here
 			finallyPos := c.CurrentPosition()
-			c.PatchJump(fastCallPos, 1, finallyPos)
+			c.PatchJump(jmpToFinallyPos, 1, finallyPos)
 
+			// Also patch all catch block JMPs to here
+			for _, jmpPos := range catchJmpPositions {
+				c.PatchJump(jmpPos, 1, finallyPos)
+			}
+
+			// Compile finally block body
 			if err := c.Compile(node.Finally); err != nil {
 				return err
 			}
-
-			// FAST_RET to return from finally
-			c.EmitWithLine(vm.OpFastRet, uint32(node.Token.Pos.Line),
-				vm.UnusedOperand(),
-				vm.UnusedOperand(),
-				vm.UnusedOperand())
+		} else {
+			// No finally - patch JMPs to end position
+			endPos := c.CurrentPosition()
+			c.PatchJump(jmpToFinallyPos, 1, endPos)
+			for _, jmpPos := range catchJmpPositions {
+				c.PatchJump(jmpPos, 1, endPos)
+			}
 		}
 		return nil
 
@@ -2308,10 +2771,11 @@ func (c *Compiler) Compile(node ast.Node) error {
 		if err := c.Compile(node.Expression); err != nil {
 			return err
 		}
+		exceptionTemp := c.CurrentTemp()
 
 		// THROW instruction
 		c.EmitWithLine(vm.OpThrow, uint32(node.Token.Pos.Line),
-			vm.TmpVarOperand(0),
+			exceptionTemp,
 			vm.UnusedOperand(),
 			vm.UnusedOperand())
 		return nil
@@ -2324,6 +2788,16 @@ func (c *Compiler) Compile(node ast.Node) error {
 	case *ast.FunctionDeclaration:
 		// Store function name as constant
 		funcNameIdx := c.AddConstant(node.Name.Value)
+
+		// Register function signature for by-ref parameter tracking
+		sig := &FunctionSignature{
+			Name:       node.Name.Value,
+			ParamByRef: make([]bool, len(node.Parameters)),
+		}
+		for i, param := range node.Parameters {
+			sig.ParamByRef[i] = param.ByRef
+		}
+		c.functionSignatures[node.Name.Value] = sig
 
 		// DECLARE_FUNCTION will be emitted here with placeholders
 		// We need to know funcStart and funcEnd first, so we'll do a two-pass approach:
@@ -2434,6 +2908,14 @@ func (c *Compiler) Compile(node ast.Node) error {
 		// Remember class body start position
 		classStart := c.CurrentPosition()
 
+		// Track method metadata during compilation
+		methodMetadata := make(map[string]struct {
+			start      int
+			end        int
+			numParams  int
+			numLocals  int
+		})
+
 		// Compile class body (properties and methods)
 		for _, stmt := range node.Body {
 			switch decl := stmt.(type) {
@@ -2480,16 +2962,18 @@ func (c *Compiler) Compile(node ast.Node) error {
 					continue
 				}
 
+				// Emit JMP to skip over method body during class initialization
+				// This JMP will be patched to jump to the end of the method
+				jmpPos := c.Emit(vm.OpJmp, vm.UnusedOperand(), vm.UnusedOperand(), vm.UnusedOperand())
+
 				methodStart := c.CurrentPosition()
 
 				// Enter new scope for method
 				c.EnterScope()
 
 				// Instance methods have implicit $this parameter
-				// Static methods do NOT have $this
-				if !decl.Static {
-					c.DefineVariable("this")
-				}
+				// $this is NOT defined as a CV - it's accessed via FETCH_THIS opcode
+				// This avoids conflicts with parameter storage in locals[0..N-1]
 
 				// Emit RECV opcodes for each parameter
 				for i, param := range decl.Parameters {
@@ -2541,13 +3025,31 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 				methodEnd := c.CurrentPosition()
 
-				// Store method metadata
+				// Patch the JMP to jump to current position (after method body)
+				// JMP reads from Op1, so patch operand 1
+				c.PatchJump(jmpPos, 1, methodEnd)
+
+				// Store method metadata for later use
+				methodMetadata[decl.Name.Value] = struct {
+					start      int
+					end        int
+					numParams  int
+					numLocals  int
+				}{
+					start:      methodStart,
+					end:        methodEnd,
+					numParams:  len(decl.Parameters),
+					numLocals:  c.symbolTable.numDefinitions, // Track number of local vars
+				}
+
 				_ = methodNameIdx
-				_ = methodStart
-				_ = methodEnd
+
+			case *ast.ClassConstantDeclaration:
+				// Class constants are stored in the ClassEntry later
+				// Just skip here - we'll process them after classEntry is created
 
 			default:
-				// Other class body elements (constants, trait uses, etc.)
+				// Other class body elements (trait uses, etc.)
 				if err := c.Compile(stmt); err != nil {
 					return err
 				}
@@ -2557,22 +3059,104 @@ func (c *Compiler) Compile(node ast.Node) error {
 		// Class end position
 		classEnd := c.CurrentPosition()
 
-		// DECLARE_CLASS to register the class
-		if node.Extends != nil {
-			// Class with parent - use extended value for parent index
-			c.EmitWithExtended(vm.OpDeclareClass, uint32(node.Token.Pos.Line),
-				uint32(parentIdx),                     // Parent class name index
-				vm.ConstOperand(uint32(classNameIdx)), // Class name
-				vm.ConstOperand(uint32(classStart)),   // Class start position
-				vm.ConstOperand(uint32(classEnd)))     // Class end position
-		} else {
-			// Class without parent
-			c.EmitWithExtended(vm.OpDeclareClass, uint32(node.Token.Pos.Line),
-				0,                                     // No parent
-				vm.ConstOperand(uint32(classNameIdx)), // Class name
-				vm.ConstOperand(uint32(classStart)),   // Class start position
-				vm.ConstOperand(uint32(classEnd)))     // Class end position
+		// Build ClassEntry for runtime registration
+		classEntry := types.NewClassEntry(node.Name.Value)
+
+		// Set class modifiers (final, abstract)
+		for _, mod := range node.Modifiers {
+			switch mod {
+			case "final":
+				classEntry.IsFinal = true
+			case "abstract":
+				classEntry.IsAbstract = true
+			}
 		}
+
+		// Store parent class name for runtime resolution
+		if node.Extends != nil {
+			classEntry.ParentClassName = node.Extends.Value
+		}
+		_ = parentIdx // parentIdx was added to constants but not used in instruction
+
+		// Helper to convert string visibility to PropertyVisibility
+		parseVisibility := func(vis string) types.PropertyVisibility {
+			switch vis {
+			case "private":
+				return types.VisibilityPrivate
+			case "protected":
+				return types.VisibilityProtected
+			default:
+				return types.VisibilityPublic
+			}
+		}
+
+		// Add methods to class entry using the metadata we collected
+		for _, stmt := range node.Body {
+			if methodDecl, ok := stmt.(*ast.MethodDeclaration); ok {
+				// Get method metadata
+				metadata := methodMetadata[methodDecl.Name.Value]
+
+				// Extract method instructions from the compiled bytecode
+				var methodInstructions []interface{}
+				if metadata.start < metadata.end && metadata.end <= len(c.instructions) {
+					// Convert vm.Instructions slice to []interface{}
+					for i := metadata.start; i < metadata.end; i++ {
+						methodInstructions = append(methodInstructions, c.instructions[i])
+					}
+				}
+
+				// Create MethodDef for each method
+				method := &types.MethodDef{
+					Name:           methodDecl.Name.Value,
+					Visibility:     parseVisibility(methodDecl.Visibility),
+					IsStatic:       methodDecl.Static,
+					IsAbstract:     methodDecl.Abstract,
+					IsFinal:        methodDecl.Final,
+					DeclaringClass: node.Name.Value,
+					IsConstructor:  methodDecl.Name.Value == "__construct",
+					IsDestructor:   methodDecl.Name.Value == "__destruct",
+					IsMagic:        len(methodDecl.Name.Value) > 2 && methodDecl.Name.Value[0:2] == "__",
+					NumParams:      metadata.numParams,
+					NumLocals:      metadata.numLocals,
+					Instructions:   methodInstructions,
+				}
+				classEntry.Methods[methodDecl.Name.Value] = method
+			}
+		}
+
+		// Add class constants to class entry
+		for _, stmt := range node.Body {
+			if constDecl, ok := stmt.(*ast.ClassConstantDeclaration); ok {
+				for _, constItem := range constDecl.Constants {
+					// Evaluate constant value (must be compile-time constant)
+					constValue, err := c.evaluateConstantExpression(constItem.Value)
+					if err != nil {
+						return fmt.Errorf("class constant %s must have a constant value: %v", constItem.Name.Value, err)
+					}
+
+					// Create ClassConstant entry
+					classConst := &types.ClassConstant{
+						Name:       constItem.Name.Value,
+						Value:      constValue,
+						Visibility: parseVisibility(constDecl.Visibility),
+						IsFinal:    false, // TODO: support final constants in PHP 8.1+
+					}
+					classEntry.Constants[constItem.Name.Value] = classConst
+				}
+			}
+		}
+
+		// Store class entry in constants
+		classEntryIdx := c.AddConstant(classEntry)
+
+		// DECLARE_CLASS to register the class
+		// Op1 = ClassEntry constant index
+		// Op2 = Class start position
+		// Op3 = Class end position
+		c.EmitWithLine(vm.OpDeclareClass, uint32(node.Token.Pos.Line),
+			vm.ConstOperand(uint32(classEntryIdx)), // ClassEntry in constants
+			vm.ConstOperand(uint32(classStart)),    // Class start position
+			vm.ConstOperand(uint32(classEnd)))      // Class end position
 
 		return nil
 
@@ -2641,14 +3225,17 @@ func (c *Compiler) Compile(node ast.Node) error {
 					continue
 				}
 
+				// Emit JMP to skip over method body during trait initialization
+				// This JMP will be patched to jump to the end of the method
+				jmpPos := c.Emit(vm.OpJmp, vm.UnusedOperand(), vm.UnusedOperand(), vm.UnusedOperand())
+
 				methodStart := c.CurrentPosition()
 
 				c.EnterScope()
 
 				// Trait methods can access $this when used in a class
-				if !decl.Static {
-					c.DefineVariable("this")
-				}
+				// $this is NOT defined as a CV - it's accessed via FETCH_THIS opcode
+				// This avoids conflicts with parameter storage in locals[0..N-1]
 
 				// Emit RECV opcodes for parameters
 				for i, param := range decl.Parameters {
@@ -2696,6 +3283,10 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 				methodEnd := c.CurrentPosition()
 
+				// Patch the JMP to jump to current position (after method body)
+				// JMP reads from Op1, so patch operand 1
+				c.PatchJump(jmpPos, 1, methodEnd)
+
 				_ = methodNameIdx
 				_ = methodStart
 				_ = methodEnd
@@ -2737,6 +3328,208 @@ func (c *Compiler) Compile(node ast.Node) error {
 // ========================================
 // Helper Methods
 // ========================================
+
+// compileListDestructuring handles list() destructuring assignment
+// list($a, $b, $c) = $array - assigns array elements to variables
+func (c *Compiler) compileListDestructuring(listExpr *ast.ListExpression, arrayTemp vm.Operand, lineno uint32) error {
+	for i, element := range listExpr.Elements {
+		// Skip nil values (holes in list)
+		if element == nil || element.Value == nil {
+			continue
+		}
+
+		// Determine the key to fetch from the array
+		var keyTemp vm.Operand
+		if element.Key != nil {
+			// Keyed list: list("x" => $a) - compile the key expression
+			if err := c.Compile(element.Key); err != nil {
+				return err
+			}
+			keyTemp = c.CurrentTemp()
+		} else {
+			// Non-keyed list: list($a, $b) - use index i as key
+			keyConstIdx := c.AddConstant(int64(i))
+			keyTemp = vm.ConstOperand(uint32(keyConstIdx))
+		}
+
+		// Fetch the array element
+		fetchTemp := c.AllocTemp()
+		c.EmitWithLine(vm.OpFetchDimR, lineno,
+			arrayTemp,
+			keyTemp,
+			fetchTemp)
+
+		// Assign to the target
+		switch target := element.Value.(type) {
+		case *ast.Variable:
+			// Simple variable: $a
+			symbol, ok := c.ResolveVariable(target.Name)
+			if !ok {
+				symbol = c.DefineVariable(target.Name)
+			}
+			c.EmitWithLine(vm.OpAssign, lineno,
+				fetchTemp,
+				vm.UnusedOperand(),
+				vm.CVOperand(uint32(symbol.Index)))
+
+		case *ast.IndexExpression:
+			// Array element: $arr[$key]
+			if err := c.Compile(target.Left); err != nil {
+				return err
+			}
+			targetArrayTemp := c.CurrentTemp()
+
+			var targetIndexTemp vm.Operand
+			if target.Index == nil {
+				targetIndexTemp = vm.UnusedOperand()
+			} else {
+				if err := c.Compile(target.Index); err != nil {
+					return err
+				}
+				targetIndexTemp = c.CurrentTemp()
+			}
+
+			c.EmitWithLine(vm.OpAssignDim, lineno,
+				targetArrayTemp,
+				targetIndexTemp,
+				fetchTemp)
+
+		case *ast.PropertyExpression:
+			// Object property: $obj->prop
+			if err := c.Compile(target.Object); err != nil {
+				return err
+			}
+			objTemp := c.CurrentTemp()
+
+			if err := c.Compile(target.Property); err != nil {
+				return err
+			}
+			propTemp := c.CurrentTemp()
+
+			c.EmitWithLine(vm.OpAssignObj, lineno,
+				objTemp,
+				propTemp,
+				fetchTemp)
+
+		case *ast.ListExpression:
+			// Nested list: list($a, list($b, $c)) = $arr
+			if err := c.compileListDestructuring(target, fetchTemp, lineno); err != nil {
+				return err
+			}
+
+		case *ast.ArrayExpression:
+			// Nested short syntax: list($a, [$b, $c]) = $arr
+			if err := c.compileArrayDestructuring(target, fetchTemp, lineno); err != nil {
+				return err
+			}
+
+		default:
+			return fmt.Errorf("invalid list() element target type: %T", element.Value)
+		}
+	}
+	return nil
+}
+
+// compileArrayDestructuring handles short destructuring syntax
+// [$a, $b, $c] = $array - same as list() but using [] syntax
+func (c *Compiler) compileArrayDestructuring(arrayExpr *ast.ArrayExpression, sourceTemp vm.Operand, lineno uint32) error {
+	for i, element := range arrayExpr.Elements {
+		// Skip nil values (holes)
+		if element.Value == nil {
+			continue
+		}
+
+		// Determine the key to fetch from the source array
+		var keyTemp vm.Operand
+		if element.Key != nil {
+			// Keyed element: ["x" => $a] - compile the key expression
+			if err := c.Compile(element.Key); err != nil {
+				return err
+			}
+			keyTemp = c.CurrentTemp()
+		} else {
+			// Non-keyed element: [$a, $b] - use index i as key
+			keyConstIdx := c.AddConstant(int64(i))
+			keyTemp = vm.ConstOperand(uint32(keyConstIdx))
+		}
+
+		// Fetch the array element from source
+		fetchTemp := c.AllocTemp()
+		c.EmitWithLine(vm.OpFetchDimR, lineno,
+			sourceTemp,
+			keyTemp,
+			fetchTemp)
+
+		// Assign to the target
+		switch target := element.Value.(type) {
+		case *ast.Variable:
+			// Simple variable: $a
+			symbol, ok := c.ResolveVariable(target.Name)
+			if !ok {
+				symbol = c.DefineVariable(target.Name)
+			}
+			c.EmitWithLine(vm.OpAssign, lineno,
+				fetchTemp,
+				vm.UnusedOperand(),
+				vm.CVOperand(uint32(symbol.Index)))
+
+		case *ast.IndexExpression:
+			// Array element: $arr[$key]
+			if err := c.Compile(target.Left); err != nil {
+				return err
+			}
+			targetArrayTemp := c.CurrentTemp()
+
+			var targetIndexTemp vm.Operand
+			if target.Index == nil {
+				targetIndexTemp = vm.UnusedOperand()
+			} else {
+				if err := c.Compile(target.Index); err != nil {
+					return err
+				}
+				targetIndexTemp = c.CurrentTemp()
+			}
+
+			c.EmitWithLine(vm.OpAssignDim, lineno,
+				targetArrayTemp,
+				targetIndexTemp,
+				fetchTemp)
+
+		case *ast.PropertyExpression:
+			// Object property: $obj->prop
+			if err := c.Compile(target.Object); err != nil {
+				return err
+			}
+			objTemp := c.CurrentTemp()
+
+			if err := c.Compile(target.Property); err != nil {
+				return err
+			}
+			propTemp := c.CurrentTemp()
+
+			c.EmitWithLine(vm.OpAssignObj, lineno,
+				objTemp,
+				propTemp,
+				fetchTemp)
+
+		case *ast.ListExpression:
+			// Nested list: [$a, list($b, $c)] = $arr
+			if err := c.compileListDestructuring(target, fetchTemp, lineno); err != nil {
+				return err
+			}
+
+		case *ast.ArrayExpression:
+			// Nested short syntax: [$a, [$b, $c]] = $arr
+			if err := c.compileArrayDestructuring(target, fetchTemp, lineno); err != nil {
+				return err
+			}
+
+		default:
+			return fmt.Errorf("invalid destructuring element target type: %T", element.Value)
+		}
+	}
+	return nil
+}
 
 // PatchJump patches a jump instruction with a target position
 // It adds the target position to the constants pool and updates the operand
@@ -3301,5 +4094,130 @@ func findVarsRecursive(node ast.Node, vars map[string]bool) {
 		// No variables in literals
 
 		// Default: ignore unknown node types
+	}
+}
+
+// evaluateConstantExpression evaluates a compile-time constant expression
+// and returns its Value. This is used for class constants and other
+// compile-time constant contexts.
+func (c *Compiler) evaluateConstantExpression(expr ast.Expr) (*types.Value, error) {
+	switch node := expr.(type) {
+	case *ast.IntegerLiteral:
+		return types.NewInt(node.Value), nil
+
+	case *ast.FloatLiteral:
+		return types.NewFloat(node.Value), nil
+
+	case *ast.StringLiteral:
+		return types.NewString(node.Value), nil
+
+	case *ast.BooleanLiteral:
+		return types.NewBool(node.Value), nil
+
+	case *ast.NullLiteral:
+		return types.NewNull(), nil
+
+	case *ast.ArrayExpression:
+		// Evaluate array with constant elements
+		arr := types.NewEmptyArray()
+		for i, elem := range node.Elements {
+			if elem.Spread {
+				return nil, fmt.Errorf("spread operator not allowed in constant array")
+			}
+
+			// Evaluate value
+			val, err := c.evaluateConstantExpression(elem.Value)
+			if err != nil {
+				return nil, err
+			}
+
+			if elem.Key != nil {
+				// Keyed element
+				key, err := c.evaluateConstantExpression(elem.Key)
+				if err != nil {
+					return nil, err
+				}
+				arr.Set(key, val)
+			} else {
+				// Numeric index
+				arr.Set(types.NewInt(int64(i)), val)
+			}
+		}
+		return types.NewArray(arr), nil
+
+	case *ast.PrefixExpression:
+		// Handle unary operators like -1, +5, !true
+		operand, err := c.evaluateConstantExpression(node.Right)
+		if err != nil {
+			return nil, err
+		}
+		switch node.Operator {
+		case "-":
+			if operand.Type() == types.TypeInt {
+				return types.NewInt(-operand.ToInt()), nil
+			}
+			if operand.Type() == types.TypeFloat {
+				return types.NewFloat(-operand.ToFloat()), nil
+			}
+		case "+":
+			return operand, nil
+		case "!":
+			return types.NewBool(!operand.ToBool()), nil
+		}
+		return nil, fmt.Errorf("unsupported unary operator %s in constant expression", node.Operator)
+
+	case *ast.InfixExpression:
+		// Handle binary operators for constant folding
+		left, err := c.evaluateConstantExpression(node.Left)
+		if err != nil {
+			return nil, err
+		}
+		right, err := c.evaluateConstantExpression(node.Right)
+		if err != nil {
+			return nil, err
+		}
+
+		switch node.Operator {
+		case "+":
+			if left.Type() == types.TypeInt && right.Type() == types.TypeInt {
+				return types.NewInt(left.ToInt() + right.ToInt()), nil
+			}
+			return types.NewFloat(left.ToFloat() + right.ToFloat()), nil
+		case "-":
+			if left.Type() == types.TypeInt && right.Type() == types.TypeInt {
+				return types.NewInt(left.ToInt() - right.ToInt()), nil
+			}
+			return types.NewFloat(left.ToFloat() - right.ToFloat()), nil
+		case "*":
+			if left.Type() == types.TypeInt && right.Type() == types.TypeInt {
+				return types.NewInt(left.ToInt() * right.ToInt()), nil
+			}
+			return types.NewFloat(left.ToFloat() * right.ToFloat()), nil
+		case "/":
+			if right.ToFloat() == 0 {
+				return nil, fmt.Errorf("division by zero in constant expression")
+			}
+			return types.NewFloat(left.ToFloat() / right.ToFloat()), nil
+		case ".":
+			return types.NewString(left.ToString() + right.ToString()), nil
+		}
+		return nil, fmt.Errorf("unsupported binary operator %s in constant expression", node.Operator)
+
+	case *ast.TernaryExpression:
+		// Handle ternary conditional
+		cond, err := c.evaluateConstantExpression(node.Condition)
+		if err != nil {
+			return nil, err
+		}
+		if cond.ToBool() {
+			if node.Consequence != nil {
+				return c.evaluateConstantExpression(node.Consequence)
+			}
+			return cond, nil
+		}
+		return c.evaluateConstantExpression(node.Alternative)
+
+	default:
+		return nil, fmt.Errorf("expression type %T not allowed in constant context", expr)
 	}
 }

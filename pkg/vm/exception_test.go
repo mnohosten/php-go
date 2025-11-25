@@ -135,10 +135,11 @@ func TestFindCatchHandler(t *testing.T) {
 	vm := New()
 
 	// Create function with catch handler
+	// OpCatch with empty type (catches all) is at index 2
 	instructions := Instructions{
 		{Opcode: OpFetchConstant, Lineno: 1},
 		{Opcode: OpFetchConstant, Lineno: 2},
-		{Opcode: OpCatch, Lineno: 3}, // Catch handler
+		{Opcode: OpCatch, Op1: Operand{Type: OpConst, Value: 0}, Lineno: 3}, // Catch handler with empty type
 		{Opcode: OpReturn, Lineno: 4},
 	}
 
@@ -151,6 +152,8 @@ func TestFindCatchHandler(t *testing.T) {
 
 	frame := NewFrame(fn)
 	frame.ip = 0
+	// Set exception so findCatchHandler can work
+	frame.exception = runtime.NewException("test", 0, nil)
 
 	// Should find catch handler
 	found := vm.findCatchHandler(frame)
@@ -183,6 +186,8 @@ func TestFindCatchHandlerNotFound(t *testing.T) {
 
 	frame := NewFrame(fn)
 	frame.ip = 0
+	// Set exception so findCatchHandler can work
+	frame.exception = runtime.NewException("test", 0, nil)
 
 	// Should not find catch handler
 	found := vm.findCatchHandler(frame)
@@ -195,11 +200,11 @@ func TestFindCatchHandlerNotFound(t *testing.T) {
 func TestExceptionWrapping(t *testing.T) {
 	exc := runtime.NewException("Test error", 123, nil)
 
-	// Wrap as value
+	// Wrap as value (now wraps as object, not resource)
 	val := runtime.WrapExceptionAsValue(exc)
 
-	if val.Type() != types.TypeResource {
-		t.Error("Exception should be wrapped as resource")
+	if val.Type() != types.TypeObject {
+		t.Errorf("Exception should be wrapped as object, got %v", val.Type())
 	}
 
 	// Unwrap
@@ -216,9 +221,10 @@ func TestExceptionWrapping(t *testing.T) {
 		t.Error("Unwrapped exception has wrong code")
 	}
 
-	// Should be the same object
-	if unwrapped != exc {
-		t.Error("Unwrapped exception should be same object")
+	// When wrapped as object, FromObject creates a new Exception from the object properties
+	// So we check that values match, not object identity
+	if unwrapped.Message != exc.Message || unwrapped.Code != exc.Code {
+		t.Error("Unwrapped exception should have same values")
 	}
 }
 

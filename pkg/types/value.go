@@ -235,6 +235,32 @@ func NewReference(v *Value) *Value {
 	return &Value{typ: TypeReference, flags: FlagIsRef, data: v}
 }
 
+// SetReferenceTarget sets the target value of a reference
+// If v is not a reference, this does nothing
+func (v *Value) SetReferenceTarget(target *Value) {
+	if v == nil || v.typ != TypeReference {
+		return
+	}
+	// Copy the target's type, flags, and data to the referenced value
+	if refTarget, ok := v.data.(*Value); ok && refTarget != nil {
+		refTarget.typ = target.typ
+		refTarget.flags = target.flags
+		refTarget.data = target.data
+	}
+}
+
+// GetReferenceTarget returns the target value of a reference
+// If v is not a reference, returns v itself
+func (v *Value) GetReferenceTarget() *Value {
+	if v == nil || v.typ != TypeReference {
+		return v
+	}
+	if refTarget, ok := v.data.(*Value); ok {
+		return refTarget
+	}
+	return v
+}
+
 // ============================================================================
 // Type Queries
 // ============================================================================

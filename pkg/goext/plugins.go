@@ -86,12 +86,12 @@ func (pm *PluginManager) LoadPlugin(path string) error {
 		// If previously failed, allow retry
 	}
 
-	// Get file modification time
-	fileInfo, err := os.Stat(absPath)
-	if err != nil {
-		return fmt.Errorf("stating plugin file '%s': %w", absPath, err)
+	// Get file modification time if file exists
+	var modTime time.Time
+	fileInfo, statErr := os.Stat(absPath)
+	if statErr == nil {
+		modTime = fileInfo.ModTime()
 	}
-	modTime := fileInfo.ModTime()
 
 	// Load the plugin
 	p, err := plugin.Open(absPath)

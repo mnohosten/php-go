@@ -304,6 +304,21 @@ func TestPropertyDeclaration(t *testing.T) {
 			hasType:    false,
 			hasDefault: true,
 		},
+		// PHP 4 style var keyword - should be treated as public
+		{
+			input:      `<?php class Test { var $oldStyle; }`,
+			visibility: "public",
+			propName:   "oldStyle",
+			hasType:    false,
+			hasDefault: false,
+		},
+		{
+			input:      `<?php class Test { var $withDefault = "hello"; }`,
+			visibility: "public",
+			propName:   "withDefault",
+			hasType:    false,
+			hasDefault: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -390,6 +405,111 @@ class Test {
 
 	if len(propDecl.Properties) != 3 {
 		t.Errorf("expected 3 properties. got=%d", len(propDecl.Properties))
+	}
+}
+
+// TestVarPropertyDeclaration tests PHP 4 style var keyword
+func TestVarPropertyDeclaration(t *testing.T) {
+	input := `<?php
+class OldStyle {
+	var $name;
+	var $age = 25;
+	var $items = [];
+}`
+
+	l := lexer.New(input, "test.php")
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	classDecl := program.Statements[0].(*ast.ClassDeclaration)
+
+	if len(classDecl.Body) != 3 {
+		t.Fatalf("expected 3 properties. got=%d", len(classDecl.Body))
+	}
+
+	// Test first property: var $name;
+	prop1 := classDecl.Body[0].(*ast.PropertyDeclaration)
+	if prop1.Visibility != "public" {
+		t.Errorf("var should be treated as public. got=%s", prop1.Visibility)
+	}
+	if prop1.Properties[0].Name.Name != "name" {
+		t.Errorf("property name not 'name'. got=%s", prop1.Properties[0].Name.Name)
+	}
+	if prop1.Properties[0].DefaultValue != nil {
+		t.Error("first property should not have default value")
+	}
+
+	// Test second property: var $age = 25;
+	prop2 := classDecl.Body[1].(*ast.PropertyDeclaration)
+	if prop2.Visibility != "public" {
+		t.Errorf("var should be treated as public. got=%s", prop2.Visibility)
+	}
+	if prop2.Properties[0].Name.Name != "age" {
+		t.Errorf("property name not 'age'. got=%s", prop2.Properties[0].Name.Name)
+	}
+	if prop2.Properties[0].DefaultValue == nil {
+		t.Error("second property should have default value")
+	}
+
+	// Test third property: var $items = [];
+	prop3 := classDecl.Body[2].(*ast.PropertyDeclaration)
+	if prop3.Visibility != "public" {
+		t.Errorf("var should be treated as public. got=%s", prop3.Visibility)
+	}
+	if prop3.Properties[0].Name.Name != "items" {
+		t.Errorf("property name not 'items'. got=%s", prop3.Properties[0].Name.Name)
+	}
+	if prop3.Properties[0].DefaultValue == nil {
+		t.Error("third property should have default value")
+	}
+}
+
+// TestVarMultipleProperties tests var with multiple properties on one line
+func TestVarMultipleProperties(t *testing.T) {
+	input := `<?php
+class Test {
+	var $x, $y = 1, $z;
+}`
+
+	l := lexer.New(input, "test.php")
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	classDecl := program.Statements[0].(*ast.ClassDeclaration)
+	propDecl := classDecl.Body[0].(*ast.PropertyDeclaration)
+
+	if propDecl.Visibility != "public" {
+		t.Errorf("var should be treated as public. got=%s", propDecl.Visibility)
+	}
+
+	if len(propDecl.Properties) != 3 {
+		t.Fatalf("expected 3 properties. got=%d", len(propDecl.Properties))
+	}
+
+	// $x - no default
+	if propDecl.Properties[0].Name.Name != "x" {
+		t.Errorf("first property name not 'x'. got=%s", propDecl.Properties[0].Name.Name)
+	}
+	if propDecl.Properties[0].DefaultValue != nil {
+		t.Error("$x should not have default value")
+	}
+
+	// $y = 1 - has default
+	if propDecl.Properties[1].Name.Name != "y" {
+		t.Errorf("second property name not 'y'. got=%s", propDecl.Properties[1].Name.Name)
+	}
+	if propDecl.Properties[1].DefaultValue == nil {
+		t.Error("$y should have default value")
+	}
+
+	// $z - no default
+	if propDecl.Properties[2].Name.Name != "z" {
+		t.Errorf("third property name not 'z'. got=%s", propDecl.Properties[2].Name.Name)
+	}
+	if propDecl.Properties[2].DefaultValue != nil {
+		t.Error("$z should not have default value")
 	}
 }
 

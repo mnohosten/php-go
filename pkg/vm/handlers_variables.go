@@ -102,7 +102,7 @@ func (vm *VM) opEmpty(frame *Frame, instr Instruction) error {
 
 // opIssetIsemptyVar handles isset/empty check on a variable
 // Op1 = variable to check (CV or temp)
-// Op2 = mode: 0 for isset, 1 for empty
+// ExtendedValue = mode: 0 for isset, 1 for empty
 // Result = boolean result
 func (vm *VM) opIssetIsemptyVar(frame *Frame, instr Instruction) error {
 	// For isset/empty, we need to directly check the local variable
@@ -141,8 +141,8 @@ func (vm *VM) opIssetIsemptyVar(frame *Frame, instr Instruction) error {
 		}
 	}
 
-	// Get the mode from Op2 (0 = isset, 1 = empty)
-	mode := instr.Op2.Value
+	// Get the mode from ExtendedValue (0 = isset, 1 = empty)
+	mode := instr.ExtendedValue
 	var result bool
 
 	if mode == 0 {
@@ -165,25 +165,48 @@ func (vm *VM) opIssetIsemptyVar(frame *Frame, instr Instruction) error {
 }
 
 // opBindGlobal handles binding a local variable to a global variable
-// Op1 = local variable (CV) to bind
+// Op1 = local variable index (CV)
+// Op2 = constant index containing the variable name
 // After this, the local variable references the global variable
 func (vm *VM) opBindGlobal(frame *Frame, instr Instruction) error {
 	// Get the variable index
 	if instr.Op1.Type != OpCV {
-		return fmt.Errorf("BIND_GLOBAL expects CV operand, got %v", instr.Op1.Type)
+		return fmt.Errorf("BIND_GLOBAL expects CV operand for Op1, got %v", instr.Op1.Type)
+	}
+	localIdx := int(instr.Op1.Value)
+
+	// Get the variable name from constants
+	if instr.Op2.Type != OpConst {
+		return fmt.Errorf("BIND_GLOBAL expects Const operand for Op2, got %v", instr.Op2.Type)
+	}
+	nameIdx := int(instr.Op2.Value)
+	if nameIdx < 0 || nameIdx >= len(vm.constants) {
+		return fmt.Errorf("BIND_GLOBAL: invalid constant index %d", nameIdx)
+	}
+	varName, ok := vm.constants[nameIdx].(string)
+	if !ok {
+		return fmt.Errorf("BIND_GLOBAL: constant at index %d is not a string", nameIdx)
 	}
 
-	_ = int(instr.Op1.Value) // index - will be used when we implement proper global binding
+	// Initialize globalBindings map if needed
+	if frame.globalBindings == nil {
+		frame.globalBindings = make(map[int]string)
+	}
 
-	// TODO: Implement proper global variable binding
-	// This requires:
-	// 1. Track variable names in function metadata (compiler enhancement)
-	// 2. Add global binding map to Frame structure
-	// 3. Modify getOperandValue/setOperandValue to check for global-bound variables
-	// 4. When a variable is marked as global, read/write operations should use vm.globals
-	//
-	// For now, this is a no-op placeholder that allows the code to parse and compile
-	// without errors. The global statement will be recognized but won't have runtime effect.
+	// Record the binding: local index -> global variable name
+	frame.globalBindings[localIdx] = varName
+
+	// Ensure the global variable exists in vm.globals
+	// If it doesn't exist, create it with null value
+	if _, exists := vm.globals[varName]; !exists {
+		vm.globals[varName] = types.NewNull()
+	}
+
+	// Copy current global value to local slot for consistency
+	// (This makes sure the local slot has the current global value)
+	if localIdx >= 0 && localIdx < len(frame.locals) {
+		frame.locals[localIdx] = vm.globals[varName]
+	}
 
 	return nil
 }

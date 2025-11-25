@@ -512,6 +512,125 @@ func TestOpClone_NonObject(t *testing.T) {
 	}
 }
 
+func TestOpClone_MagicCloneMethod(t *testing.T) {
+	vm := New()
+
+	// Create class with __clone magic method
+	classEntry := types.NewClassEntry("CloneableClass")
+	classEntry.Properties["value"] = &types.PropertyDef{
+		Name:       "value",
+		Visibility: types.VisibilityPublic,
+		Default:    types.NewInt(0),
+	}
+	classEntry.Properties["cloneCount"] = &types.PropertyDef{
+		Name:       "cloneCount",
+		Visibility: types.VisibilityPublic,
+		Default:    types.NewInt(0),
+	}
+
+	// Create __clone method that increments cloneCount
+	// The method will: $this->cloneCount = $this->cloneCount + 1
+	cloneMethod := &types.MethodDef{
+		Name:       "__clone",
+		Visibility: types.VisibilityPublic,
+		IsMagic:    true,
+		NumParams:  0,
+		NumLocals:  5,
+		Instructions: []interface{}{
+			// Fetch $this->cloneCount
+			Instruction{
+				Opcode: OpFetchThis,
+				Result: Operand{Type: OpTmpVar, Value: 0},
+			},
+			Instruction{
+				Opcode: OpFetchObjR,
+				Op1:    Operand{Type: OpTmpVar, Value: 0},
+				Op2:    Operand{Type: OpConst, Value: 0}, // "cloneCount"
+				Result: Operand{Type: OpTmpVar, Value: 1},
+			},
+			// Add 1
+			Instruction{
+				Opcode: OpAdd,
+				Op1:    Operand{Type: OpTmpVar, Value: 1},
+				Op2:    Operand{Type: OpConst, Value: 1}, // 1
+				Result: Operand{Type: OpTmpVar, Value: 2},
+			},
+			// Store back to $this->cloneCount
+			Instruction{
+				Opcode: OpFetchThis,
+				Result: Operand{Type: OpTmpVar, Value: 3},
+			},
+			Instruction{
+				Opcode: OpAssignObj,
+				Op1:    Operand{Type: OpTmpVar, Value: 3},
+				Op2:    Operand{Type: OpConst, Value: 0}, // "cloneCount"
+				Result: Operand{Type: OpTmpVar, Value: 2},
+			},
+			// Return
+			Instruction{
+				Opcode: OpReturn,
+				Op1:    Operand{Type: OpUnused},
+			},
+		},
+	}
+	classEntry.Methods["__clone"] = cloneMethod
+
+	vm.classes["CloneableClass"] = classEntry
+	vm.constants = []interface{}{"cloneCount", int64(1)}
+
+	// Create object with initial values
+	obj := types.NewObjectFromClass(classEntry)
+	obj.Properties["value"].Value = types.NewInt(42)
+	obj.Properties["cloneCount"].Value = types.NewInt(0)
+	objVal := types.NewObject(obj)
+
+	mainFunc := &CompiledFunction{
+		Name: "main",
+		Instructions: Instructions{
+			{
+				Opcode: OpClone,
+				Op1:    Operand{Type: OpTmpVar, Value: 0}, // object to clone
+				Result: Operand{Type: OpTmpVar, Value: 1}, // cloned object
+			},
+		},
+		NumLocals: 10,
+		NumParams: 0,
+	}
+
+	frame := NewFrame(mainFunc)
+	frame.setLocal(0, objVal)
+	vm.pushFrame(frame)
+
+	// Execute OpClone
+	err := vm.dispatch(frame, mainFunc.Instructions[0])
+	if err != nil {
+		t.Fatalf("OpClone with __clone method failed: %v", err)
+	}
+
+	// Verify cloned object was created
+	clonedVal := frame.getLocal(1)
+	if clonedVal.Type() != types.TypeObject {
+		t.Fatalf("Expected object, got %v", clonedVal.Type())
+	}
+
+	cloned := clonedVal.ToObject()
+
+	// Verify original object's cloneCount is still 0
+	if obj.Properties["cloneCount"].Value.ToInt() != 0 {
+		t.Errorf("Original cloneCount should be 0, got %d", obj.Properties["cloneCount"].Value.ToInt())
+	}
+
+	// Verify cloned object's cloneCount was incremented to 1 by __clone
+	if cloned.Properties["cloneCount"].Value.ToInt() != 1 {
+		t.Errorf("Cloned cloneCount should be 1, got %d", cloned.Properties["cloneCount"].Value.ToInt())
+	}
+
+	// Verify value was cloned
+	if cloned.Properties["value"].Value.ToInt() != 42 {
+		t.Errorf("Cloned value should be 42, got %d", cloned.Properties["value"].Value.ToInt())
+	}
+}
+
 // ============================================================================
 // OpInstanceof Tests - Type Checking
 // ============================================================================

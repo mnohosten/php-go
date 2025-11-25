@@ -52,6 +52,8 @@ func (p *Parser) registerExpressionParsers() {
 	p.prefixParseFns[lexer.INCLUDE_ONCE] = p.parseIncludeExpression
 	p.prefixParseFns[lexer.REQUIRE] = p.parseIncludeExpression
 	p.prefixParseFns[lexer.REQUIRE_ONCE] = p.parseIncludeExpression
+	p.prefixParseFns[lexer.YIELD] = p.parseYieldExpression
+	p.prefixParseFns[lexer.THROW] = p.parseThrowExpression
 
 	// Magic constants
 	p.prefixParseFns[lexer.LINE_CONST] = p.parseMagicConstant
@@ -443,6 +445,17 @@ func (p *Parser) parseArrayExpression() ast.Expr {
 }
 
 func (p *Parser) parseArrayElement() ast.ArrayElement {
+	// Check for spread operator (PHP 7.4+)
+	if p.curTokenIs(lexer.ELLIPSIS) {
+		p.nextToken() // consume ...
+		expr := p.parseExpression(LOWEST)
+		return ast.ArrayElement{
+			Key:    nil,
+			Value:  expr,
+			Spread: true,
+		}
+	}
+
 	// Parse first expression
 	expr := p.parseExpression(LOWEST)
 
@@ -453,15 +466,17 @@ func (p *Parser) parseArrayElement() ast.ArrayElement {
 
 		value := p.parseExpression(LOWEST)
 		return ast.ArrayElement{
-			Key:   expr,
-			Value: value,
+			Key:    expr,
+			Value:  value,
+			Spread: false,
 		}
 	}
 
 	// Non-associative element
 	return ast.ArrayElement{
-		Key:   nil,
-		Value: expr,
+		Key:    nil,
+		Value:  expr,
+		Spread: false,
 	}
 }
 
@@ -511,11 +526,19 @@ func (p *Parser) parseArrayConstructor() ast.Expr {
 }
 
 func (p *Parser) parseNewExpression() ast.Expr {
-	expression := &ast.NewExpression{
-		Token: p.curToken,
-	}
+	newToken := p.curToken
 
 	p.nextToken()
+
+	// Check for anonymous class: new class { ... } or new class(args) extends Base { ... }
+	if p.curTokenIs(lexer.CLASS) {
+		return p.parseAnonymousClass(newToken)
+	}
+
+	// Regular new expression: new ClassName(args)
+	expression := &ast.NewExpression{
+		Token: newToken,
+	}
 
 	// Parse class name or expression
 	expression.Class = p.parseExpression(NEW_CLONE)
@@ -527,6 +550,80 @@ func (p *Parser) parseNewExpression() ast.Expr {
 	}
 
 	return expression
+}
+
+// parseAnonymousClass parses an anonymous class expression
+// Syntax: new class(args) extends Base implements Iface { body }
+func (p *Parser) parseAnonymousClass(newToken lexer.Token) ast.Expr {
+	anonClass := &ast.AnonymousClassExpression{
+		Token:      p.curToken, // CLASS token
+		Implements: []*ast.Identifier{},
+		Body:       []ast.Stmt{},
+	}
+
+	// Check for constructor arguments: new class(args) { ... }
+	if p.peekTokenIs(lexer.LPAREN) {
+		p.nextToken() // move to (
+		anonClass.ConstructorArgs = p.parseCallArguments()
+	}
+
+	// Check for extends
+	if p.peekTokenIs(lexer.EXTENDS) {
+		p.nextToken() // move to extends
+		p.nextToken() // move to parent class name
+
+		if !p.curTokenIs(lexer.IDENT) {
+			p.error("expected class name after 'extends'")
+			return nil
+		}
+
+		anonClass.Extends = &ast.Identifier{
+			Token: p.curToken,
+			Value: p.curToken.Literal,
+		}
+	}
+
+	// Check for implements
+	if p.peekTokenIs(lexer.IMPLEMENTS) {
+		p.nextToken() // move to implements
+		p.nextToken() // move to first interface
+
+		for {
+			if !p.curTokenIs(lexer.IDENT) {
+				p.error("expected interface name after 'implements'")
+				return nil
+			}
+
+			anonClass.Implements = append(anonClass.Implements, &ast.Identifier{
+				Token: p.curToken,
+				Value: p.curToken.Literal,
+			})
+
+			if !p.peekTokenIs(lexer.COMMA) {
+				break
+			}
+			p.nextToken() // consume comma
+			p.nextToken() // move to next interface
+		}
+	}
+
+	// Expect opening brace
+	if !p.expectPeek(lexer.LBRACE) {
+		return nil
+	}
+
+	p.nextToken() // move into body
+
+	// Parse class body using the same logic as regular class declarations
+	for !p.curTokenIs(lexer.RBRACE) && !p.curTokenIs(lexer.EOF) {
+		member := p.parseClassMember()
+		if member != nil {
+			anonClass.Body = append(anonClass.Body, member)
+		}
+		p.nextToken()
+	}
+
+	return anonClass
 }
 
 func (p *Parser) parseCloneExpression() ast.Expr {
@@ -883,6 +980,13 @@ func (p *Parser) parseIndexExpression(left ast.Expr) ast.Expr {
 	}
 
 	p.nextToken()
+
+	// Handle empty index for array append: $arr[] = value
+	if p.curTokenIs(lexer.RBRACKET) {
+		expression.Index = nil // nil index means append
+		return expression
+	}
+
 	expression.Index = p.parseExpression(LOWEST)
 
 	if !p.expectPeek(lexer.RBRACKET) {
@@ -902,6 +1006,27 @@ func (p *Parser) parsePropertyOrMethodCall(left ast.Expr) ast.Expr {
 	// Check if this is a method call
 	if p.peekTokenIs(lexer.LPAREN) {
 		p.nextToken() // move to (
+
+		// Check for first-class callable syntax: $obj->method(...)
+		if p.peekTokenIs(lexer.ELLIPSIS) {
+			p.nextToken() // move to ...
+			if p.peekTokenIs(lexer.RPAREN) {
+				p.nextToken() // consume )
+				// Create a pseudo-method call expression and wrap it as a callable
+				methodCallExpr := &ast.MethodCallExpression{
+					Token:     token,
+					Object:    left,
+					Method:    property,
+					Arguments: nil, // No arguments for first-class callable
+				}
+				return &ast.FirstClassCallableExpression{
+					Token:    token,
+					Callable: methodCallExpr,
+				}
+			}
+			// Otherwise it's unpacking - go back and parse normally
+			// This is handled by parseCallArguments()
+		}
 
 		return &ast.MethodCallExpression{
 			Token:     token,
@@ -968,6 +1093,27 @@ func (p *Parser) parseStaticAccessOrCall(left ast.Expr) ast.Expr {
 	// Check if this is a method call
 	if p.peekTokenIs(lexer.LPAREN) {
 		p.nextToken()
+
+		// Check for first-class callable syntax: Class::method(...)
+		if p.peekTokenIs(lexer.ELLIPSIS) {
+			p.nextToken() // move to ...
+			if p.peekTokenIs(lexer.RPAREN) {
+				p.nextToken() // consume )
+				// Create a pseudo-static call expression and wrap it as a callable
+				staticCallExpr := &ast.StaticCallExpression{
+					Token:     token,
+					Class:     left,
+					Method:    member,
+					Arguments: nil, // No arguments for first-class callable
+				}
+				return &ast.FirstClassCallableExpression{
+					Token:    token,
+					Callable: staticCallExpr,
+				}
+			}
+			// Otherwise it's unpacking - go back and parse normally
+			// This is handled by parseCallArguments()
+		}
 
 		return &ast.StaticCallExpression{
 			Token:     token,
@@ -1278,6 +1424,56 @@ func (p *Parser) parseStaticClosureOrProperty() ast.Expr {
 		Token: staticToken,
 		Value: staticToken.Literal,
 	}
+}
+
+// parseYieldExpression parses yield expressions in generators (PHP 5.5+)
+// Syntax:
+//   yield;               // Yield null with auto-incremented key
+//   yield $value;        // Yield value with auto-incremented key
+//   yield $key => $value;  // Yield value with explicit key
+func (p *Parser) parseYieldExpression() ast.Expr {
+	expression := &ast.YieldExpression{
+		Token: p.curToken, // The YIELD token
+	}
+
+	p.nextToken()
+
+	// Check if this is just "yield;" (no value)
+	if p.curTokenIs(lexer.SEMICOLON) || p.curTokenIs(lexer.RPAREN) || p.curTokenIs(lexer.RBRACKET) {
+		// Yield without value (yields null)
+		return expression
+	}
+
+	// Parse the value or key expression
+	valueOrKey := p.parseExpression(YIELD)
+
+	// Check if there's a => after the expression (indicating a key => value pair)
+	if p.peekTokenIs(lexer.DOUBLE_ARROW) {
+		p.nextToken() // consume the current expression
+		p.nextToken() // consume the =>
+		expression.Key = valueOrKey
+		expression.Value = p.parseExpression(YIELD)
+	} else {
+		// Just a value
+		expression.Value = valueOrKey
+	}
+
+	return expression
+}
+
+// parseThrowExpression parses throw expression (PHP 8.0+)
+// throw has the lowest precedence, so it parses everything after as its argument
+func (p *Parser) parseThrowExpression() ast.Expr {
+	expression := &ast.ThrowExpression{
+		Token: p.curToken, // The THROW token
+	}
+
+	p.nextToken()
+
+	// Parse the expression to throw (use LOWEST precedence since throw has lowest precedence)
+	expression.Expression = p.parseExpression(LOWEST)
+
+	return expression
 }
 
 // Helper functions for string interpolation

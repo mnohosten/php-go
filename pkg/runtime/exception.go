@@ -366,9 +366,8 @@ func GetExceptionFromValue(val *types.Value) (*Exception, error) {
 	return nil, fmt.Errorf("Value is not an exception")
 }
 
-// WrapExceptionAsValue wraps an exception as a PHP value
+// WrapExceptionAsValue wraps an exception as a PHP value (object)
 func WrapExceptionAsValue(exc *Exception) *types.Value {
-	// Store exception as a resource
-	resource := types.NewResourceHandle("Exception", exc)
-	return types.NewResource(resource)
+	// Convert exception to object so PHP code can access properties
+	return types.NewObject(exc.ToObject())
 }

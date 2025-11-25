@@ -357,3 +357,157 @@ func TestFinalMethod_CannotOverride(t *testing.T) {
 		t.Errorf("Expected error '%s', got '%s'", expectedMsg, err.Error())
 	}
 }
+
+// ============================================================================
+// OpDeclareClass Final Class Tests
+// ============================================================================
+
+func TestOpDeclareClass_FinalClassCannotBeExtended(t *testing.T) {
+	vm := New()
+
+	// Create and register a final parent class
+	finalParent := types.NewClassEntry("FinalParent")
+	finalParent.IsFinal = true
+	vm.classes["FinalParent"] = finalParent
+
+	// Create child class that tries to extend the final class
+	child := types.NewClassEntry("ChildClass")
+	child.ParentClassName = "FinalParent" // Uses deferred parent resolution
+
+	// Store child class entry in constants
+	vm.constants = []interface{}{child}
+
+	mainFunc := &CompiledFunction{
+		Name: "main",
+		Instructions: Instructions{
+			{
+				Opcode: OpDeclareClass,
+				Op1:    Operand{Type: OpConst, Value: 0}, // child class
+				Op2:    Operand{Type: OpConst, Value: 0},
+				Result: Operand{Type: OpConst, Value: 0},
+			},
+		},
+		NumLocals: 1,
+		NumParams: 0,
+	}
+
+	frame := NewFrame(mainFunc)
+	vm.pushFrame(frame)
+
+	// Execute OpDeclareClass - should fail for extending final class
+	err := vm.dispatch(frame, mainFunc.Instructions[0])
+	if err == nil {
+		t.Fatal("Expected error when extending final class")
+	}
+
+	expectedMsg := "Class ChildClass cannot extend final class FinalParent"
+	if err.Error() != expectedMsg {
+		t.Errorf("Expected error '%s', got '%s'", expectedMsg, err.Error())
+	}
+}
+
+func TestOpDeclareClass_FinalMethodCannotBeOverridden(t *testing.T) {
+	vm := New()
+
+	// Create parent class with a final method
+	parent := types.NewClassEntry("Parent")
+	parent.Methods["finalMethod"] = &types.MethodDef{
+		Name:       "finalMethod",
+		Visibility: types.VisibilityPublic,
+		IsFinal:    true,
+	}
+	vm.classes["Parent"] = parent
+
+	// Create child class that tries to override the final method
+	child := types.NewClassEntry("Child")
+	child.ParentClassName = "Parent"
+	child.Methods["finalMethod"] = &types.MethodDef{
+		Name:       "finalMethod",
+		Visibility: types.VisibilityPublic,
+	}
+
+	// Store child class entry in constants
+	vm.constants = []interface{}{child}
+
+	mainFunc := &CompiledFunction{
+		Name: "main",
+		Instructions: Instructions{
+			{
+				Opcode: OpDeclareClass,
+				Op1:    Operand{Type: OpConst, Value: 0}, // child class
+				Op2:    Operand{Type: OpConst, Value: 0},
+				Result: Operand{Type: OpConst, Value: 0},
+			},
+		},
+		NumLocals: 1,
+		NumParams: 0,
+	}
+
+	frame := NewFrame(mainFunc)
+	vm.pushFrame(frame)
+
+	// Execute OpDeclareClass - should fail for overriding final method
+	err := vm.dispatch(frame, mainFunc.Instructions[0])
+	if err == nil {
+		t.Fatal("Expected error when overriding final method")
+	}
+
+	expectedMsg := "Cannot override final method Parent::finalMethod() in Child"
+	if err.Error() != expectedMsg {
+		t.Errorf("Expected error '%s', got '%s'", expectedMsg, err.Error())
+	}
+}
+
+func TestOpDeclareClass_ValidInheritance(t *testing.T) {
+	vm := New()
+
+	// Create non-final parent class
+	parent := types.NewClassEntry("Parent")
+	parent.Methods["normalMethod"] = &types.MethodDef{
+		Name:       "normalMethod",
+		Visibility: types.VisibilityPublic,
+	}
+	vm.classes["Parent"] = parent
+
+	// Create child class that extends the non-final class
+	child := types.NewClassEntry("Child")
+	child.ParentClassName = "Parent"
+
+	// Store child class entry in constants
+	vm.constants = []interface{}{child}
+
+	mainFunc := &CompiledFunction{
+		Name: "main",
+		Instructions: Instructions{
+			{
+				Opcode: OpDeclareClass,
+				Op1:    Operand{Type: OpConst, Value: 0}, // child class
+				Op2:    Operand{Type: OpConst, Value: 0},
+				Result: Operand{Type: OpConst, Value: 0},
+			},
+		},
+		NumLocals: 1,
+		NumParams: 0,
+	}
+
+	frame := NewFrame(mainFunc)
+	vm.pushFrame(frame)
+
+	// Execute OpDeclareClass - should succeed
+	err := vm.dispatch(frame, mainFunc.Instructions[0])
+	if err != nil {
+		t.Fatalf("OpDeclareClass failed: %v", err)
+	}
+
+	// Verify child is registered and inherited from parent
+	registeredChild, exists := vm.classes["Child"]
+	if !exists {
+		t.Fatal("Child class should be registered")
+	}
+	if registeredChild.ParentClass != parent {
+		t.Error("Child should have ParentClass set after inheritance")
+	}
+	if _, hasMethod := registeredChild.Methods["normalMethod"]; !hasMethod {
+		t.Error("Child should have inherited normalMethod from Parent")
+	}
+}

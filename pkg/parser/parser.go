@@ -70,8 +70,37 @@ func (p *Parser) ParseProgram() *ast.Program {
 		}
 
 		// Handle PHP open tags
-		if p.curTokenIs(lexer.OPEN_TAG) || p.curTokenIs(lexer.OPEN_TAG_ECHO) {
+		if p.curTokenIs(lexer.OPEN_TAG) {
 			p.nextToken()
+			continue
+		}
+
+		// Handle <?= short echo tag - treat as echo statement
+		if p.curTokenIs(lexer.OPEN_TAG_ECHO) {
+			echoToken := p.curToken
+			p.nextToken() // Move past <?=
+
+			// Parse expressions until we hit ?> or EOF
+			expressions := []ast.Expr{}
+			for !p.curTokenIs(lexer.CLOSE_TAG) && !p.curTokenIs(lexer.EOF) {
+				expr := p.parseExpression(LOWEST)
+				if expr != nil {
+					expressions = append(expressions, expr)
+				}
+				// Skip comma if present (for multiple expressions)
+				if p.peekTokenIs(lexer.COMMA) {
+					p.nextToken()
+				}
+				p.nextToken()
+			}
+
+			if len(expressions) > 0 {
+				echoStmt := &ast.EchoStatement{
+					Token:       echoToken,
+					Expressions: expressions,
+				}
+				program.Statements = append(program.Statements, echoStmt)
+			}
 			continue
 		}
 
@@ -135,6 +164,9 @@ func (p *Parser) parseStatement() ast.Stmt {
 	case lexer.ABSTRACT, lexer.FINAL:
 		// Handle abstract/final class declarations
 		return p.parseClassDeclarationWithModifiers()
+	case lexer.ATTRIBUTE_START:
+		// Handle PHP 8 attributes: #[Attr] class/function/etc
+		return p.parseStatementWithAttributes()
 	default:
 		return p.parseExpressionStatement()
 	}
@@ -310,6 +342,7 @@ func (p *Parser) peekTokenPrecedence() int {
 const (
 	_ int = iota
 	LOWEST
+	YIELD            // yield, yield from
 	LOGICAL_OR       // or, ||
 	LOGICAL_XOR      // xor
 	LOGICAL_AND      // and, &&
